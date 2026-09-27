@@ -26,6 +26,7 @@ use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
@@ -315,6 +316,65 @@ final class ARenewalAndAPlanChangeDoNotDeadlockTest extends TestCase
         $this->assertSame(
             1_000 + $upgrade->fresh()->total_minor + 500,
             $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits(),
+        );
+    }
+
+    #[Test]
+    public function a_settlement_heard_while_a_cancellation_holds_the_subscription_resizes_nothing_and_returns_the_upgrade(): void
+    {
+        /*
+         * The round-five verifier's L2: the upgrade is paid, and its
+         * settlement (ResizeOnPlanChangeSettlement) is heard while an
+         * immediate cancellation holds the subscription's lock. The listener
+         * decides under that same lock, so it waits, then finds the
+         * subscription ended: no resize is queued onto the cancelled
+         * subscription, and the upgrade - paid for and never delivered - is
+         * returned to the wallet, once. Deciding from an unlocked read, the
+         * listener saw the subscription still active, recorded the upgrade
+         * delivered and queued a resize; the ending then kept the money.
+         *
+         * Deterministic: the cancellation is stopped right after it locks the
+         * subscription; the listener is let run until it waits on a row lock.
+         */
+        $fixture = $this->upgradeLeftOpen();
+        $customer = Customer::query()->findOrFail($fixture['customer']);
+        $upgrade = Invoice::query()->findOrFail($fixture['x']);
+
+        // Paid; its settlement not yet heard.
+        Event::fake([InvoicePaid::class]);
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+
+        DB::select('SELECT pg_advisory_lock(?)', [self::RENEWAL_BARRIER]);
+
+        try {
+            $cancel = $this->start(
+                ['cancel', $fixture['sub']],
+                ['RACER_PAUSE_AFTER' => '/from "subscriptions".*for update/i', 'RACER_PAUSE_LOCK' => (string) self::RENEWAL_BARRIER],
+            );
+            $this->waitUntilWaitingOnAdvisory(1);
+
+            $listener = $this->start(['resize', (string) $upgrade->getKey()]);
+            $this->waitUntil(fn (): bool => ! $listener->isRunning() || $this->waiting() >= 1, 'The listener neither finished nor waited.');
+
+            DB::select('SELECT pg_advisory_unlock(?)', [self::RENEWAL_BARRIER]);
+        } finally {
+            DB::select('SELECT pg_advisory_unlock_all()');
+        }
+
+        $this->assertNoDeadlock([$this->verdict($cancel), $this->verdict($listener)]);
+
+        $this->assertSame(SubscriptionStatus::Cancelled, Subscription::query()->findOrFail($fixture['sub'])->status);
+        $this->assertSame(
+            0,
+            ProvisioningJob::query()->where('idempotency_key', 'like', '%:invoice:'.$upgrade->getKey())->count(),
+            'A resize was queued onto the cancelled subscription.',
+        );
+
+        $ledger = app(WalletLedger::class);
+        $this->assertSame(
+            (int) $upgrade->fresh()->total_minor,
+            $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits(),
+            'The upgrade paid for and never delivered was not returned, once.',
         );
     }
 

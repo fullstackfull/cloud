@@ -919,6 +919,70 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
     }
 
     #[Test]
+    public function a_deadlock_inside_the_return_of_an_undelivered_upgrade_fails_the_whole_ending(): void
+    {
+        /*
+         * The same guard as the withdrawal's, on the other savepoint: the
+         * return of a paid upgrade the end prevented. A concurrency error
+         * there leaves the transaction aborted, and swallowing it made the
+         * ending report success while nothing had ended.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+        $this->changePlan($user, $subscription, $this->large, 'deadlock-in-return')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        // Paid, its settlement not heard: the end returns it.
+        Event::fake([InvoicePaid::class]);
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+
+        // The only wallet posting of this ending is the upgrade's return.
+        DB::listen(static function (QueryExecuted $query): void {
+            if (str_starts_with(strtolower($query->sql), 'insert into "wallet_transactions"')) {
+                throw new QueryException('pgsql', $query->sql, [], new PDOException('SQLSTATE[40P01]: Deadlock detected: 7 ERROR:  deadlock detected'));
+            }
+        });
+
+        $thrown = null;
+
+        try {
+            app(CancelSubscription::class)->execute($subscription->fresh(), immediately: true);
+        } catch (Throwable $e) {
+            $thrown = $e;
+        }
+
+        $this->assertNotNull($thrown, 'A deadlock inside the return of an undelivered upgrade was swallowed and the ending reported success.');
+        $this->assertStringContainsString('deadlock detected', $thrown->getMessage());
+    }
+
+    #[Test]
+    public function an_upgrade_settled_before_delivered_at_existed_with_its_resize_queued_is_kept(): void
+    {
+        /*
+         * The fallback for a change settled before `delivered_at` was
+         * recorded: its resize job, keyed on the invoice, still says it was
+         * delivered, and the end keeps the money.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+        $this->changePlan($user, $subscription, $this->large, 'pre-column-up')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+        $this->assertSame(1, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->count(), 'Precondition: the resize was queued.');
+
+        // As a row written before the column existed.
+        PlanChange::query()->where('proration_invoice_id', $upgrade->getKey())->update(['delivered_at' => null]);
+
+        app(CancelSubscription::class)->execute($subscription->fresh(), immediately: true);
+
+        $this->assertSame(0, $this->walletOf($customer), 'An upgrade whose resize was queued was returned at the end.');
+        $this->assertSame(InvoiceStatus::Paid, $upgrade->fresh()?->status);
+    }
+
+    #[Test]
     public function a_capture_recorded_but_not_yet_settled_when_the_subscription_ends_is_returned_once(): void
     {
         /*
