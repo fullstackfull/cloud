@@ -87,7 +87,9 @@ use Tests\Support\UnpinnedClockAssertions;
  *    change to the scanner that alters its verdict on one of them turns the
  *    gate red. A behaviour in neither has no control and is not claimed to
  *    be held.
- *     - Element controls are named `<found|clean>_<prefix>__<element>`, and
+ *     - Element controls are named `<found|clean|ignored>_<prefix>__<element>`
+ *       (`ignored`: a method that must not be read as a test), or, for a
+ *       hook name, are a `#[Test]` method named the element itself; and
  *       {@see self::every_element_the_scanner_recognises_has_its_own_control()}
  *       fails when an element has no control, when a control names an
  *       element no longer listed, when a public list constant is missing
@@ -97,8 +99,10 @@ use Tests\Support\UnpinnedClockAssertions;
  *       scanner's code (rather than a constant) decides: how tests, set-up
  *       and helpers are found and resolved, what the walk visits and in what
  *       order, what flows and what does not, the literal rules, and the
- *       `031f6c9` and `e0aa0ab` shapes. Two are methods that must *not* be
- *       read as tests (`ignored_*`), so they are named outside `found_`/`clean_`.
+ *       `031f6c9` and `e0aa0ab` shapes. Methods that must *not* be read as
+ *       tests are named `ignored_*` (or, for a hook name, the hook's own
+ *       name), outside `found_`/`clean_`, so reading one as a test adds a
+ *       finding or a test the exact comparison refuses.
  *     - The file a finding names (the helper's, not the test's) needs two
  *       sources, so {@see self::a_finding_in_a_helper_names_the_file_that_holds_it()}
  *       holds it.
@@ -178,7 +182,7 @@ final class NoAssertionComparesAClockReadOnAnUnpinnedClockTest extends TestCase
         'clean_pinned_by_a_parents_trait' => 'set-up is gathered from the parents\' traits',
         'clean_pinned_by_a_trait_a_trait_uses' => 'set-up is gathered from traits a trait uses',
         'clean_pinned_by_a_parents_before' => '#[Before] is gathered from parents',
-        'ignored_a_static_method' => 'a static method is not a test',
+        'found_a_static_test' => 'a public static method is a test (PHPUnit 12 does not check static)',
         'ignored_a_protected_method' => 'a non-public method is not a test',
         'found_in_another_closure' => 'any closure is walked where it is written',
         'found_after_an_arrow_function_that_freezes' => 'an arrow function\'s pin does not leak',
@@ -221,6 +225,14 @@ final class NoAssertionComparesAClockReadOnAnUnpinnedClockTest extends TestCase
         'found_a_higher_priority_before_runs_first' => 'a higher-priority #[Before] runs before a lower one (a positional priority is read)',
         'found_in_a_nested_trait_test' => 'a test declared in a trait a trait uses is read',
         'found_in_a_parents_trait_test' => 'a test declared in a trait a parent uses is read',
+        'clean_trait_set_up_runs_again_at_a_second_parent_set_up' => 'the traits\' set-up runs each time parent::setUp() leaves the set',
+        'clean_a_nested_traits_set_up_attribute_runs_with_its_user' => 'a trait\'s #[SetUp] methods include those of the traits it uses',
+        'found_traits_not_set_up_when_the_parents_set_up_stops' => 'an in-set parent::setUp() is followed, not taken as Laravel\'s',
+        'clean_a_before_overridden_in_another_case_runs_once' => '#[Before] methods are de-duplicated case-insensitively',
+        'found_a_before_overridden_without_the_attribute' => 'a #[Before] method is resolved on the class running the test',
+        'found_a_trait_set_up_the_class_overrides' => 'setUp<Trait>() is resolved on the class',
+        'clean_before_on_set_up_is_ignored' => '#[Before] on setUp() is ignored',
+        'clean_the_traits_set_up_through_an_overridden_runner' => 'an overridden setUpTraits() reaches the traits through parent::setUpTraits()',
     ];
 
     private static ?UnpinnedClockAssertions $suite = null;
@@ -303,17 +315,29 @@ final class NoAssertionComparesAClockReadOnAnUnpinnedClockTest extends TestCase
     #[Test]
     public function every_element_the_scanner_recognises_has_its_own_control(): void
     {
-        $controls = self::controlNames();
+        $controls = self::controlNames(true);
+        $fixture = (string) file_get_contents(self::root().'/'.self::FIXTURE);
         $required = [];
+        $unnamed = [];
         $scanner = new ReflectionClass(UnpinnedClockAssertions::class);
 
         foreach (UnpinnedClockAssertions::VOCABULARY as $constant => [$kind, $prefix]) {
             $list = $scanner->getConstant($constant);
             $this->assertIsArray($list, "{$constant} is not a list the scanner has.");
             foreach (array_is_list($list) ? $list : array_keys($list) as $element) {
-                $required[] = sprintf('%s_%s__%s', $kind, $prefix, (string) preg_replace('/\W/', '', substr((string) strrchr('\\'.$element, '\\'), 1)));
+                $slug = (string) preg_replace('/\W/', '', substr((string) strrchr('\\'.$element, '\\'), 1));
+                if ($kind === 'named') {
+                    // The control is a #[Test] method named the element itself.
+                    if (! preg_match('/#\[Test\]\s+public (?:static )?function '.preg_quote($slug, '/').'\(/i', $fixture)) {
+                        $unnamed[] = "{$constant}: {$slug}";
+                    }
+
+                    continue;
+                }
+                $required[] = sprintf('%s_%s__%s', $kind, $prefix, $slug);
             }
         }
+        $this->assertSame([], $unnamed, 'These hook names have no #[Test] method of that name in the fixture.');
         foreach (UnpinnedClockAssertions::EQUALITY as $assertion => $positions) {
             foreach ($positions as $position) {
                 $required[] = "found_equality__{$assertion}__{$position}";
@@ -344,7 +368,6 @@ final class NoAssertionComparesAClockReadOnAnUnpinnedClockTest extends TestCase
                 && array_filter($required, static fn (string $r): bool => $satisfies($c, $r)) === [])),
             'These controls name an element no list holds any more.',
         );
-        $fixture = (string) file_get_contents(self::root().'/'.self::FIXTURE);
         $this->assertSame(
             [],
             array_values(array_filter(array_keys(self::STRUCTURAL), static fn (string $c): bool => ! str_contains($fixture, "function {$c}("))),
@@ -393,9 +416,10 @@ final class NoAssertionComparesAClockReadOnAnUnpinnedClockTest extends TestCase
     /**
      * @return list<string>
      */
-    private static function controlNames(): array
+    private static function controlNames(bool $withIgnored = false): array
     {
-        preg_match_all('/function (\w*(?:found|clean)_\w+)\(/', (string) file_get_contents(self::root().'/'.self::FIXTURE), $matches);
+        $kinds = $withIgnored ? 'found|clean|ignored' : 'found|clean';
+        preg_match_all('/function (\w*(?:'.$kinds.')_\w+)\(/', (string) file_get_contents(self::root().'/'.self::FIXTURE), $matches);
 
         return $matches[1];
     }

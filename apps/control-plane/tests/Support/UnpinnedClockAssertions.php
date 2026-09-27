@@ -66,10 +66,19 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  * resolve to code in the same set; anything outside it (the framework's
  * TestCase, vendor traits) is not read and is taken not to pin the clock.
  *
- * **Tests.** The public methods a non-abstract class runs — its own, and those
- * it inherits from its parents and traits in the set, as PHP resolves each
- * name — that carry an attribute in {@see self::TEST_ATTRIBUTES} or a name
- * beginning with an element of {@see self::TEST_PREFIXES}. A doc tag
+ * **Tests.** The public methods, static or not, a non-abstract class runs — its
+ * own, and those it inherits from its parents and traits in the set, as PHP
+ * resolves each name — that carry an attribute in {@see self::TEST_ATTRIBUTES}
+ * or a name beginning with an element of {@see self::TEST_PREFIXES}, and are
+ * not hooks: PHPUnit skips, with a warning, a method named for a hook
+ * ({@see self::HOOK_METHOD_NAMES}, {@see self::SET_UP_METHODS}, compared
+ * case-insensitively) or carrying a hook attribute
+ * ({@see self::HOOK_ATTRIBUTES}, {@see self::BEFORE_ATTRIBUTES})
+ * (phpunit/src/Framework/TestSuite.php:103-118, Util/Test.php:42-58,
+ * Metadata/Api/HookMethods.php:150-173). The `setUp`/`#[Before]` part of that
+ * rule has no control of its own: such a method runs as set-up either way,
+ * and run as a test it would start from the state its own set-up run left,
+ * so the one bit cannot tell the two apart. A doc tag
  * (`@test`, `@before`) is not read: PHPUnit 12, which this repository runs,
  * reads attributes only (its metadata parsers are `AttributeParser` and
  * `CachingParser`). A test is named after the class that runs it.
@@ -83,10 +92,17 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  * ordered by `#[Before]` priority, highest first (so a negative priority runs
  * after `setUp()`); then `setUp()` as
  * resolved on the class, following `parent::setUp()`, and at the point that
- * chain reaches a `setUp()` outside the set (Laravel's `TestCase::setUp()`)
- * the traits' set-up — for each trait in `class_uses_recursive()` order,
- * `setUp<Trait>()` and then its methods carrying `#[SetUp]` — before the rest
- * of the class's `setUp()` runs. Then, statement by statement:
+ * chain reaches a `setUp()` outside the set (Laravel's `TestCase::setUp()`),
+ * every time it does, the traits' set-up — for each trait in
+ * `class_uses_recursive()` order, `setUp<Trait>()` as resolved on the class
+ * and then the trait's methods (its own and those of the traits it uses)
+ * carrying `#[SetUp]` — before the rest of the class's `setUp()` runs; an
+ * override of `setUpTraits()` in the set ({@see self::TRAIT_SET_UP_RUNNERS})
+ * is walked there instead, and the traits' set-up runs where its
+ * `parent::setUpTraits()` leaves the set. `#[Before]` on a method named
+ * `setUp` is ignored, as PHPUnit ignores it. `#[PreCondition]`,
+ * `assertPreConditions()` and every after-hook are not walked. Then,
+ * statement by statement:
  *
  *  - **pins**: `$this->m()` for `m` in {@see self::PIN_METHODS} (with no
  *    callback), `$this->travel($n)->u()` for `u` in {@see self::WORMHOLE_UNITS}
@@ -378,10 +394,10 @@ final class UnpinnedClockAssertions
     /** Named arguments that are never compared. */
     public const array MESSAGE_PARAMETERS = ['message'];
 
-    /** A public, non-static method whose name begins with one of these is a test. */
+    /** A public method (static or not) whose name begins with one of these is a test, unless it is a hook. */
     public const array TEST_PREFIXES = ['test'];
 
-    /** Attributes, by short name, that make a public, non-static method a test. */
+    /** Attributes, by short name, that make a public method (static or not) a test, unless it is a hook. */
     public const array TEST_ATTRIBUTES = ['Test'];
 
     /** Attributes, by short name, of a method run before each test. */
@@ -395,6 +411,23 @@ final class UnpinnedClockAssertions
 
     /** Attributes, by short name, of a trait method Laravel runs as set-up (`Illuminate\Foundation\Testing\Attributes\SetUp`). */
     public const array TRAIT_SET_UP_ATTRIBUTES = ['SetUp'];
+
+    /**
+     * The method that runs the traits' set-up (Laravel's `setUpTraits()`); an
+     * override of it in the set is walked, and its `parent::` call is where
+     * the traits' set-up runs.
+     */
+    public const array TRAIT_SET_UP_RUNNERS = ['setUpTraits'];
+
+    /**
+     * Hook method names, compared case-insensitively, that PHPUnit will not
+     * run as a test even when marked one (`HookMethods::isHookMethod()`), with
+     * {@see self::SET_UP_METHODS}.
+     */
+    public const array HOOK_METHOD_NAMES = ['setUpBeforeClass', 'assertPreConditions', 'assertPostConditions', 'tearDown', 'tearDownAfterClass'];
+
+    /** Hook attributes that keep a method from being a test, with {@see self::BEFORE_ATTRIBUTES}. */
+    public const array HOOK_ATTRIBUTES = ['BeforeClass', 'PreCondition', 'PostCondition', 'After', 'AfterClass'];
 
     /** Method-call nodes: a pin, an unpin, a helper, an implicit or combining Carbon method, a predicate method. */
     public const array METHOD_CALLS = [MethodCall::class, NullsafeMethodCall::class];
@@ -410,7 +443,10 @@ final class UnpinnedClockAssertions
      * control each element needs (`found` or `clean`) and the prefix of its
      * name in the fixture: `<kind>_<prefix>__<element>`.
      *
-     * @var array<string, array{0: 'found'|'clean', 1: string}>
+     * `named` means the control is a `#[Test]` method named the element
+     * itself, and `ignored` a method that must not be read as a test.
+     *
+     * @var array<string, array{0: 'found'|'clean'|'ignored'|'named', 1: string}>
      */
     public const array VOCABULARY = [
         'PREDICATE' => ['found', 'predicate_assertion'],
@@ -452,6 +488,9 @@ final class UnpinnedClockAssertions
         'SET_UP_METHODS' => ['clean', 'set_up_method'],
         'TRAIT_SET_UP_PREFIXES' => ['clean', 'trait_set_up_prefix'],
         'TRAIT_SET_UP_ATTRIBUTES' => ['clean', 'trait_set_up_attribute'],
+        'TRAIT_SET_UP_RUNNERS' => ['clean', 'trait_set_up_runner'],
+        'HOOK_METHOD_NAMES' => ['named', 'hook_method_name'],
+        'HOOK_ATTRIBUTES' => ['ignored', 'hook_attribute'],
         'METHOD_CALLS' => ['found', 'method_call'],
         'PROPERTY_FETCHES' => ['found', 'property_fetch'],
         'BLANK_LITERAL_PARSERS' => ['found', 'blank_literal_parser'],
@@ -479,7 +518,7 @@ final class UnpinnedClockAssertions
     /** The class whose set-up is being walked, while it is. */
     private ?string $traitSetUpFor = null;
 
-    private bool $traitSetUpRun = false;
+    private bool $inTraitSetUpRunner = false;
 
     /**
      * @param  array<string, string>  $sources  path => PHP source
@@ -773,7 +812,7 @@ final class UnpinnedClockAssertions
 
     private static function isTest(ClassMethod $method): bool
     {
-        if (! $method->isPublic() || $method->isStatic() || $method->stmts === null) {
+        if (! $method->isPublic() || $method->stmts === null || self::isHook($method)) {
             return false;
         }
 
@@ -784,6 +823,19 @@ final class UnpinnedClockAssertions
         }
 
         return self::marked($method, self::TEST_ATTRIBUTES);
+    }
+
+    /**
+     * PHPUnit's `HookMethods::isHookMethod()`: a method named for a hook, or
+     * carrying a hook attribute, is skipped as a test with a warning
+     * (`TestSuite::fromClassReflector()`).
+     */
+    private static function isHook(ClassMethod $method): bool
+    {
+        $names = array_map(strtolower(...), [...self::HOOK_METHOD_NAMES, ...self::SET_UP_METHODS]);
+
+        return in_array($method->name->toLowerString(), $names, true)
+            || self::marked($method, [...self::HOOK_ATTRIBUTES, ...self::BEFORE_ATTRIBUTES]);
     }
 
     /**
@@ -825,15 +877,21 @@ final class UnpinnedClockAssertions
      *     Concerns/InteractsWithTestCaseLifecycle.php:106,259-274): for each
      *     trait in `class_uses_recursive()` order, `setUp<Trait>()` and then
      *     every method of it carrying {@see self::TRAIT_SET_UP_ATTRIBUTES};
-     *     then the rest of the class's `setUp()`. A class with no `setUp()` in
-     *     the set runs the traits' set-up at that step.
+     *     then the rest of the class's `setUp()`. This happens each time the
+     *     chain leaves the set (a `setUp()` calling `parent::setUp()` twice runs
+     *     it twice, as `setUpTheTestEnvironment()` does). An override of
+     *     `setUpTraits()` in the set is walked in its place, and the traits'
+     *     set-up runs where it calls `parent::setUpTraits()`. A class with no
+     *     `setUp()` in the set runs the traits' set-up at that step. PHPUnit
+     *     ignores `#[Before]` on `setUp()` itself (`addHookMethod()`,
+     *     HookMethods.php:180-193), and so does this.
      */
     private function setUpState(string $class): bool
     {
         $this->test = $class.'::setUp';
         $this->stack = [$this->test];
         $this->traitSetUpFor = $class;
-        $this->traitSetUpRun = false;
+        $this->inTraitSetUpRunner = false;
         $pinned = false;
 
         // PHPUnit's hook list: each #[Before] prepended to setUp (priority 0),
@@ -898,6 +956,10 @@ final class UnpinnedClockAssertions
                     continue;
                 }
                 $seen[strtolower($name)] = true;
+                // PHPUnit ignores #[Before] on the default hook, setUp().
+                if (in_array(strtolower($name), array_map(strtolower(...), self::SET_UP_METHODS), true)) {
+                    continue;
+                }
                 $resolved = $this->findMethod($class, $name);
                 if ($resolved !== null && self::marked($resolved[0], self::BEFORE_ATTRIBUTES)) {
                     $listed[] = $resolved;
@@ -940,12 +1002,26 @@ final class UnpinnedClockAssertions
      * Laravel's `setUpTraits()`, reached where the `parent::setUp()` chain
      * leaves the set.
      */
-    private function runTraitSetUps(bool $pinned): bool
+    private function runTraitSetUps(bool $pinned, bool $direct = false): bool
     {
-        if ($this->traitSetUpFor === null || $this->traitSetUpRun) {
+        if ($this->traitSetUpFor === null) {
             return $pinned;
         }
-        $this->traitSetUpRun = true;
+
+        // An override of setUpTraits() in the set is walked; its parent::
+        // call, leaving the set, comes back here with $direct.
+        if (! $direct && ! $this->inTraitSetUpRunner) {
+            foreach (self::TRAIT_SET_UP_RUNNERS as $name) {
+                $runner = $this->findMethod($this->traitSetUpFor, $name);
+                if ($runner !== null) {
+                    $this->inTraitSetUpRunner = true;
+                    $pinned = $this->walk($runner[0]->stmts ?? [], $pinned, $runner[1]);
+                    $this->inTraitSetUpRunner = false;
+
+                    return $pinned;
+                }
+            }
+        }
 
         foreach ($this->traitsInLaravelOrder($this->traitSetUpFor) as $trait) {
             $short = substr($trait, (int) strrpos('\\'.$trait, '\\'));
@@ -1185,6 +1261,9 @@ final class UnpinnedClockAssertions
             $method = $this->findMethod($lookupFrom, $name);
             if ($method === null && self::HELPER_SCOPES[$scope] === 'parent' && in_array($name, self::SET_UP_METHODS, true)) {
                 $pinned = $this->runTraitSetUps($pinned);
+            }
+            if ($method === null && self::HELPER_SCOPES[$scope] === 'parent' && in_array($name, self::TRAIT_SET_UP_RUNNERS, true)) {
+                $pinned = $this->runTraitSetUps($pinned, true);
             }
             if ($method !== null) {
                 $key = $method[1].'::'.$name;

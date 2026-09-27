@@ -15,7 +15,12 @@ use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\Attributes\SetUp;
 use Illuminate\Foundation\Testing\Wormhole;
 use Illuminate\Support\Facades\Date;
+use PHPUnit\Framework\Attributes\After;
+use PHPUnit\Framework\Attributes\AfterClass;
 use PHPUnit\Framework\Attributes\Before;
+use PHPUnit\Framework\Attributes\BeforeClass;
+use PHPUnit\Framework\Attributes\PostCondition;
+use PHPUnit\Framework\Attributes\PreCondition;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -741,11 +746,11 @@ final class PinnedByAParentsBeforeTest extends HoldsBefore
     }
 }
 
-// A static or non-public method is not a test, whatever it carries.
+// A public static method is a test (PHPUnit 12 does not check static); a non-public one is not.
 final class NotTestsTest extends TestCase
 {
     #[Test]
-    public static function ignored_a_static_method(): void
+    public static function found_a_static_test(): void
     {
         self::assertEquals(now(), $row->at);
     }
@@ -2613,4 +2618,265 @@ abstract class ParentWithATestTrait extends TestCase
 
 final class InheritsATraitTestTest extends ParentWithATestTrait
 {
+}
+
+// A method that is both a test and a hook is skipped as a test (TestSuite::fromClassReflector()).
+final class HooksAreNotTestsTest extends TestCase
+{
+    #[Test]
+    public static function setUpBeforeClass(): void
+    {
+        self::assertEquals(now(), self::$at);
+    }
+
+    #[Test]
+    public function assertPreConditions(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+
+    #[Test]
+    public function assertPostConditions(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+
+    #[Test]
+    public function tearDown(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+
+    #[Test]
+    public static function tearDownAfterClass(): void
+    {
+        self::assertEquals(now(), self::$at);
+    }
+
+    #[Test]
+    #[BeforeClass]
+    public static function ignored_hook_attribute__BeforeClass(): void
+    {
+        self::assertEquals(now(), self::$at);
+    }
+
+    #[Test]
+    #[PreCondition]
+    public function ignored_hook_attribute__PreCondition(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+
+    #[Test]
+    #[PostCondition]
+    public function ignored_hook_attribute__PostCondition(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+
+    #[Test]
+    #[After]
+    public function ignored_hook_attribute__After(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+
+    #[Test]
+    #[AfterClass]
+    public static function ignored_hook_attribute__AfterClass(): void
+    {
+        self::assertEquals(now(), self::$at);
+    }
+}
+
+// An override of setUpTraits() is walked; the traits' set-up runs at its parent:: call.
+final class TraitSetUpRunnerTest extends TestCase
+{
+    use LetsTheClockGo;
+
+    protected function setUpTraits()
+    {
+        $uses = parent::setUpTraits();
+        $this->freezeSecond();
+
+        return $uses;
+    }
+
+    #[Test]
+    public function clean_trait_set_up_runner__setUpTraits(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// The traits' set-up runs each time parent::setUp() leaves the set.
+final class SetsUpTwiceTest extends TestCase
+{
+    use FreezesTheClock;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->travelBack();
+        parent::setUp();
+    }
+
+    #[Test]
+    public function clean_trait_set_up_runs_again_at_a_second_parent_set_up(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A trait's #[SetUp] methods include those of the traits it uses.
+trait UsesTheAttributeHolder
+{
+    use HoldsItsClockByAttribute;
+}
+
+final class NestedSetUpAttributeTest extends TestCase
+{
+    use HoldsItsClockByAttribute;
+    use LetsTheClockGo;
+    use UsesTheAttributeHolder;
+
+    #[Test]
+    public function clean_a_nested_traits_set_up_attribute_runs_with_its_user(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A parent in the set whose setUp() never calls parent::setUp() never reaches the traits.
+abstract class StopsSetUp extends TestCase
+{
+    protected function setUp(): void
+    {
+    }
+}
+
+final class ChildOfAStoppedSetUpTest extends StopsSetUp
+{
+    use FreezesTheClock;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+    }
+
+    #[Test]
+    public function found_traits_not_set_up_when_the_parents_set_up_stops(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// PHP method names are case-insensitive: a #[Before] overriding its parent's
+// in another case runs once, after the child's other #[Before].
+abstract class ChecksInABefore extends TestCase
+{
+    #[Before]
+    public function check(): void
+    {
+    }
+}
+
+final class OverridesTheCheckTest extends ChecksInABefore
+{
+    #[Before]
+    public function CHECK(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+
+    #[Before]
+    public function holdIt(): void
+    {
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function clean_a_before_overridden_in_another_case_runs_once(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A #[Before] method overridden without the attribute is no longer a hook.
+abstract class HoldsInABefore extends TestCase
+{
+    #[Before]
+    public function hold(): void
+    {
+        $this->freezeSecond();
+    }
+}
+
+final class OverridesTheHoldTest extends HoldsInABefore
+{
+    public function hold(): void
+    {
+    }
+
+    #[Test]
+    public function found_a_before_overridden_without_the_attribute(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// setUp<Trait>() is called on the class, so the class's override of it runs.
+final class OverridesTheTraitSetUpTest extends TestCase
+{
+    use FreezesTheClock;
+
+    protected function setUpFreezesTheClock(): void
+    {
+    }
+
+    #[Test]
+    public function found_a_trait_set_up_the_class_overrides(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// PHPUnit ignores #[Before] on setUp() itself.
+final class BeforeOnSetUpTest extends TestCase
+{
+    #[Before(priority: -5)]
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->travelBack();
+    }
+
+    #[Before(priority: -1)]
+    public function holdLate(): void
+    {
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function clean_before_on_set_up_is_ignored(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// The traits' set-up an overridden runner reaches through parent::setUpTraits() runs.
+final class RunnerReachesTheTraitsTest extends TestCase
+{
+    use FreezesTheClock;
+
+    protected function setUpTraits()
+    {
+        return parent::setUpTraits();
+    }
+
+    #[Test]
+    public function clean_the_traits_set_up_through_an_overridden_runner(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
 }
