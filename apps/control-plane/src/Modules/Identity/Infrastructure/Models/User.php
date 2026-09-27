@@ -85,10 +85,12 @@ class User extends Authenticatable implements MustVerifyEmail
      * counts only for a login with no staff role, which the staff gate keeps
      * off /api/admin and Horizon whatever the role holds.
      *
-     * Every permission check goes through here: Spatie's Gate::before hook
-     * (`can()`, the `permission:` middleware, Horizon's gate) calls
-     * hasPermissionTo(), which asks hasPermissionViaRole(); the permissions
-     * the portal is told about come from getPermissionsViaRoles(). What the
+     * The checks that go through here: Spatie's Gate::before hook (`can()`,
+     * the `permission:` middleware, Horizon's gate) calls hasPermissionTo(),
+     * which asks hasPermissionViaRole(); the permissions the portal is told
+     * about come from getPermissionsViaRoles(). Spatie's `permission()` query
+     * scope and wildcard permissions do not, and would count the customer
+     * role again; neither is used or enabled here. What the
      * customer role carries by default, `catalog.view`, guards no route, and
      * customer access is decided by memberships, so a promoted customer loses
      * nothing on /api/v1. Permissions given to the login directly still
