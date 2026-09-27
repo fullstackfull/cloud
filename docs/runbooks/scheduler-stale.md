@@ -5,10 +5,16 @@
 A scheduled command that has stopped running, or keeps failing: renewals not
 happening, sweeps not advancing.
 
-No alert fires for this, so nothing will page you.
-`lynomia_scheduled_command_last_success_timestamp_seconds` and
-`lynomia_scheduled_command_consecutive_failures` are exported per command, and
-no rule reads either. You get here by noticing.
+A command that keeps failing raises `ScheduledCommandFailing` (warning, to the
+platform channel): it has failed three runs in a row, read from
+`lynomia_scheduled_command_consecutive_failures`, for five minutes. The alert
+names the command in its `command` label. A success resets the count, so the
+alert clears on the first run that succeeds.
+
+A command that has stopped being invoked at all raises nothing: its failure
+count simply stops moving. `lynomia_scheduled_command_last_success_timestamp_seconds`
+is exported per command and no rule reads it. You get to that case by noticing,
+or by checking the timer below.
 
 ## What it means
 
@@ -69,5 +75,10 @@ php artisan ipam:reclaim
 ## What not to do
 
 Do not disable a failing scheduled command to make the failures stop. Its
-failures are the only record that renewals stopped, and no alert is watching
-them.
+failures are the only record that renewals stopped, and a disabled command is
+one that has stopped being invoked: no alert watches that.
+
+Do not silence `ScheduledCommandFailing` for a command you expect to keep
+failing. `hosting:reconcile` and `backups:reconcile` exit non-zero on purpose
+when reconciling a node or a backup failed; the node list and the backup
+review queue say which, and the alert clears once a run succeeds.
