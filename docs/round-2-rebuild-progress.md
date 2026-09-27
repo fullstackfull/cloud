@@ -142,3 +142,21 @@ All five round-four bands merged at `a6b583b`: backend 5,601 / 5,601, 690
 testsuites `skipped="0"`, exit 0; vitest 648 / 648, tsc and eslint clean;
 `make infra-validate` 0 and every infrastructure self-test green. An
 independent re-audit after round four is dispatched against `a6b583b`.
+
+### Round five — fixing what the re-audit after round four found
+
+The re-audit against `a6b583b` (five bands plus "what round four introduced",
+with skeptics) is in `scratchpad` digests until its document is written. Its
+numbered verdicts: F-07 partially reproduces (a customer-facing network with no
+bridge is sold onto); F-09 partially reproduces (overlapping reconcile sweeps
+settle a later restore attempt); F-23 partially reproduces (by-value excuses hid
+unwritten server and node states). Every other finding re-audited does not
+reproduce. The unnumbered items it found stay unnumbered.
+
+| Band | Scope | Status | Commit |
+|---|---|---|---|
+| A | F-07 network attachability; system ledger keys a customer's Idempotency-Key can take; renewal/plan-change deadlock; undelivered paid upgrade on wind-up; refund failed after success; wording | fixing | — |
+| B | a customer-surface API token accepted on `/api/admin`; staff-gate oracle blind to `withoutMiddleware`; one-super-admin chain walked | fixing | — |
+| C | F-09 compare-and-set on the attempt; a scalar DirectAdmin `list` read as no accounts; file-restore lock oracle | fixing | — |
+| D | a VPS built with no gateway; a quarantine test red at midnight; capacity left on the node a retry moved away from | fixing | — |
+| E | F-23 per-case entries replace the by-value excuses (coordinator; each entry mutation-pinned) | awaiting verifier | `6568d78` |
