@@ -137,11 +137,13 @@ use Tests\Support\EnumCaseReferences;
  *  - **`vocabulary`**, for a whole enum: its cases are names code asks about
  *    or walks — a permission, a capability, a naming rule — not values a row
  *    takes. The entry names a file and the spelling there that walks or asks,
- *    and the file must still contain it.
+ *    and the file's code (its comments left out) must still contain it.
  *  - **`spelled`**, for one case: it is produced, by a spelling the classifier
  *    reads as a read or cannot read at all — a string default, a scalar
  *    concatenated into SQL, a ternary branch. The entry names the file and the
- *    spelling, and the file must still contain it.
+ *    spelling, and the file's code (its comments left out) must still contain
+ *    it. The search is for the text, so a read that spells the case the same
+ *    way also satisfies it; the spelling is chosen to name the write.
  *  - **`unwritten`**, for one case: nothing produces it. The entry names the
  *    module that owns the decision — build the writer, delete the case, or
  *    declare it prepared. These, with the sibling gate's `UNPRODUCED`, are the
@@ -640,6 +642,20 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
     {
         $path = EnumCaseReferences::ROOT.'/'.$relative;
 
-        return $spelling !== '' && is_file($path) && str_contains((string) file_get_contents($path), $spelling);
+        if ($spelling === '' || ! is_file($path)) {
+            return false;
+        }
+
+        // Comments are left out: a spelling that survives only in a comment
+        // is not the file producing the case.
+        $code = '';
+
+        foreach (PhpToken::tokenize((string) file_get_contents($path)) as $token) {
+            if (! $token->is([T_COMMENT, T_DOC_COMMENT])) {
+                $code .= $token->text;
+            }
+        }
+
+        return str_contains($code, $spelling);
     }
 }
