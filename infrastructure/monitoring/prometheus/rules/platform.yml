@@ -303,8 +303,8 @@ groups:
         # retention all run from the scheduler, and a command failing every run
         # is silent: nothing errors where a customer sees it, the work simply
         # stops. hosting:reconcile and backups:reconcile exit non-zero on
-        # purpose when a node or a backup could not be reconciled; this is
-        # where that reaches a person.
+        # purpose when a node, a backup or a file restore could not be
+        # reconciled; this is where that reaches a person.
         #
         # Three, because one failure is a provider blip and two can be the
         # same blip seen twice. How long three takes is the command's own

@@ -74,10 +74,27 @@ final class RecordScheduledRun
         }
 
         /*
+         * A skip that arrives as "finished". withoutOverlapping's filter found
+         * the mutex free, then Event::run failed to create it (another
+         * invocation took it in between) and returned without running
+         * anything. schedule:run still dispatches ScheduledTaskFinished, with
+         * no exit code; recording that as a success is the skip the class
+         * docblock says is never recorded.
+         */
+        if ($event->task->skippedBecauseOverlapping) {
+            return;
+        }
+
+        /*
          * Laravel reports the exit code on the task itself. Zero is success.
          * Anything else is a run that failed, and schedule:run dispatches
          * ScheduledTaskFailed for it next, which is where it is counted:
          * counting it here as well counted every failed run twice.
+         *
+         * Null is taken as success, but a foreground run that got this far
+         * never has it: Event::run sets the exit code in finish() for every
+         * foreground run it does not skip, and one whose start throws
+         * dispatches ScheduledTaskFailed instead of this event.
          */
         $exitCode = $event->task->exitCode;
 
@@ -95,7 +112,10 @@ final class RecordScheduledRun
         $exitCode = $event->task->exitCode;
 
         if ($exitCode === 0 || $exitCode === null) {
-            // No runtime is reported with this event; the column is left as it is.
+            // No runtime is reported with this event, so succeeded() leaves
+            // last_runtime_ms holding whatever it held: a runtime measured by
+            // an earlier foreground run of the same command, or null.
+            // Writing null here would drop that command's runtime series.
             $this->succeeded($event->task, null);
 
             return;

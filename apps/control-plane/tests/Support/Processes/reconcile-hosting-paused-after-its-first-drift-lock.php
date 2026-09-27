@@ -55,6 +55,9 @@ DB::listen(static function (QueryExecuted $query) use (&$paused, $lock): void {
     DB::select('select pg_advisory_unlock_shared(?)', [$lock]);
 });
 
+// The test reads pg_locks for this backend alone.
+fwrite(STDERR, 'BACKEND '.DB::selectOne('select pg_backend_pid() as pid')->pid."\n");
+
 $code = Artisan::call('hosting:reconcile', ['--no-interaction' => true]);
 
 echo trim(Artisan::output()), "\n";

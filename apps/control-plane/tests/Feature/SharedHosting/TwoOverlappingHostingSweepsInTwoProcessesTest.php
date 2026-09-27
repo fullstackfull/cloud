@@ -71,7 +71,7 @@ final class TwoOverlappingHostingSweepsInTwoProcessesTest extends TestCase
             $sweepB = $this->sweep('list[]=strangertwo&list[]=strangerone', $gate);
             $sweepB->start();
             $this->waitFor(
-                fn (): bool => str_contains($sweepB->getErrorOutput(), 'LOCKED') || $this->somebodyWaitsOnSomethingButTheGate($gate),
+                fn (): bool => str_contains($sweepB->getErrorOutput(), 'LOCKED') || $this->sweepWaitsOnSomethingButTheGate($gate, $sweepA, $sweepB),
                 $sweepB,
                 'Sweep B neither took a drift lock nor waited on anything',
             );
@@ -97,15 +97,39 @@ final class TwoOverlappingHostingSweepsInTwoProcessesTest extends TestCase
     }
 
     /**
-     * Whether some backend is waiting for a lock other than the test's gate
-     * (which sweep A, and a sweep that has taken its first drift lock, wait on).
+     * Whether a sweep process's backend is waiting for a lock other than the
+     * test's gate (which sweep A, and a sweep that has taken its first drift
+     * lock, wait on).
+     *
+     * Only the sweeps' own backends count: pg_locks covers the whole cluster,
+     * and a lock another run waits on, in this database or another, must not
+     * let sweep B go early. Each sweep names its backend on standard error
+     * (`BACKEND <pid>`) before it runs the command. Filtered by backend and
+     * not by pg_locks.database, which is null for the transaction-id lock a
+     * row-lock waiter waits on.
      */
-    private function somebodyWaitsOnSomethingButTheGate(int $gate): bool
+    private function sweepWaitsOnSomethingButTheGate(int $gate, Process ...$sweeps): bool
     {
+        $pids = [];
+
+        foreach ($sweeps as $sweep) {
+            if (preg_match('/^BACKEND (\d+)$/m', $sweep->getErrorOutput(), $m) === 1) {
+                $pids[] = (int) $m[1];
+            }
+        }
+
+        if ($pids === []) {
+            return false;
+        }
+
         $row = DB::selectOne(
-            "select count(*) as waiting from pg_locks
-              where not granted
-                and not (locktype = 'advisory' and classid::bigint = 0 and objid::bigint = ? and objsubid = 1)",
+            sprintf(
+                "select count(*) as waiting from pg_locks
+                  where not granted
+                    and pid in (%s)
+                    and not (locktype = 'advisory' and classid::bigint = 0 and objid::bigint = ? and objsubid = 1)",
+                implode(', ', $pids),
+            ),
             [$gate],
         );
 

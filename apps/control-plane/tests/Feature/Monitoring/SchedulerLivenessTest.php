@@ -6,6 +6,7 @@ namespace Tests\Feature\Monitoring;
 
 use Closure;
 use Illuminate\Console\Scheduling\Event as ScheduledEvent;
+use Illuminate\Console\Scheduling\EventMutex;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
@@ -182,6 +183,25 @@ final class SchedulerLivenessTest extends TestCase
     }
 
     #[Test]
+    public function a_background_success_keeps_the_runtime_a_foreground_run_measured(): void
+    {
+        // The outcome of a background run carries no runtime. It must not
+        // erase the one the same command's last foreground run recorded.
+        $this->scheduleOnly(fn (Schedule $s) => $s->exec('true'));
+        $this->runTheScheduler();
+        $measured = ScheduledRun::query()->sole()->last_runtime_ms;
+        $this->assertNotNull($measured);
+
+        $event = $this->scheduleOnly(fn (Schedule $s) => $s->exec('true')->runInBackground());
+        Artisan::call('schedule:finish', ['id' => $event->mutexName(), 'code' => 0]);
+
+        $run = ScheduledRun::query()->sole();
+        $this->assertNotNull($run->last_succeeded_at);
+        $this->assertSame($measured, $run->last_runtime_ms);
+        $this->assertStringContainsString('lynomia_scheduled_command_last_runtime_seconds{command="true"}', $this->scrape());
+    }
+
+    #[Test]
     public function a_successful_run_is_recorded_against_the_command_as_a_person_would_type_it(): void
     {
         /*
@@ -219,6 +239,41 @@ final class SchedulerLivenessTest extends TestCase
         $this->runTheScheduler();
 
         $this->assertSame(0, ScheduledRun::query()->count());
+    }
+
+    #[Test]
+    public function a_run_that_loses_the_overlap_lock_after_its_filter_passed_is_not_a_run(): void
+    {
+        /*
+         * The other way withoutOverlapping skips. Its filter asks whether the
+         * mutex exists and finds it free; Event::run then fails to create it,
+         * because another invocation took it in between, and returns without
+         * running anything and with no exit code. schedule:run dispatches
+         * ScheduledTaskFinished for it all the same. A mutex that says it is
+         * free and refuses every create is that race, every time.
+         */
+        $refusing = new class implements EventMutex
+        {
+            public function create(ScheduledEvent $event): bool
+            {
+                return false;
+            }
+
+            public function exists(ScheduledEvent $event): bool
+            {
+                return false;
+            }
+
+            public function forget(ScheduledEvent $event): void {}
+        };
+
+        $event = $this->scheduleOnly(fn (Schedule $s) => $s->exec('false')->withoutOverlapping(60));
+        $event->preventOverlapsUsing($refusing);
+
+        $this->runTheScheduler();
+
+        $this->assertTrue($event->skippedBecauseOverlapping, 'The race this test is about did not happen.');
+        $this->assertSame(0, ScheduledRun::query()->count(), 'A run that never started was recorded.');
     }
 
     #[Test]
