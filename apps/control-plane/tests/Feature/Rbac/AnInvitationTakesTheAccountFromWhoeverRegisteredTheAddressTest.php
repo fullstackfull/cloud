@@ -204,32 +204,106 @@ final class AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest exten
 
     /**
      * `promoted_existing_account` says that an address already had a login.
-     * A super admin may know that; a delegate holding `role.manage` is told
-     * nothing (null), whichever way it went.
+     * A super admin may know that, and is told; so is the stored name.
+     * A delegate holding `role.manage` is not told either way: the two
+     * responses it gets — for an address with a login the registrant named
+     * and created a year ago, and for a brand-new address — are the same
+     * apart from the id and the address itself (verifier's reproduction of
+     * the round-six rejection: the name and created_at used to give it away).
      */
     #[Test]
     public function only_a_super_admin_is_told_whether_an_existing_login_was_promoted(): void
     {
         $admin = User::factory()->create(['email_verified_at' => now()]);
         $admin->syncRoles([Role::SuperAdmin->value]);
+        User::factory()->create(['email' => 'admin-sees-this@lynomia.test', 'name' => 'Registrant Chosen Name']);
 
         $this->actingAs($admin)
             ->postJson('/api/admin/operators', ['email' => 'brand-new@lynomia.test', 'name' => 'N', 'roles' => [Role::Noc->value]])
             ->assertCreated()
             ->assertJsonPath('data.promoted_existing_account', false);
+        $this->actingAs($admin)
+            ->postJson('/api/admin/operators', ['email' => 'admin-sees-this@lynomia.test', 'name' => 'N', 'roles' => [Role::Noc->value]])
+            ->assertCreated()
+            ->assertJsonPath('data.promoted_existing_account', true)
+            ->assertJsonPath('data.name', 'Registrant Chosen Name');
 
         $delegate = User::factory()->create(['email_verified_at' => now()]);
         $delegate->syncRoles([Role::Support->value]);
         $delegate->givePermissionTo('role.manage');
-        $existing = User::factory()->create(['email' => 'already-has-a-login@lynomia.test']);
+        $existing = User::factory()->create([
+            'email' => 'already-has-a-login@lynomia.test',
+            'name' => 'Registrant Chosen Name',
+            'created_at' => now()->subYear(),
+        ]);
 
-        $this->freshClient();
-        $response = $this->actingAs($delegate)
-            ->postJson('/api/admin/operators', ['email' => 'already-has-a-login@lynomia.test', 'name' => 'C', 'roles' => [Role::Support->value]])
-            ->assertCreated();
-        $this->assertArrayHasKey('promoted_existing_account', (array) $response->json('data'));
-        $this->assertNull($response->json('data.promoted_existing_account'));
+        $responses = [];
+
+        foreach (['already-has-a-login@lynomia.test', 'never-had-a-login@lynomia.test'] as $address) {
+            $this->freshClient();
+            $data = (array) $this->actingAs($delegate)
+                ->postJson('/api/admin/operators', ['email' => $address, 'name' => 'Supplied Name', 'roles' => [Role::Support->value]])
+                ->assertCreated()
+                ->json('data');
+
+            $this->assertSame($address, $data['email'] ?? null);
+            $this->assertArrayHasKey('promoted_existing_account', $data);
+            unset($data['id'], $data['email']);
+            $responses[$address] = $data;
+        }
+
+        $this->assertSame(
+            $responses['never-had-a-login@lynomia.test'],
+            $responses['already-has-a-login@lynomia.test'],
+            'A delegate can tell a promoted login from a new one by the 201 alone.',
+        );
+        $this->assertNull($responses['already-has-a-login@lynomia.test']['promoted_existing_account']);
+        $this->assertSame('Supplied Name', $responses['already-has-a-login@lynomia.test']['name']);
         $this->assertTrue($existing->fresh()?->hasRole(Role::Support->value));
+        // The stored name is the login's own; only the response echoes the supplied one.
+        $this->assertSame('Registrant Chosen Name', $existing->fresh()?->name);
+    }
+
+    /**
+     * The invitation reads an existing login under FOR UPDATE, by address,
+     * before it writes anything to it: otherwise a concurrent change to the
+     * row (a second invitation, a password reset completing) could land
+     * between the read and the revocation.
+     */
+    #[Test]
+    public function the_invitation_locks_the_existing_login_before_it_revokes_anything(): void
+    {
+        $admin = User::factory()->create(['email_verified_at' => now()]);
+        $admin->syncRoles([Role::SuperAdmin->value]);
+        $existing = User::factory()->create(['email' => 'locked-first@lynomia.test']);
+
+        $statements = [];
+        DB::listen(static function ($query) use (&$statements): void {
+            $statements[] = strtolower($query->sql);
+        });
+
+        $this->actingAs($admin)
+            ->postJson('/api/admin/operators', ['email' => 'locked-first@lynomia.test', 'name' => 'L', 'roles' => [Role::Noc->value]])
+            ->assertCreated();
+
+        $lock = null;
+        $firstWrite = null;
+
+        foreach ($statements as $index => $sql) {
+            if ($lock === null && str_starts_with($sql, 'select') && str_contains($sql, 'from "users"')
+                && str_contains($sql, '"email" = ?') && str_contains($sql, 'for update')) {
+                $lock = $index;
+            }
+
+            if ($firstWrite === null && str_starts_with($sql, 'update "users"')) {
+                $firstWrite = $index;
+            }
+        }
+
+        $this->assertNotNull($lock, 'The existing login was not read FOR UPDATE by its address.');
+        $this->assertNotNull($firstWrite, 'Precondition: the revocation wrote the users row.');
+        $this->assertLessThan($firstWrite, $lock);
+        $this->assertTrue($existing->fresh()?->hasRole(Role::Noc->value));
     }
 
     /**
