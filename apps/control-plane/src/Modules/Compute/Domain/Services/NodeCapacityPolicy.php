@@ -66,14 +66,43 @@ final readonly class NodeCapacityPolicy
         VmResources $resources,
         CpuArchitecture $architecture = CpuArchitecture::X86_64,
     ): CapacityAssessment {
+        return $this->assessQuantities($node, $resources->vcpu, $resources->memoryMib, $resources->diskGib, $architecture);
+    }
+
+    /**
+     * Whether a machine already on this node may grow by these amounts.
+     *
+     * The same ceilings as a placement, and only those: a machine that grows
+     * in place is not being placed, so the node's status, health and
+     * architecture are not asked again - a node put into maintenance takes no
+     * new machines, but the ones it holds are still the size their customers
+     * pay for. What is asked is whether the node can hold the growth, because
+     * a growth it cannot hold is an oversold node (RestateNodeCommitment). An
+     * amount of zero or less grows nothing and is counted as zero.
+     */
+    public function assessGrowth(ComputeNode $node, int $vcpu, int $memoryMib, int $diskGib): CapacityAssessment
+    {
+        return $this->assessQuantities($node, max(0, $vcpu), max(0, $memoryMib), max(0, $diskGib), null);
+    }
+
+    /**
+     * @param  CpuArchitecture|null  $architecture  null for a growth in place, which asks only the ceilings
+     */
+    private function assessQuantities(
+        ComputeNode $node,
+        int $vcpu,
+        int $memoryMib,
+        int $diskGib,
+        ?CpuArchitecture $architecture,
+    ): CapacityAssessment {
         $usableMemory = $node->usableMemoryMib();
         $schedulableMemory = $this->schedulableMemoryMib($node);
         $usableCores = $node->usableCpuCores();
         $totalStorage = $node->storage_gib;
 
-        $memoryAfter = $node->allocated_memory_mib + $resources->memoryMib;
-        $coresAfter = $node->allocated_cpu_cores + $resources->vcpu;
-        $storageAfter = $node->allocated_storage_gib + $resources->diskGib;
+        $memoryAfter = $node->allocated_memory_mib + $memoryMib;
+        $coresAfter = $node->allocated_cpu_cores + $vcpu;
+        $storageAfter = $node->allocated_storage_gib + $diskGib;
 
         // Free capacity is measured against the threshold ceiling rather than
         // the physical one, so that scoring ranks nodes by the headroom the
@@ -93,21 +122,21 @@ final readonly class NodeCapacityPolicy
             $totalStorage,
         );
 
-        if (! $node->status->acceptsPlacement()) {
+        if ($architecture !== null && ! $node->status->acceptsPlacement()) {
             return $reject(
                 PlacementRejectionReason::NodeNotActive,
                 sprintf('the node is %s', $node->status->value),
             );
         }
 
-        if (! $node->is_healthy) {
+        if ($architecture !== null && ! $node->is_healthy) {
             return $reject(
                 PlacementRejectionReason::NodeUnhealthy,
                 'the node last reported unhealthy',
             );
         }
 
-        if ($node->architecture() !== $architecture) {
+        if ($architecture !== null && $node->architecture() !== $architecture) {
             return $reject(
                 PlacementRejectionReason::ArchitectureMismatch,
                 sprintf('the node is %s and the image is %s', $node->architecture()->value, $architecture->value),
@@ -119,7 +148,7 @@ final readonly class NodeCapacityPolicy
                 PlacementRejectionReason::InsufficientMemory,
                 sprintf(
                     'placing %d MiB would commit %d MiB of %d MiB usable',
-                    $resources->memoryMib,
+                    $memoryMib,
                     $memoryAfter,
                     $usableMemory,
                 ),
@@ -137,7 +166,7 @@ final readonly class NodeCapacityPolicy
                 PlacementRejectionReason::CapacityThresholdExceeded,
                 sprintf(
                     'placing %d MiB would commit %d MiB, past the %d%% threshold of %d MiB',
-                    $resources->memoryMib,
+                    $memoryMib,
                     $memoryAfter,
                     $this->capacityThresholdPercent,
                     $schedulableMemory,
@@ -150,7 +179,7 @@ final readonly class NodeCapacityPolicy
                 PlacementRejectionReason::CpuOvercommitExceeded,
                 sprintf(
                     'placing %d vCPU would commit %d of %d virtual cores at a %.2f× overcommit ratio',
-                    $resources->vcpu,
+                    $vcpu,
                     $coresAfter,
                     $usableCores,
                     $node->cpu_overcommit_ratio,
@@ -163,7 +192,7 @@ final readonly class NodeCapacityPolicy
                 PlacementRejectionReason::InsufficientStorage,
                 sprintf(
                     'placing %d GiB would commit %d GiB of %d GiB',
-                    $resources->diskGib,
+                    $diskGib,
                     $storageAfter,
                     $totalStorage,
                 ),

@@ -8,6 +8,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Compute\Application\Actions\ReleaseNodeCapacity;
 use Lynomia\Modules\Compute\Application\Actions\ReserveNodeCapacity;
+use Lynomia\Modules\Compute\Application\Actions\SyncClusterInventory;
 use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
@@ -30,17 +31,30 @@ use Tests\TestCase;
  * between the same two nodes in opposite directions unless the nodes are
  * taken in one order.
  *
- * Checked from the statements actually issued, in the order they ran, and
- * from the FIRST lock on each row only: a row locked again later in the same
- * transaction is already held and waits for nothing. A single process cannot
- * make the deadlock happen, so this asserts the order that prevents it (as
- * MoneyPathsTakeTheirLocksInOneOrderTest does for the money paths).
+ * The inventory sync keeps the same order (D1, round six). It wrote node,
+ * shared pool, node in the order the cluster reported them, in one
+ * transaction - and an UPDATE takes the row's lock as surely as a
+ * `for update` does. A sync holding the shared pool while it waited for node
+ * B, and a reservation holding node B while it waited for the pool, killed
+ * one of the two (40P01, 3/3 each way); the two-process race is
+ * AnInventorySyncDoesNotDeadlockAReservationTest.
+ *
+ * Checked from the statements actually issued, in the order they ran - a
+ * `for update` select and an UPDATE or DELETE of a row by id both count as
+ * locking it - and from the FIRST lock on each row only: a row locked again
+ * later in the same transaction is already held and waits for nothing. A
+ * single process cannot make the deadlock happen, so this asserts the order
+ * that prevents it (as MoneyPathsTakeTheirLocksInOneOrderTest does for the
+ * money paths).
  */
 final class CapacityPathsTakeTheirLocksInOneOrderTest extends TestCase
 {
     use RefreshDatabase;
 
     private ComputeCluster $cluster;
+
+    /** While true, statements run are another worker's, not the call's under test. */
+    private bool $offTheRecord = false;
 
     protected function setUp(): void
     {
@@ -98,6 +112,96 @@ final class CapacityPathsTakeTheirLocksInOneOrderTest extends TestCase
         $this->assertSame('node_capacity_reservations', $release[0][0]);
     }
 
+    #[Test]
+    public function a_sync_takes_every_node_before_any_pool_whatever_order_the_cluster_reports(): void
+    {
+        foreach ([false, true] as $pass => $reversed) {
+            $this->reportTheFleet($reversed, $pass * 2);
+            app(SyncClusterInventory::class)->execute($this->cluster->refresh());
+
+            // Figures that moved since, so every row is written again.
+            $this->reportTheFleet($reversed, $pass * 2 + 1);
+            $order = $this->firstLocks(fn () => app(SyncClusterInventory::class)->execute($this->cluster->refresh()));
+
+            $this->assertOrdered($order);
+            $this->assertCount(2, $this->idsOf($order, 'compute_nodes'), 'The sync did not write both nodes: '.json_encode($order));
+            $this->assertCount(3, $this->idsOf($order, 'compute_storages'), 'The sync did not write the shared pool and both local pools: '.json_encode($order));
+        }
+    }
+
+    #[Test]
+    public function a_move_takes_its_locks_from_the_reservation_as_locked_not_as_first_read(): void
+    {
+        /*
+         * D4. The move chose which node and pool to lock from the row it read
+         * without a lock, and threw away the locked re-read. A reservation
+         * moved by another worker between the two reads (a retry of the same
+         * build, placed elsewhere) left the move locking a node and pool it
+         * no longer gives anything back to, and the release then locked the
+         * node the row really names after the pools: out of order. The
+         * other worker's move is modelled here as the row changing right
+         * after any read of it that takes no lock.
+         */
+        $nodes = [];
+
+        foreach (['pve-01', 'pve-02', 'pve-03'] as $name) {
+            $nodes[] = ComputeNode::factory()->create([
+                'cluster_id' => $this->cluster->id,
+                'provider_name' => $name,
+                'cpu_cores' => 64,
+                'memory_mib' => 262144,
+                'storage_gib' => 4096,
+            ]);
+        }
+
+        usort($nodes, static fn (ComputeNode $a, ComputeNode $b): int => strcmp((string) $a->id, (string) $b->id));
+        [$low, $middle, $high] = $nodes;
+        $pools = [];
+
+        foreach ($nodes as $node) {
+            $pools[(string) $node->id] = $this->poolOn($node);
+        }
+
+        // Held on the middle node; the other worker's move takes it to the
+        // lowest; this call moves it to the highest.
+        app(ReserveNodeCapacity::class)->execute($middle, $this->resources(), storageId: $pools[(string) $middle->id]->id, reservationKey: 'job-1');
+
+        // The other worker's move, whole: the row and the counters it moves.
+        // It lands only if this call reads the row without a lock first.
+        $moved = false;
+        DB::listen(function ($query) use (&$moved, $low, $middle, $pools): void {
+            $sql = strtolower($query->sql);
+
+            if ($moved || ! str_contains($sql, 'from "node_capacity_reservations"') || str_contains($sql, 'for update')) {
+                return;
+            }
+
+            $moved = true;
+            // The other worker's statements are not this call's locks.
+            $this->offTheRecord = true;
+            DB::table('node_capacity_reservations')->where('reservation_key', 'job-1')->whereNull('released_at')
+                ->update(['node_id' => $low->id, 'storage_id' => $pools[(string) $low->id]->id]);
+            DB::table('compute_nodes')->where('id', $low->id)->update(['vm_count' => 1, 'allocated_cpu_cores' => 2, 'allocated_memory_mib' => 4096, 'allocated_storage_gib' => 40]);
+            DB::table('compute_nodes')->where('id', $middle->id)->update(['vm_count' => 0, 'allocated_cpu_cores' => 0, 'allocated_memory_mib' => 0, 'allocated_storage_gib' => 0]);
+            DB::table('compute_storages')->where('id', $pools[(string) $low->id]->id)->update(['committed_gib' => 40]);
+            DB::table('compute_storages')->where('id', $pools[(string) $middle->id]->id)->update(['committed_gib' => 0]);
+            $this->offTheRecord = false;
+        });
+
+        $order = $this->firstLocks(fn () => app(ReserveNodeCapacity::class)
+            ->execute($high, $this->resources(), storageId: $pools[(string) $high->id]->id, reservationKey: 'job-1'));
+        $moved = true; // The other worker is done; the reads below are this test's.
+
+        $this->assertOrdered($order);
+        $this->assertSame((string) $high->id, NodeCapacityReservation::query()->whereNull('released_at')->sole()->node_id);
+        $this->assertSame(0, (int) $low->fresh()->vm_count);
+        $this->assertSame(0, (int) $middle->fresh()->vm_count);
+        $this->assertSame(1, (int) $high->fresh()->vm_count);
+        $this->assertSame(0, (int) $pools[(string) $low->id]->fresh()->committed_gib);
+        $this->assertSame(0, (int) $pools[(string) $middle->id]->fresh()->committed_gib);
+        $this->assertSame(40, (int) $pools[(string) $high->id]->fresh()->committed_gib);
+    }
+
     private function assertMoveIsOrdered(ComputeNode $from, ComputeNode $to): void
     {
         // The destination's pool is created first, so it has the lower id:
@@ -147,8 +251,12 @@ final class CapacityPathsTakeTheirLocksInOneOrderTest extends TestCase
     }
 
     /**
-     * The first `for update` on each row, in the order the statements ran, as
-     * [table, id] (id null where the statement is not by id).
+     * The first lock on each row, in the order the statements ran, as
+     * [table, id] (id null where the statement is not by id). A lock is a
+     * `for update` select, or an UPDATE or DELETE, which takes the row's lock
+     * as it writes: the sync's deadlock was made of UPDATEs alone. An
+     * INSERT is not counted, because a row nobody else can see yet is
+     * nobody else's to wait for.
      *
      * @return list<array{0: string, 1: ?string}>
      */
@@ -156,18 +264,37 @@ final class CapacityPathsTakeTheirLocksInOneOrderTest extends TestCase
     {
         $seen = [];
         $order = [];
+        $listening = true;
 
-        DB::listen(static function ($query) use (&$seen, &$order): void {
-            $sql = strtolower($query->sql);
-
-            if (! str_contains($sql, 'for update') || preg_match('/from\s+"([a-z_]+)"/', $sql, $m) !== 1) {
+        DB::listen(function ($query) use (&$seen, &$order, &$listening): void {
+            if (! $listening || $this->offTheRecord) {
                 return;
             }
 
-            $table = $m[1];
-            $ids = preg_match('/"'.$table.'"\."id"\s*(=|in)/', $sql) === 1
-                ? array_map('strval', $query->bindings)
-                : [null];
+            $sql = strtolower($query->sql);
+
+            if (str_contains($sql, 'for update') && preg_match('/from\s+"([a-z_]+)"/', $sql, $m) === 1) {
+                $table = $m[1];
+                $ids = preg_match('/"'.$table.'"\."id"\s*(=|in)/', $sql) === 1
+                    ? array_map('strval', $query->bindings)
+                    : [null];
+            } elseif (preg_match('/^\s*(?:update|delete\s+from)\s+"([a-z_]+)"/', $sql, $m) === 1) {
+                $table = $m[1];
+
+                // A row of a table already locked by another key (the
+                // reservation, locked by its reservation key and then
+                // stamped by id) is taken to be the row that was locked.
+                if (isset($seen[$table.'#*'])) {
+                    return;
+                }
+
+                // Written by id, the id is the statement's last binding.
+                $ids = preg_match('/where\s+"(?:'.$table.'"\.")?id"\s*=\s*\?\s*$/', $sql) === 1
+                    ? [(string) end($query->bindings)]
+                    : [null];
+            } else {
+                return;
+            }
 
             foreach ($ids as $id) {
                 $key = $table.'#'.($id ?? '*');
@@ -181,7 +308,11 @@ final class CapacityPathsTakeTheirLocksInOneOrderTest extends TestCase
             }
         });
 
-        $work();
+        try {
+            $work();
+        } finally {
+            $listening = false;
+        }
 
         return $order;
     }
@@ -218,6 +349,33 @@ final class CapacityPathsTakeTheirLocksInOneOrderTest extends TestCase
         usort($nodes, static fn (ComputeNode $a, ComputeNode $b): int => strcmp((string) $a->id, (string) $b->id));
 
         return [$nodes[0], $nodes[1]];
+    }
+
+    /**
+     * Two nodes, each with a pool of its own, and one pool both share, as
+     * the fake cluster reports them - in id order, or against it.
+     */
+    private function reportTheFleet(bool $reversed, int $pass): void
+    {
+        $this->cluster->forceFill(['driver' => 'fake'])->save();
+
+        $fleet = [];
+
+        foreach (['pve-01', 'pve-02'] as $name) {
+            $fleet[] = [
+                'name' => $name,
+                'online' => true,
+                'cpu_cores' => 32,
+                'memory_total_mib' => 262144,
+                'memory_used_mib' => 1000 + $pass,
+                'storages' => [
+                    ['name' => 'local-lvm', 'class' => 'nvme', 'shared' => false, 'total_gib' => 2048, 'available_gib' => 1000 + $pass],
+                    ['name' => 'ceph-pool', 'class' => 'ceph', 'shared' => true, 'total_gib' => 65536, 'available_gib' => 30000 + $pass],
+                ],
+            ];
+        }
+
+        config(['compute.fake.nodes' => $reversed ? array_reverse($fleet) : $fleet]);
     }
 
     private function poolOn(ComputeNode $node): ComputeStorage

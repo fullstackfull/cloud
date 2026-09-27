@@ -404,6 +404,10 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
                 // never being told which architecture to refuse.
                 architecture: CpuArchitecture::tryFrom((string) ($payload['architecture'] ?? ''))
                     ?? CpuArchitecture::X86_64,
+                // The key the capacity below is committed under. A retry
+                // holds its earlier attempt's commitment, and is placed
+                // without it counted against the node it fills (D3).
+                reservationKey: $job->idempotency_key,
             ));
         } catch (NoCapacityAvailableException $e) {
             /*

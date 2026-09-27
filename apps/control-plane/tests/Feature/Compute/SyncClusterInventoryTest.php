@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Compute;
 
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Lynomia\Modules\Compute\Application\Actions\SyncClusterInventory;
 use Lynomia\Modules\Compute\Domain\Enums\NodeStatus;
@@ -14,6 +16,7 @@ use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
+use PDOException;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -291,6 +294,42 @@ final class SyncClusterInventoryTest extends TestCase
         // is up to date.
         $this->assertNotNull($cluster->last_sync_error);
         $this->assertNull($cluster->last_synced_at);
+    }
+
+    #[Test]
+    public function a_pass_that_fails_while_writing_records_why_and_the_failure_still_propagates(): void
+    {
+        /*
+         * D1, round six. A pass the database stopped - a deadlock with a
+         * reservation, which the sync's old lock order made certain - went
+         * back to the scheduler as an exception and left nothing on the
+         * cluster row: the last error an operator could see was whatever the
+         * provider had said last. The database's refusal is recorded as the
+         * provider's is.
+         */
+        $cluster = $this->fakeCluster();
+
+        // The first pass creates every row; the second writes them.
+        app(SyncClusterInventory::class)->execute($cluster);
+        config()->set('compute.fake.nodes.0.storages.0.available_gib', 3000);
+
+        DB::listen(static function ($query): void {
+            if (str_starts_with(strtolower($query->sql), 'update "compute_storages"')) {
+                throw new QueryException('pgsql', $query->sql, [], new PDOException('SQLSTATE[40P01]: Deadlock detected: 7 ERROR:  deadlock detected'));
+            }
+        });
+
+        try {
+            app(SyncClusterInventory::class)->execute($cluster->refresh());
+
+            $this->fail('A pass the database refused reported a successful sync.');
+        } catch (PDOException $e) {
+            // Inside this test's transaction Laravel re-throws a deadlock as
+            // DeadlockException, a PDOException; at the top a QueryException.
+            $this->assertStringContainsString('40P01', $e->getMessage());
+        }
+
+        $this->assertStringContainsString('deadlock detected', (string) $cluster->refresh()->last_sync_error);
     }
 
     /**
