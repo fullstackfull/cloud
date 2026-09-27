@@ -156,6 +156,7 @@ advance — which is to say, before the outage.
 | Drift queue not empty for a day (`DriftQueueUnworked`) | Disagreements with a provider are piling up unreviewed: every evaluation for a day has found at least one open. Warning; acknowledging clears it |
 | Dedicated power request indeterminate (`DedicatedPowerOperationIndeterminate`) | A customer's physical machine may be mid-reset, off or untouched, and nothing will try again. Pages |
 | Dedicated power claims abandoned (`DedicatedPowerClaimsAbandoned`) | Claims are outliving their lease: the settling sweep has stopped, or requests keep dying mid-call. Warning |
+| Scheduled command failing (`ScheduledCommandFailing`) | A scheduled command has failed three runs in a row, so renewals, a sweep or a reconciliation have stopped happening. Warning; a command that is no longer invoked at all does not raise it |
 
 Every alert carries enough context to act: which node, which cluster, which customer where
 one is implicated, and a link to the runbook.

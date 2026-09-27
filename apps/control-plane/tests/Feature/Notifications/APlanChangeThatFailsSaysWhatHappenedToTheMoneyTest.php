@@ -91,6 +91,40 @@ final class APlanChangeThatFailsSaysWhatHappenedToTheMoneyTest extends TestCase
 
         $this->assertStringContainsString('Nothing has been charged', $this->renderedBody('en'));
         $this->assertStringContainsString('لم تُحمَّل أي رسوم', $this->renderedBody('ar'));
+
+        /*
+         * But it was not "left as it was" (the re-audit after round six): a
+         * change that owed nothing moved the subscription, and its price and
+         * any credit, when it was made. What was left as it was is the
+         * service.
+         */
+        $this->assertStringNotContainsString('left as it was', $this->renderedBody('en'));
+        $this->assertStringNotContainsString('وبقي كما كان', $this->renderedBody('ar'));
+        $this->assertStringContainsString('now on the new plan and billed at its price', $this->renderedBody('en'));
+        $this->assertStringContainsString('still running as it was', $this->renderedBody('en'));
+        $this->assertStringContainsString('ويُفوتَر بسعرها', $this->renderedBody('ar'));
+    }
+
+    #[Test]
+    #[DataProvider('planChangeKinds')]
+    public function a_change_whose_money_is_held_says_the_renewal_bills_the_new_plan(ProvisioningJobKind $kind): void
+    {
+        /*
+         * "Held" said nothing of the renewal (the re-audit after round six):
+         * the subscription is on the new plan, and a renewal before the
+         * change is completed bills its price. Said, in both messages that
+         * speak of a payment held.
+         */
+        $paid = $this->job($kind, 'plan-change:'.Str::ulid().':'.Str::ulid().':invoice:'.Str::ulid());
+        app(NotifyOnProvisioningOutcome::class)->failed(new ProvisioningJobFailed((string) $paid->id, $kind, (string) $this->service->id, FailureClass::Permanent, 'compute.refused'));
+        $this->assertStringContainsString('billed at its price', $this->renderedBody('en'));
+        $this->assertStringContainsString('يُفوتَر بسعرها', $this->renderedBody('ar'));
+
+        Notification::query()->delete();
+
+        app(NotifyOnProvisioningOutcome::class)->needsReview(new ProvisioningJobNeedsReview((string) $paid->id, $kind, (string) $this->service->id, null, FailureClass::Capacity, 'no room'));
+        $this->assertStringContainsString('billed at its price', $this->renderedBody('en'));
+        $this->assertStringContainsString('يُفوتَر بسعرها', $this->renderedBody('ar'));
     }
 
     #[Test]

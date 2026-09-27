@@ -10,9 +10,9 @@ production ready.
 <!-- counts:begin -->
 <!-- Written by `validate-runbook-alerts.py --write` from the tree, and compared on every run. Do not edit by hand. -->
 - **32** files here: **31** pages and this README.
-- **68** alerts are defined in `infrastructure/monitoring/prometheus/rules/`.
-- **50** of them name a page here with `runbook:`; **18** name no page here.
-- **8** of the 31 pages are named by no alert, and are listed under *Pages with no alert here* with the reason.
+- **69** alerts are defined in `infrastructure/monitoring/prometheus/rules/`.
+- **51** of them name a page here with `runbook:`; **18** name no page here.
+- **7** of the 31 pages are named by no alert, and are listed under *Pages with no alert here* with the reason.
 <!-- counts:end -->
 
 Those numbers are derived from the tree by
@@ -116,7 +116,6 @@ something that happens to them.
 - `dns-outage.md` — **Gap.** No rule reads the `lynomia_dns_*` series the control plane exports.
 - `pbs-unavailable.md` — **Indirect.** Nothing alerts on the backup server as such, and the backup series come from the control plane's own records, not from PBS. Its failure reaches you as backup alerts, which send you to `backup-failure.md`, or as `NodeDown` if the host stops answering, which sends you to `node-unavailable.md`; both pages send you on here.
 - `registrar-timeout.md` — **Gap.** `lynomia_domain_operations_total` is exported and no rule reads it.
-- `scheduler-stale.md` — **Gap.** `lynomia_scheduled_command_last_success_timestamp_seconds` and `lynomia_scheduled_command_consecutive_failures` are exported and no rule reads either.
 - `wordpress-provisioning-stuck.md` — **Gap.** `lynomia_wordpress_sites_total` is exported and no rule reads it.
 
 ## The rule that applies to all of them

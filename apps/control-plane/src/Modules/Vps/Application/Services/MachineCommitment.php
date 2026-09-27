@@ -43,6 +43,10 @@ final readonly class MachineCommitment
      */
     public function whyTheGrowthWouldNotFit(VirtualMachine $machine, ?int $vcpu, ?int $memoryMib, ?int $diskGib): ?string
     {
+        if (! $this->grows($machine, $vcpu, $memoryMib, $diskGib)) {
+            return null;
+        }
+
         /** @var ComputeNode|null $node */
         $node = $machine->node()->first();
 
@@ -58,6 +62,32 @@ final readonly class MachineCommitment
             $this->poolFor($held, $machine, $node),
             $this->ceiling($machine, $vcpu, $memoryMib, $diskGib),
         );
+    }
+
+    /**
+     * Whether the target makes the machine larger than it runs now in any
+     * dimension: the only change a resize asks the node or pool about.
+     *
+     * A shrink is never refused for capacity - the machine already occupies
+     * its shape on the node, and a shrink gives room back. Committed from
+     * nothing, as a machine with no live commitment is (keyFor()), the whole
+     * of its shape read as growth, and a pure shrink of such a machine on a
+     * full node was refused by the quote (not_deliverable) and would have
+     * been refused by the resize (N3, the re-audit after round six).
+     *
+     * "Runs now" is $current when the caller has read it - the resize reads
+     * the machine from the hypervisor before it changes anything
+     * (ResizeVpsHandler), and a machine ahead of its row (a growth that
+     * landed unrecorded) is then compared with what it is - and the row
+     * otherwise, as the plan-change quote reads it.
+     */
+    public function grows(VirtualMachine $machine, ?int $vcpu, ?int $memoryMib, ?int $diskGib, ?VmResources $current = null): bool
+    {
+        $current ??= self::shapeOf($machine);
+
+        return ($vcpu !== null && $vcpu > $current->vcpu)
+            || ($memoryMib !== null && $memoryMib > $current->memoryMib)
+            || ($diskGib !== null && $diskGib > $current->diskGib);
     }
 
     /**

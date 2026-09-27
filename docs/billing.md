@@ -86,12 +86,18 @@ payment is opened, and again when the payment's settlement is heard - a card pay
 captured after it was opened, and an operator can withdraw the package or fill the node
 in between. A change the settlement refuses is **returned**, not delivered as nothing:
 what the invoice holds is credited to the customer's wallet against the invoice, the
-subscription goes back to the plan and the recurring amount it came from, the change is
+subscription goes back to the plan and the recurring amount it came from (a paid upgrade
+stops holding its unit of that plan, so the plan may have sold it in the window: the return
+is made all the same, adding at most the change's units to the plan's claims, and the audit
+entry records the plan's whole excess over its `stock_limit` after the return as
+`plan_stock_exceeded_by` - which includes any excess it already had, as when an operator
+lowered `stock_limit` below the units held), the change is
 recorded `returned_at` with its `return_reason`, and a `subscription.plan_changed` audit
 entry with the reason `plan_change_not_deliverable_at_settlement` names the invoice, the
 refusal and the amount returned (`ReturnAPlanChangeNoLongerDeliverable`), and the customer
-is told (`billing.plan_change_returned`: the amount returned to the wallet, and that the
-service stays on its current plan). A returned change counts afterwards as having bought
+is told (`billing.plan_change_returned`: that the service was not changed, and the amount
+returned to the wallet - not which plan the subscription is on, since it goes back only when
+nothing was changed after the returned change). A returned change counts afterwards as having bought
 nothing: it does not reprice the period's discount, supersede an earlier paid change, or
 hold the subscription's next change.
 
@@ -108,9 +114,27 @@ waiting for the team and that what they paid for it is held
 message goes to a change that owed nothing). A paid change whose resize or package change
 fails outright is not returned automatically either: the payment is held for an operator
 to complete the change or return it, and the customer is told exactly that
-(`service.plan_change_failed_after_payment`). A change that owed nothing and fails is told
-that nothing was charged (`service.plan_change_failed`). Which of the two a failure is, is
-read off the job's key: an upgrade is queued under the invoice that paid for it.
+(`service.plan_change_failed_after_payment`). Both messages also say what "held" does not:
+the subscription is on the new plan, and a renewal before the change is completed bills
+its price. A change that owed nothing and fails is told that nothing was charged, and that
+its subscription is on the new plan and billed at its price while the service runs as it
+was (`service.plan_change_failed`). Which of the two a failure is, is read off the job's
+key: an upgrade is queued under the invoice that paid for it.
+
+### An unpaid plan change can be withdrawn by the customer
+
+A change that stops being deliverable before it is paid (the package withdrawn, the node
+filled) cannot be paid: both payments refuse it (409 `invoice.plan_change_not_deliverable`),
+and the invoice's `is_payable` says `false`, because it asks the same question. Its open
+invoice used to hold every other change of plan (`invoice_outstanding`) with no way out for
+the customer but the renewal's lapse or an operator's void. The customer can now withdraw
+any unpaid plan change (`POST /api/v1/invoices/{invoice}/withdraw-plan-change`, offered
+where the invoice says `plan_change_withdrawable`): what the invoice holds goes back to the
+wallet against it, the invoice is voided, and the subscription goes back to the plan and
+the recurring amount it came from - the path the lapse takes (`WithdrawAnUnpaidPlanChange`,
+recorded as `invoice.voided` with the reason `plan_change_withdrawn`). Only while the void
+puts the plan back: the invoice bills the subscription's latest change, unpaid, and the
+subscription has neither ended nor moved on from it.
 
 ## Invoice numbering
 

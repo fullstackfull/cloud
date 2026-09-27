@@ -346,7 +346,11 @@ export interface AdminHostingNode {
   reconciled_at: string | null
   /** When the reconciliation sweep last asked, read or not. */
   reconcile_attempted_at: string | null
-  /** Why that attempt could not be read, if it could not; null once one is. */
+  /**
+   * Why that attempt concluded nothing, if it did not: the listing could not
+   * be read (the adapter's refusal), or reconciling it failed some other way
+   * (the failure's class). Null once a listing is read and compared.
+   */
   reconcile_error: string | null
 }
 

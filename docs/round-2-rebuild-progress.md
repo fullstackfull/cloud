@@ -192,3 +192,19 @@ testsuites `skipped="0"`, exit 0 (the one red of an earlier full run, a clock
 comparison in a round-six test, was fixed at `02d7364` and is what band G's gate
 now refuses); vitest 651 / 651, tsc and eslint clean; `make infra-validate` 0;
 `npm run openapi:lint` valid. An independent re-audit after round six follows.
+
+### Round seven — fixing what the re-audit after round six found
+
+The re-audit after round six against `a66ac17` is recorded in
+`docs/independent-re-audit-after-round-6.md`: F-07 partially reproduces (VPS half);
+every other finding does not reproduce; the confirmed unnumbered items are listed
+there.
+
+| Band | Scope | Status | Commit |
+|---|---|---|---|
+| A | F-07 VPS half and the stale service shape; the undeliverable-change lockout (a customer route to withdraw); a shrink refused; stock on return; a change settled after the renewal; wording | upheld after one closing pass; merged `2ebb829`; the look-back sentence now states what a settlement later than a week costs (at integration) | `26329f7` |
+| B | a delegate's invitation revealing a login exists; soft-deleted address; `roles: []` | rejected once (keeping `customer` beside a staff role let the customer role's permissions reach /api/admin), repaired; upheld with reservations (the operator list still shows a promoted login's id, name and age); merged `dcf1d54`; the User docblock's reach narrowed at integration | `0addd08` |
+| C | cPanel unreadable listings; one node's failure stopping the sweep; runbook; overlapping sweeps in two processes | upheld with reservations after one closing pass (a listing-step failure failing the command is unpinned; nothing alerts on the scheduled-command failure gauge — being added); merged `d425d4b` | `ac4f051` |
+| D | destroy overlapping a resize; a retried resize growing the disk twice; adopted VPS without a machine row; adoption's provider call inside a transaction; clock gate limits | fixing | — |
+| E | owed oracles: staff roles pinned, by-value reads, pairing check, `Rule::in`, notification literals, schema collisions | upheld after one closing pass (its six reservations fixed); merged `7dde69e` | `7069dc1` |
+| C2 | a listing-step failure fails `hosting:reconcile`; the deadlock fallback pinned; `ScheduledCommandFailing` alert | upheld with reservations; merged; three sentences (a comment, the scheduler runbook on where a failed backup is named, the rule comment's timing) corrected at integration | `f9afa72` |

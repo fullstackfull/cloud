@@ -156,6 +156,25 @@ final class ARetriedResizeLooksAtTheMachineBeforeGrowingItTest extends TestCase
         $this->assertSame(40, $this->hypervisor->fleet->getVm('pve-01', (string) $machine->provider_id)?->diskGib);
     }
 
+    #[Test]
+    public function what_grows_is_measured_from_the_machine_not_the_row(): void
+    {
+        $machine = $this->aBuiltMachine();
+
+        // The machine already has 8192 MiB; the row says 4096. The node has
+        // no memory to spare (a sync after a DIMM was lost).
+        $this->hypervisor->fleet->resizeVm('pve-01', (string) $machine->provider_id, new ResizeVmRequest(memoryMib: 8192));
+        $this->node->forceFill(['memory_mib' => 4096])->save();
+
+        // 8192 MiB (what it has) and 1 vCPU (a shrink): nothing grows on the machine.
+        $resize = $this->resizeJob($machine, vcpu: 1, memoryMib: 8192, diskGib: 40);
+        $this->runWorker($resize);
+
+        $this->assertSame(ProvisioningJobStatus::Succeeded, $resize->refresh()->status, (string) $resize->last_error);
+        $this->assertSame([1, 8192], [$machine->refresh()->vcpu, $machine->memory_mib]);
+        $this->assertSame(1, $this->hypervisor->fleet->getVm('pve-01', (string) $machine->provider_id)?->vcpu);
+    }
+
     private function aBuiltMachine(): VirtualMachine
     {
         $job = $this->createJob();

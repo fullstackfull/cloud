@@ -83,7 +83,7 @@ final class RoleManagementCannotTakeWhatItCannotGiveTest extends TestCase
 
     /**
      * The positive control: the delegate may still change an operator whose
-     * roles, before and after, are all roles the delegate holds.
+     * staff roles, before and after, are all roles the delegate holds.
      */
     #[Test]
     public function a_delegate_may_still_move_roles_they_hold(): void

@@ -256,7 +256,7 @@ final class OperatorAndRoleManagementTest extends TestCase
         $this->assertFalse($target->fresh()?->hasRole(Role::SuperAdmin->value));
 
         // And the same person may still do the part they are authorised for:
-        // an operator whose roles, before and after, are all the delegate's
+        // an operator whose staff roles, before and after, are all the delegate's
         // own. (This used to take Noc off a Noc operator, a role the delegate
         // does not hold; removal is now judged like granting - see
         // RoleManagementCannotTakeWhatItCannotGiveTest.)

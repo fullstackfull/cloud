@@ -230,6 +230,32 @@ export function useInvoice(id: string) {
   })
 }
 
+/**
+ * Withdraw the unpaid plan change an invoice bills.
+ *
+ * The server voids the invoice, returns anything paid on it to the wallet and
+ * puts the subscription back on the plan it came from; the portal decides
+ * none of it. Offered only where the invoice says `plan_change_withdrawable`.
+ */
+export function useWithdrawPlanChange() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (invoiceId: string): Promise<Invoice> => {
+      const response = await api.post<Envelope<Invoice>>(
+        `/invoices/${encodeURIComponent(invoiceId)}/withdraw-plan-change`,
+      )
+      return response.data
+    },
+    onSuccess: () => {
+      // The subscription moved back and the wallet may have been credited.
+      void queryClient.invalidateQueries({ queryKey: ['invoices'] })
+      void queryClient.invalidateQueries({ queryKey: ['subscriptions'] })
+      void queryClient.invalidateQueries({ queryKey: ['wallet'] })
+    },
+  })
+}
+
 export function useSubscriptions(pageNumber = 1) {
   return useQuery({
     queryKey: ['subscriptions', pageNumber],

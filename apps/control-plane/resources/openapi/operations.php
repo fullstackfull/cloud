@@ -748,6 +748,12 @@ return [
         'description' => 'Requires an Idempotency-Key: a repeated submission that debited twice would spend a balance the customer only has once. There is no amount field — how much is applied is decided from the balance and the amount due, both read under a lock. Partial payment is ordinary: the remainder stays payable by card. Credit is never converted between currencies.',
         'response' => $one('Invoice'),
     ],
+    'api.v1.invoices.plan_change.withdraw' => [
+        'tag' => 'Billing',
+        'summary' => 'Withdraw the unpaid plan change an invoice bills',
+        'description' => 'The way out of a plan change the customer has not paid for - above all one that can no longer be delivered, whose payments are refused (409 `invoice.plan_change_not_deliverable`) and whose open invoice holds every other change of plan. What the invoice holds (a part paid from the wallet) goes back to the wallet, the invoice is voided, and the subscription goes back to the plan and the recurring amount it came from; nothing is resized. What a renewal does to an upgrade still unpaid, without waiting for it. Takes no body. Refused (409 `invoice.plan_change_not_withdrawable`) for an invoice that does not bill the subscription\'s latest, unpaid change, or once the subscription has ended or moved on from it; `plan_change_withdrawable` on the invoice says which. Requires `billing.pay`, the permission a plan change needs.',
+        'response' => $one('Invoice'),
+    ],
 
     'api.v1.backups.destroy' => [
         'tag' => 'Backups',
@@ -1495,7 +1501,7 @@ return [
     'api.admin.operators.index' => [
         'tag' => 'Operator',
         'summary' => 'The people who operate the platform',
-        'description' => 'Staff only — a customer login holds the baseline customer role and never appears here.',
+        'description' => 'Staff only — a customer login holds the baseline customer role and never appears here; a customer who was made an operator appears with its staff roles only.',
         'permission' => 'role.manage',
         'query' => ['q'],
         'response' => $many('AdminOperator'),
@@ -1503,7 +1509,7 @@ return [
     'api.admin.operators.store' => [
         'tag' => 'Operator',
         'summary' => 'Add an operator',
-        'description' => 'No password is chosen: the person takes the account over through the one-time reset link the platform already issues, so there is never a moment when a credential somebody else picked opens an operator account. An address with an existing login that holds no staff role — a customer account, which anybody may have registered without proving the mailbox — is promoted, and every credential that login held is taken away before the roles land: password, sessions, remember-me token, personal access tokens and second factor. Its address stays as verified as it was; completing the reset proves the mailbox and verifies it. An address that already holds a staff role is refused rather than silently re-roled. The roles go on through the same path a role change uses, so an invitation cannot hand out authority a direct change would have refused.',
+        'description' => 'No password is chosen: the person takes the account over through the one-time reset link the platform already issues, so there is never a moment when a credential somebody else picked opens an operator account. An address with an existing login that holds no staff role — a customer account, which anybody may have registered without proving the mailbox — is promoted, and every credential that login held is taken away before the roles land: password, sessions, remember-me token, personal access tokens and second factor, and any permission given to the login directly is revoked. The staff roles are added beside its customer role, which it keeps; the customer role gives a login that holds a staff role no permission. A deleted login\'s address is invited the same way: the login is restored, without any staff role it held when it was deleted, and promoted. Its address stays as verified as it was; completing the reset proves the mailbox and verifies it. An address that already holds a staff role is refused rather than silently re-roled. The roles go on through the same path a role change uses, so an invitation cannot hand out authority a direct change would have refused.',
         'permission' => 'role.manage',
         'body' => ['email', 'name', 'roles'],
         'response' => $one('AdminInvitedOperator', 201),
@@ -1511,7 +1517,7 @@ return [
     'api.admin.operators.roles' => [
         'tag' => 'Operator',
         'summary' => 'Change what an operator may do',
-        'description' => 'Refusals, each an escalation if it were allowed: your own account is never yours to re-role (grant, use, revoke is the shortest escalation there is), a role you do not hold is not yours to grant or to take away, the last principal who can administer the platform cannot be stripped of it — the console bootstrap refuses once one exists, so a deployment that loses its last administrator has no supported way back — and a login that holds no staff role is not given one here (`rbac.not_an_operator`): its credentials may be somebody else\'s, so it becomes an operator only through an invitation, which takes them away first.',
+        'description' => 'Refusals, each an escalation if it were allowed: your own account is never yours to re-role (grant, use, revoke is the shortest escalation there is), a role you do not hold is not yours to grant or to take away, the last principal who can administer the platform cannot be stripped of it — the console bootstrap refuses once one exists, so a deployment that loses its last administrator has no supported way back — and a login that holds no staff role is not given one here (`rbac.not_an_operator`): its credentials may be somebody else\'s, so it becomes an operator only through an invitation, which takes them away first. The roles given are the login\'s staff roles from now on; the customer role is never given or taken here, so a customer who was made an operator and is given no roles is a customer again.',
         'permission' => 'role.manage',
         'body' => ['roles'],
         'response' => $one('AdminOperator'),

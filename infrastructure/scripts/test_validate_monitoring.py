@@ -221,6 +221,15 @@ DRIFT_PINS = {
 
 NEVER_PAGES = {"lynomia_open_drift_total": "is cleared by acknowledging"}
 
+# The scheduled-command alert as shipped. Held here as the drift pins are, so
+# emptying the shipped table cannot leave the gate green over nothing.
+SCHEDULER_PIN = {
+    "receiver": "platform-team",
+    "reads": "lynomia_scheduled_command_consecutive_failures",
+    "expr": "max by (command) (lynomia_scheduled_command_consecutive_failures) >= 3",
+    "for": "5m",
+}
+
 LOKI_WITH_RULER = """
 ruler:
   storage:
@@ -1267,9 +1276,10 @@ def main() -> int:
     ok = (
         shipped.get("ResourceDriftOpen") == DRIFT_PINS["ResourceDriftOpen"]
         and shipped.get("DriftQueueUnworked") == DRIFT_PINS["DriftQueueUnworked"]
+        and shipped.get("ScheduledCommandFailing") == SCHEDULER_PIN
         and "lynomia_open_drift_total" in validator.NEVER_PAGES
     )
-    print(f"{'PASS' if ok else 'FAIL'}  the shipped pin tables still hold the drift page to the on-call")
+    print(f"{'PASS' if ok else 'FAIL'}  the shipped pin tables still hold the drift page to the on-call and a failing scheduled command to the platform channel")
     if not ok:
         failures += 1
         print(f"      PINNED_ROUTES: {shipped!r}\n      NEVER_PAGES: {validator.NEVER_PAGES!r}")

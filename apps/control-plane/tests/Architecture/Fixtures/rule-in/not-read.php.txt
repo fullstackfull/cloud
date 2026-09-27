@@ -1,0 +1,22 @@
+<?php
+
+// Read by EveryEnumCaseHasAProducerTest::restrictingRules() over TicketPriority
+// (low, normal, high, urgent). Nothing here is read as a rule restricting it.
+
+use Illuminate\Validation\Rule;
+use Lynomia\Modules\Support\Domain\Enums\TicketPriority;
+
+$high = 'high';
+
+// Rule::in(['low', 'normal', 'high']) in a comment is not code.
+/* Rule::in(['low']) */
+
+return [
+    'a variable among the values' => ['required', Rule::in(['low', 'normal', $high])],
+    'a value outside the enum' => ['required', Rule::in(['low', 'normal', 'high', 'extreme'])],
+    'an enum case, not a quoted string' => ['required', Rule::in([TicketPriority::Low->value])],
+    'a call' => ['required', Rule::in(array_map('strval', ['low']))],
+    'more after the list' => ['required', Rule::in(['low'], 'normal')],
+    'not Rule' => ['required', Ruler::in(['low', 'normal', 'high'])],
+    'not in' => ['required', Rule::notIn(['urgent'])],
+];

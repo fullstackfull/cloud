@@ -46,8 +46,27 @@ A row in `needs_review` whose `quarantined_from` is `restoring` or `verifying` i
 operation the platform stopped watching after `backups.max_poll_hours`. The archive is
 not the problem; the platform's knowledge is.
 
-1. `GET /api/admin/backups/needs-review` for the row, its task id, when it started, and
-   its `review` token.
+1. `GET /api/admin/backups/needs-review` for the row, its task id (`restore_task_id` or
+   `verification_task_id`), when it started (`restore_started_at` or
+   `verification_started_at`), and its `review` token.
+
+   A restore can be in review with no task id: `restore_task_id` is null. That is a
+   restore whose start call never gave the platform a handle. Either the call ended
+   without an answer (a timeout, a lost response), and `failure_reason` is the message
+   of the error the backup adapter raised, with anything that looks like a secret
+   redacted; or no handle had arrived `backups.max_poll_hours` after
+   `restore_started_at` (the call still waiting, or its process gone), and
+   `failure_reason` says the platform stopped tracking it. Either way the restore may
+   have started. If the handle arrives after the row went to review,
+   it is not written onto the row; it is in the application log, as a warning that
+   reads
+
+       A restore handle arrived after its attempt had ended; it was not written onto the row as it now stands.
+
+   carrying `backup_id` (the row's `id`) and `restore_task_id`.
+   Search the log for that line with this row's `id`. If there is none, find the task
+   on the hypervisor by the machine (`virtual_machine_id`) and the time
+   (`restore_started_at`).
 2. Read that task's log on the hypervisor or the datastore. A restore may still be
    running: while the row is in review, no other restore of that machine will start.
 3. `POST /api/admin/backups/{backup}/resolve` with `verdict` `completed` or `failed`, the

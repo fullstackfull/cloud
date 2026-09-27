@@ -13,8 +13,42 @@ use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
 
 /**
- * Sets the roles an operator holds, and refuses the five ways that is an
+ * Sets the staff roles an operator holds, and refuses the five ways that is an
  * escalation.
+ *
+ * ---------------------------------------------------------------------------
+ * Staff roles only: `customer` stays where it is
+ * ---------------------------------------------------------------------------
+ *
+ * The roles given are the login's roles from now on, except `customer` — the
+ * baseline every login made through POST /api/v1/register holds — which is
+ * kept if the login holds it. The request refuses `customer` by name, so this
+ * surface neither gives it nor takes it away. Any other role — a row in the
+ * roles table the enum does not declare, which no route creates — is
+ * replaced as before: a super admin may remove it, a delegate only if they
+ * hold it.
+ *
+ * Holding `customer` beside a staff role gives no operator authority: a login
+ * with a staff role takes no permission from `customer` (User::
+ * hasPermissionViaRole()), so a customer role widened by a seeder or a SQL
+ * client opens nothing on /api/admin for a promoted customer either.
+ *
+ * It used to replace the whole set (re-audit after round six). An invitation
+ * that promoted a registered customer "removed" `customer`, a role no delegate
+ * holds, so a delegate holding `role.manage` was refused 422
+ * `rbac.role_not_yours_to_remove` for any address with a registered login and
+ * answered 201 for a new one — an existence oracle, and no delegate could
+ * ever promote a customer. A super admin's promotion went through and took
+ * `customer` away while the customer memberships stayed; and a super admin's
+ * `roles: []` on a customer login emptied it. Customer access was never
+ * decided by the role — /api/v1 resolves the acting customer from
+ * memberships (ResolveActingCustomer), and `customer` carries only
+ * `catalog.view`, which no route names outside the operator catalogue's own
+ * refusal to use it — so what the replacement changed was what the role says
+ * about the person, and the removal rule's answer. A promoted customer is now
+ * an operator who is still a customer: the staff gate
+ * (EnsureTheCallerIsStaff) admits the login because it holds a staff role,
+ * and the customer API serves it as before because it holds memberships.
  *
  * ---------------------------------------------------------------------------
  * Why the checks are here and not in the controller
@@ -41,9 +75,11 @@ use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
  *    operator holding `role.manage` could set a super admin's roles to
  *    [support] and demote the top authority (measured: 200), stopped only
  *    when the target happened to be the last one. Judged against the target's
- *    roles read under the row lock, so it sees what is actually removed.
- *    Together the two rules mean a delegate can change only an operator whose
- *    roles, before and after, are all roles the delegate holds.
+ *    roles read under the row lock, so it sees what is actually removed —
+ *    never `customer`, which is kept. Together the two rules mean a delegate
+ *    can change only an operator whose roles other than `customer`, before
+ *    and after, are all roles the delegate holds. (An invitation is judged
+ *    on staff roles only; see change().)
  *  - The last administrator. The console bootstrap refuses once a privileged
  *    operator exists, so a deployment that loses its last one has no supported
  *    way back. With the removal rule in place only a super admin can take the
@@ -57,7 +93,8 @@ use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
  *    mailbox (B1, re-audit after round five). A customer login becomes an
  *    operator only through InviteOperator, which takes those credentials away
  *    first; that is grantToInvited(), and nothing else calls it. An operator
- *    whose roles were emptied is, for this rule, a customer login again.
+ *    whose staff roles were emptied is, for this rule, a customer login again
+ *    (and still holds `customer` if it held it before).
  */
 final readonly class ChangeOperatorRoles
 {
@@ -115,11 +152,26 @@ final readonly class ChangeOperatorRoles
                     throw RoleChangeRefusedException::becauseTheLoginIsNotAnOperator();
                 }
 
-                $this->assertEveryRemovedRoleIsTheActorsToTake($actor, $before, $roles);
+                $after = self::keepingCustomer($before, $roles);
 
-                $this->assertSomebodyIsStillInCharge($locked, $roles);
+                /*
+                 * An invitation reaches a login that holds no staff role
+                 * (InviteOperator refuses an operator's address and strips a
+                 * deleted login's), so whatever else it takes away — a role
+                 * row the enum does not declare — goes with the credentials
+                 * of whoever held the login, and is not judged against the
+                 * inviter's roles: a delegate refused for it would learn the
+                 * address had a login, which a new address never produces.
+                 */
+                $this->assertEveryRemovedRoleIsTheActorsToTake(
+                    $actor,
+                    $mayPromote ? array_values(array_intersect($before, Role::staffRoleNames())) : $before,
+                    $after,
+                );
 
-                $locked->syncRoles($roles);
+                $this->assertSomebodyIsStillInCharge($locked, $after);
+
+                $locked->syncRoles($after);
 
                 // Carried on the instance so that describe() can report both
                 // sides without reading a row the sync has already changed.
@@ -137,6 +189,21 @@ final readonly class ChangeOperatorRoles
                 ],
             ),
         );
+    }
+
+    /**
+     * The login's roles after the change: the roles given, and `customer` if
+     * it held it. Nothing else it held survives, as before.
+     *
+     * @param  list<string>  $before  the target's roles, read under the lock
+     * @param  list<string>  $given  the roles given (staff roles: the request refuses any other)
+     * @return list<string>
+     */
+    private static function keepingCustomer(array $before, array $given): array
+    {
+        $kept = in_array(Role::Customer->value, $before, true) ? [Role::Customer->value] : [];
+
+        return array_values(array_unique([...$kept, ...$given]));
     }
 
     /**

@@ -49,7 +49,16 @@ use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
  * login from then on belongs to whoever proves the mailbox; dropping them
  * would take a legitimate customer's account away from its owner on
  * promotion, and would leave an account the registrant built with no owner.
- * Customer membership is not operator authority either way.
+ * Customer membership is not operator authority either way. So does its
+ * `customer` role: the staff roles are added beside it, not put in its place
+ * (ChangeOperatorRoles sets staff roles only), so the person is an operator
+ * and still a customer — and a delegate promoting a registered customer is
+ * not refused for "removing" a role it does not hold, which used to tell it
+ * that the address had a login (re-audit after round six).
+ *
+ * A deleted login's address is invited the same way: the row is restored and
+ * promoted, without the staff roles it held when it was deleted — see
+ * bringBack().
  *
  * The whole invitation is one transaction: the user row, the revocation, its
  * OperatorInvited entry and the role grant commit together or not at all. The
@@ -90,16 +99,32 @@ final readonly class InviteOperator
     private function inviteAndGrant(User $actor, string $address, string $name, array $roles): array
     {
         $promoted = false;
+        /** @var list<string>|null $restored the staff roles a restored deleted login held, or null */
+        $restored = null;
+        /** @var list<string> $revoked the permissions an existing login held directly, now revoked */
+        $revoked = [];
 
         $operator = $this->record->execute(
-            act: function () use ($address, $name, &$promoted): User {
+            act: function () use ($address, $name, &$promoted, &$restored, &$revoked): User {
+                /*
+                 * A deleted login included: its row still owns the address
+                 * (users_email_unique), so looking past it and inserting was
+                 * a unique violation and a 500 — for a delegate, a status no
+                 * new address produces (B7-2, re-audit after round six).
+                 */
                 /** @var User|null $existing */
-                $existing = User::query()->where('email', $address)->lockForUpdate()->first();
+                $existing = User::query()->withTrashed()->where('email', $address)->lockForUpdate()->first();
 
                 if ($existing !== null) {
                     $promoted = true;
 
-                    return $this->takeAwayFromWhoeverHeldIt($existing);
+                    if ($existing->trashed()) {
+                        $restored = $this->bringBack($existing);
+                    }
+
+                    $revoked = $this->takeAwayFromWhoeverHeldIt($existing);
+
+                    return $existing;
                 }
 
                 $user = new User;
@@ -114,11 +139,23 @@ final readonly class InviteOperator
 
                 return $user;
             },
-            describe: static fn (User $user): AuditedAct => new AuditedAct(
-                action: AuditAction::OperatorInvited,
-                subject: $user,
-                context: ['email' => $user->email, 'name' => $user->name],
-            ),
+            describe: static function (User $user) use (&$restored, &$revoked): AuditedAct {
+                $context = ['email' => $user->email, 'name' => $user->name];
+
+                if ($revoked !== []) {
+                    $context['direct_permissions_revoked'] = $revoked;
+                }
+
+                if ($restored !== null) {
+                    // The restoration and the roles it did not bring back are
+                    // recorded here; the role change that follows sees the
+                    // login only after them.
+                    $context['restored_deleted_login'] = true;
+                    $context['staff_roles_held_when_deleted'] = $restored;
+                }
+
+                return new AuditedAct(action: AuditAction::OperatorInvited, subject: $user, context: $context);
+            },
         );
 
         /*
@@ -151,12 +188,20 @@ final readonly class InviteOperator
      *  - any reset token already outstanding for the address, deleted. It went
      *    to the mailbox and is harmless, but the broker refuses a second link
      *    to the same address inside its throttle window, and the invitation's
-     *    own link would then not be sent at all.
+     *    own link would then not be sent at all;
+     *  - every permission given to the login directly, revoked (recorded on
+     *    the OperatorInvited entry). A login with no staff role cannot use
+     *    one — the staff gate refuses it — but once the roles land it would
+     *    be operator authority nobody granted in this invitation, and beyond
+     *    what a delegate may give.
      *
      * Reached only for a login that holds no staff role: the request refuses
-     * an address that already belongs to an operator.
+     * an address that already belongs to an operator, and bringBack() takes
+     * a deleted login's staff roles away before it gets here.
+     *
+     * @return list<string> the permissions the login held directly, now revoked
      */
-    private function takeAwayFromWhoeverHeldIt(User $user): User
+    private function takeAwayFromWhoeverHeldIt(User $user): array
     {
         $user->forceFill([
             'password' => Str::random(64),
@@ -172,7 +217,56 @@ final readonly class InviteOperator
         $user->tokens()->delete();
         Password::broker()->deleteToken($user);
 
-        return $user;
+        /** @var list<string> $direct */
+        $direct = $user->getDirectPermissions()->pluck('name')->sort()->values()->all();
+
+        if ($direct !== []) {
+            $user->syncPermissions([]);
+        }
+
+        return $direct;
+    }
+
+    /**
+     * A deleted login under the invited address, restored so it can be
+     * promoted like any other existing login.
+     *
+     * Nothing in the application deletes a login, so a deleted one was
+     * deleted by hand; the address is still its, and the alternatives are a
+     * refusal — which a delegate would see where a new address gets 201 — or
+     * a second row the unique index forbids.
+     *
+     * What this does: clears `deleted_at`, and takes away every staff role
+     * the row held. A deleted login is nobody's operator account (the guard
+     * does not load it), so its old authority does not come back with it;
+     * taking it here, rather than through the role change, also keeps the
+     * removal rule from refusing a delegate for a role that meant nothing —
+     * which would tell that delegate the address had a login.
+     *
+     * What it keeps is everything else on the row and hanging off it, as for
+     * any promoted login: the stored name, its customer memberships, legal
+     * acceptances and login history, and its non-staff roles (the role
+     * change that follows keeps `customer` and drops any other). Its
+     * credentials and any permission given to it directly go next, in
+     * takeAwayFromWhoeverHeldIt().
+     *
+     * @return list<string> the staff roles it held, now taken away
+     */
+    private function bringBack(User $user): array
+    {
+        $user->restore();
+
+        /** @var list<string> $staff */
+        $staff = $user->getRoleNames()
+            ->filter(static fn (string $role): bool => Role::tryFrom($role)?->isStaffRole() === true)
+            ->values()
+            ->all();
+
+        foreach ($staff as $role) {
+            $user->removeRole($role);
+        }
+
+        return $staff;
     }
 
     /**

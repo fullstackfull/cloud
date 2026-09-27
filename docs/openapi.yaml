@@ -7977,7 +7977,7 @@ paths:
         - "Operator"
       summary: "The people who operate the platform"
       description: |-
-        Staff only — a customer login holds the baseline customer role and never appears here.
+        Staff only — a customer login holds the baseline customer role and never appears here; a customer who was made an operator appears with its staff roles only.
 
         Requires the `role.manage` permission.
       parameters:
@@ -8037,7 +8037,7 @@ paths:
         - "Operator"
       summary: "Add an operator"
       description: |-
-        No password is chosen: the person takes the account over through the one-time reset link the platform already issues, so there is never a moment when a credential somebody else picked opens an operator account. An address with an existing login that holds no staff role — a customer account, which anybody may have registered without proving the mailbox — is promoted, and every credential that login held is taken away before the roles land: password, sessions, remember-me token, personal access tokens and second factor. Its address stays as verified as it was; completing the reset proves the mailbox and verifies it. An address that already holds a staff role is refused rather than silently re-roled. The roles go on through the same path a role change uses, so an invitation cannot hand out authority a direct change would have refused.
+        No password is chosen: the person takes the account over through the one-time reset link the platform already issues, so there is never a moment when a credential somebody else picked opens an operator account. An address with an existing login that holds no staff role — a customer account, which anybody may have registered without proving the mailbox — is promoted, and every credential that login held is taken away before the roles land: password, sessions, remember-me token, personal access tokens and second factor, and any permission given to the login directly is revoked. The staff roles are added beside its customer role, which it keeps; the customer role gives a login that holds a staff role no permission. A deleted login's address is invited the same way: the login is restored, without any staff role it held when it was deleted, and promoted. Its address stays as verified as it was; completing the reset proves the mailbox and verifies it. An address that already holds a staff role is refused rather than silently re-roled. The roles go on through the same path a role change uses, so an invitation cannot hand out authority a direct change would have refused.
 
         Requires the `role.manage` permission.
       parameters:
@@ -8111,7 +8111,7 @@ paths:
         - "Operator"
       summary: "Change what an operator may do"
       description: |-
-        Refusals, each an escalation if it were allowed: your own account is never yours to re-role (grant, use, revoke is the shortest escalation there is), a role you do not hold is not yours to grant or to take away, the last principal who can administer the platform cannot be stripped of it — the console bootstrap refuses once one exists, so a deployment that loses its last administrator has no supported way back — and a login that holds no staff role is not given one here (`rbac.not_an_operator`): its credentials may be somebody else's, so it becomes an operator only through an invitation, which takes them away first.
+        Refusals, each an escalation if it were allowed: your own account is never yours to re-role (grant, use, revoke is the shortest escalation there is), a role you do not hold is not yours to grant or to take away, the last principal who can administer the platform cannot be stripped of it — the console bootstrap refuses once one exists, so a deployment that loses its last administrator has no supported way back — and a login that holds no staff role is not given one here (`rbac.not_an_operator`): its credentials may be somebody else's, so it becomes an operator only through an invitation, which takes them away first. The roles given are the login's staff roles from now on; the customer role is never given or taken here, so a customer who was made an operator and is given no roles is a customer again.
 
         Requires the `role.manage` permission.
       parameters:
@@ -14379,6 +14379,63 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/WalletCreditQuoteResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/invoices/{invoice}/withdraw-plan-change":
+    post:
+      operationId: "api_v1_invoices_plan_change_withdraw"
+      tags:
+        - "Billing"
+      summary: "Withdraw the unpaid plan change an invoice bills"
+      description: "The way out of a plan change the customer has not paid for - above all one that can no longer be delivered, whose payments are refused (409 `invoice.plan_change_not_deliverable`) and whose open invoice holds every other change of plan. What the invoice holds (a part paid from the wallet) goes back to the wallet, the invoice is voided, and the subscription goes back to the plan and the recurring amount it came from; nothing is resized. What a renewal does to an upgrade still unpaid, without waiting for it. Takes no body. Refused (409 `invoice.plan_change_not_withdrawable`) for an invoice that does not bill the subscription's latest, unpaid change, or once the subscription has ended or moved on from it; `plan_change_withdrawable` on the invoice says which. Requires `billing.pay`, the permission a plan change needs."
+      parameters:
+        - name: "invoice"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/InvoiceResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -20860,7 +20917,7 @@ components:
           type:
             - "string"
             - "null"
-          description: "Why the reconciliation sweep's last attempt could not read this node's account listing, if it could not; null once one is read. While it is set, nothing on the node is being compared with the platform's records. `reconciled_at` is when they last were; `reconcile_attempted_at` is when the sweep last asked, and the sweep asks the least recently asked node first."
+          description: "Why the reconciliation sweep's last attempt on this node concluded nothing, if it did not: the node's account listing could not be read (the adapter's refusal), or reconciling it failed some other way (the failure's class; the log has the rest). Null once a listing is read and compared. While it is set, nothing on the node is being compared with the platform's records. `reconciled_at` is when they last were; `reconcile_attempted_at` is when the sweep last asked, and the sweep asks the least recently asked node first."
     AdminHostingNodePage:
       type: "object"
       required:
@@ -20922,10 +20979,13 @@ components:
     AdminInvitedOperator:
       type: "object"
       additionalProperties: false
-      description: "The operator an invitation created or promoted, as AdminOperator describes one, plus — for a super admin only — whether the address already had a login; any other caller gets a response that does not distinguish the two (see promoted_existing_account). An existing login — a customer account, perhaps one somebody else registered, since registration asks for no proof of the mailbox — is promoted with every credential it held taken away: its password is replaced by one nobody knows, its sessions, remember-me token and personal access tokens are revoked and its second factor is cleared, and the reset link the invitation mails is the only way in. Its customer memberships stay with the login, which from then on belongs to whoever proves the mailbox."
+      description: "The operator an invitation created or promoted, as AdminOperator describes one, plus — for a super admin only — whether the address already had a login; any other caller gets a response that does not distinguish the two (see promoted_existing_account). An existing login — a customer account, perhaps one somebody else registered, since registration asks for no proof of the mailbox — is promoted with every credential it held taken away: its password is replaced by one nobody knows, its sessions, remember-me token and personal access tokens are revoked and its second factor is cleared, and the reset link the invitation mails is the only way in. Its customer memberships and its customer role stay with the login, which from then on belongs to whoever proves the mailbox: the staff roles are added beside the customer role, not put in its place. The address of a deleted login is invited the same way: the login is restored and promoted, without any staff role it held when it was deleted."
       properties:
         id:
-          "$ref": "#/components/schemas/Ulid"
+          oneOf:
+            - "$ref": "#/components/schemas/Ulid"
+            - type: "null"
+          description: "The login's id for a super admin; null for any other caller, because an id is a ULID whose first ten characters are the time the login was made, which would date a promoted login."
         name:
           type: "string"
           description: "The login's stored name for a super admin; for any other caller, the name supplied in the request."
@@ -20948,7 +21008,7 @@ components:
           type:
             - "boolean"
             - "null"
-          description: "True when the address already had a login that was promoted, false when a new one was created. Null unless the caller is a super admin. For any other caller the whole response is the same for a promoted login as for a new one: `name` is the name supplied in the request, `created_at` is null, and `has_signed_in` and `two_factor_enabled` are false (promotion clears both). The operator list still shows every operator's stored name and creation date to the same callers, a promoted one included."
+          description: "True when the address already had a login that was promoted, false when a new one was created. Null unless the caller is a super admin. For any other caller the whole response — status and body — is the same for a promoted login as for a new one: the status is 201 either way, `id` and `created_at` are null, `name` is the name supplied in the request, `roles` lists the staff roles given (a promoted customer keeps its customer role, which is not listed), and `has_signed_in` and `two_factor_enabled` are false (promotion clears both). The operator list still shows every operator's id, stored name and creation date to the same callers, a promoted one included."
     AdminInvitedOperatorResponse:
       type: "object"
       required:
@@ -21216,7 +21276,7 @@ components:
     AdminOperator:
       type: "object"
       additionalProperties: false
-      description: "Somebody who may operate the platform. Staff only: a customer login holds the baseline customer role and never appears here. No password state and no two-factor secret — whether two-factor is enabled is published, what it is is not."
+      description: "Somebody who may operate the platform. Staff only: a customer login holds the baseline customer role and never appears here; a customer who was made an operator holds both and appears with its staff roles only. No password state and no two-factor secret — whether two-factor is enabled is published, what it is is not."
       properties:
         id:
           "$ref": "#/components/schemas/Ulid"
@@ -21228,6 +21288,7 @@ components:
           type: "array"
           items:
             type: "string"
+          description: "The staff roles the login holds, in the platform's order of roles. `customer` is never listed: a customer who was made an operator keeps it, and it is not operator authority."
         is_privileged:
           type: "boolean"
         has_signed_in:
@@ -23885,8 +23946,12 @@ components:
           "$ref": "#/components/schemas/Money"
         is_payable:
           type: "boolean"
+          description: "Whether a payment would be taken: the invoice is collectible and, for a plan change's invoice, the change can still be delivered - the question both payments ask. False while it cannot, with `plan_change_withdrawable` saying the way out."
         is_settled:
           type: "boolean"
+        plan_change_withdrawable:
+          type: "boolean"
+          description: "Whether the unpaid plan change this invoice bills can be withdrawn (POST /invoices/{invoice}/withdraw-plan-change)."
         order_id:
           oneOf:
             - "$ref": "#/components/schemas/Ulid"

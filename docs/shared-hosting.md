@@ -114,15 +114,48 @@ had a working website rested entirely on its own record of having built one.
 | `account_count` disagrees with the rows | `spec_mismatch` on the node | warning |
 
 A node whose listing cannot be read — the panel does not answer, or the adapter refuses
-the listing as ambiguous (an element that is not a name, or a name holding a separator,
-whitespace or a control character that could be two names run together) — records no
-drift: an outage is not data loss. It is not silent either. The attempt is stamped
+the listing — records no drift: an outage is not data loss. Both adapters refuse a
+listing by one rule. It is refused when the body is not a listing (on cPanel, anything
+but a list of rows under `data.acct`; on DirectAdmin, a body with no `list` field, or
+the accounts named as one value rather than as `list[]` elements), or when any element
+of it is not one account name: on cPanel a row that is not an object or whose `user` is
+missing, empty, or neither a string nor an integer; on DirectAdmin an element that is
+not a string; and on either a name holding a separator (`,` `;` `|`), whitespace or a
+control character that could be two names run together, or bytes that are not UTF-8
+(`ListedAccountName`). A listing that is a
+listing and names nobody — `data.acct` as an empty list, `list[]=` — is a node with no
+accounts, and is compared as one. A name is not refused for being unusual: case,
+digits, other punctuation and length are all read as a name, and one the platform does
+not know is reported as `orphan_at_provider` under the name the panel gave, however
+long (`resource_drifts.provider_reference` is `text`).
+
+A refusal is not silent. The attempt is stamped
 (`reconcile_attempted_at`), the refusal is kept on the node (`reconcile_error`, shown as
 "Accounts not compared" on the Control Center's hosting node list and returned by
 `GET /api/admin/infrastructure/hosting-nodes`), and a warning is logged. `reconciled_at`
 still says when the accounts were last actually compared. The sweep asks the least
 recently *asked* node first, so an unreadable node waits behind the others rather than
 holding the front of every run.
+
+Anything else that fails while one node is being reconciled — a fault on the way to its
+listing, or a drift the database refuses while its accounts are compared — stops that
+node, not the sweep. The node's comparison is one transaction, so what it had recorded
+is rolled back and no alert goes out for it (a drift is announced only once it is
+committed); the attempt is stamped, `reconcile_error` names the failure by its class and
+says the log has the detail, the whole exception is logged as an error, and the sweep
+moves on to the next node. Three failures still end the sweep, as they were thrown: a
+deadlock or serialization failure while a caller holds a transaction around the sweep
+(Laravel leaves that transaction aborted, and it is the caller's to retry; the scheduled
+command holds none, so there it is recorded on the node like any other), a statement
+refused because the transaction was already aborted, and a failure of the node's stamp
+itself — the database gone.
+
+`hosting:reconcile` prints how many nodes were compared, how many listings were not
+read, and how many nodes failed, and exits non-zero when any node failed, after every
+other node in the batch has been compared. A listing that was refused or not answered
+does not fail the command: it is the adapter declining an answer it cannot use, kept
+on the node and logged as a warning, and it never has; a panel that is down is the
+health sync's to report.
 
 **Nothing is repaired.** Not at the panel and not in the platform's own rows.
 An account whose provenance nobody knows must not be handed to a customer as

@@ -33,7 +33,10 @@ use Spatie\Permission\PermissionRegistrar;
  * catalog.view) giving it its own permissions — 200 — after which every
  * customer login read /api/admin/operators and /api/admin/customers. Its
  * permissions are fixed by Role::defaultPermissions() and the seeder; the
- * /api/admin staff gate (EnsureTheCallerIsStaff) is the second layer.
+ * /api/admin staff gate (EnsureTheCallerIsStaff) is the second layer, for a
+ * login holding only `customer`, and User::hasPermissionViaRole() the third,
+ * for a customer who was made an operator and holds both: a login holding a
+ * staff role takes no permission from `customer`.
  *
  * A delegate (an operator holding `role.manage` without Super Admin) may
  * neither add nor remove a permission they do not hold. The list is replaced

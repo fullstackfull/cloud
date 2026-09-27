@@ -1484,6 +1484,16 @@ export interface OperatorRow {
   created_at: string | null
 }
 
+/**
+ * What POST /api/admin/operators answers. For anybody but a super admin `id`
+ * and `created_at` are null and `promoted_existing_account` is null, so the
+ * response does not say whether the address already had a login.
+ */
+export interface InvitedOperatorRow extends Omit<OperatorRow, 'id'> {
+  id: string | null
+  promoted_existing_account: boolean | null
+}
+
 export interface RoleRow {
   name: string
   label: string
@@ -1529,7 +1539,7 @@ export function useInviteOperator() {
 
   return useMutation({
     mutationFn: (input: { email: string; name: string; roles: string[] }) =>
-      admin.post<Envelope<OperatorRow>>('/operators', input),
+      admin.post<Envelope<InvitedOperatorRow>>('/operators', input),
     onSuccess: () => { invalidateOperatorViews(queryClient) },
   })
 }

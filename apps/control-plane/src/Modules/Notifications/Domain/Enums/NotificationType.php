@@ -128,7 +128,11 @@ enum NotificationType: string
     /*
      * Two failures, because they differ in the money. A change that owed
      * nothing (a downgrade, a move between equal prices) is queued when it is
-     * made, and nothing was charged for it: PlanChangeFailed says so. An
+     * made, and nothing was charged for it: PlanChangeFailed says so, and -
+     * because the subscription moved, with its price and any credit, when
+     * the change was made - says the subscription is on the new plan while
+     * the service runs as it was (it used to say the change was "left as it
+     * was", which the re-audit after round six found false). An
      * upgrade is queued only once its proration invoice is paid, so its
      * failure has been charged, and the payment is held for an operator to
      * complete the change or return it: PlanChangeFailedAfterPayment. The one

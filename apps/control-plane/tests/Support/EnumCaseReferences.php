@@ -141,7 +141,34 @@ use UnitEnum;
  * — is recorded separately, per enum, in {@see constructions()}, and is never
  * a producer of any case: it says only that some value crosses into that
  * enum somewhere. `Enum::cases()` is recorded nowhere; walking every case is
- * not producing any of them.
+ * not producing any of them. Each construction is recorded with how it is
+ * used: `value`, or one of three reads, tested in this order —
+ *
+ *  - **inside a body declared to return exactly `bool`**: a function,
+ *    method, closure or arrow function whose declared return type is `bool`
+ *    (`->contains(static fn (string $r): bool => Role::tryFrom($r)?->
+ *    isStaffRole() === true)`). Like an enum's own `canBecome()`, a `bool`
+ *    answer cannot hand the case on as its result. It can hand it on in the
+ *    body, and each of these is misread as a read: a body that writes the
+ *    case through a by-reference `use (&$x)` or into a property; a `bool`
+ *    method or function whose body passes the case to a call that keeps it
+ *    (`$this->store(Enum::from($v)); return true;`); a closure or arrow
+ *    function not declared `bool`, nested inside a `bool` body, that
+ *    returns or keeps it (the whole nested body is inside the range); and a
+ *    `bool` arrow function whose expression passes the case to such a call;
+ *  - **over a property**: its one argument, after a `(string)` or `(int)`
+ *    cast, is a single property fetch `$x->name` or `$x?->name`
+ *    (`DeploymentKind::from($job->kind)`), read as a stored column being
+ *    turned back into its case. A request's or a DTO's property fetched the
+ *    same way reads as a read too;
+ *  - **a method called on it at once**: the closing `)` is followed by `->`
+ *    or `?->`, a name and `(` (`Role::tryFrom($name)?->
+ *    permissionsAreEditable()`): a question asked of the case, which is not
+ *    kept. A method that returns the case would be misread as a read.
+ *
+ * Each misreading makes a real value site read as a read, which fails loudly:
+ * a `by value` excuse naming such a site goes red, and the answer is to name
+ * the file where the value is chosen. Everything else is `value`.
  *
  * ===========================================================================
  * WHAT IT DOES NOT SEE
@@ -216,10 +243,19 @@ final class EnumCaseReferences
      */
     public const string CONTEXT_METHOD = 'withcontext';
 
+    /** A construction inside a body declared to return exactly `bool`. */
+    public const string READ_IN_A_BOOL_BODY = 'read: inside a body that returns bool';
+
+    /** A construction whose one argument is a property fetch, `$row->column`. */
+    public const string READ_OVER_A_PROPERTY = 'read: over a property, as a stored column';
+
+    /** A construction whose result is at once the receiver of a method call. */
+    public const string READ_ASKED_A_QUESTION = 'read: a method called on it at once';
+
     /** @var array<string, list<array{string, int, string}>>|null */
     private static ?array $sites = null;
 
-    /** @var array<class-string, list<array{string, int}>>|null */
+    /** @var array<class-string, list<array{string, int, string}>>|null */
     private static ?array $constructions = null;
 
     /** @var array<class-string<UnitEnum>, list<string>>|null */
@@ -467,9 +503,11 @@ final class EnumCaseReferences
     }
 
     /**
-     * Every `Enum::from(...)` / `Enum::tryFrom(...)` in production code.
+     * Every `Enum::from(...)` / `Enum::tryFrom(...)` in production code, with
+     * how it is used: `value`, or one of the three reads the class docblock
+     * names under **Construction from a value**.
      *
-     * @return array<class-string, list<array{string, int}>> FQCN → [file, line]
+     * @return array<class-string, list<array{string, int, string}>> FQCN → [file, line, use]
      */
     public static function constructions(): array
     {
@@ -477,7 +515,7 @@ final class EnumCaseReferences
             self::scan();
         }
 
-        /** @var array<class-string, list<array{string, int}>> */
+        /** @var array<class-string, list<array{string, int, string}>> */
         return self::$constructions;
     }
 
@@ -520,7 +558,7 @@ final class EnumCaseReferences
      * on a source they write themselves.
      *
      * @param  array<string, array<string, true>>  $enums  FQCN → case names of interest
-     * @return array{0: list<array{string, int, string}>, 1: list<array{string, int}>}
+     * @return array{0: list<array{string, int, string}>, 1: list<array{string, int, string}>}
      */
     public static function classifySource(string $source, array $enums): array
     {
@@ -558,8 +596,8 @@ final class EnumCaseReferences
                 $sites[$state][] = [$relative, $line, $position];
             }
 
-            foreach ($built as [$enum, $line]) {
-                $constructions[$enum][] = [$relative, $line];
+            foreach ($built as [$enum, $line, $use]) {
+                $constructions[$enum][] = [$relative, $line, $use];
             }
         }
 
@@ -612,7 +650,7 @@ final class EnumCaseReferences
      * of the given enums, and every construction of one from a value.
      *
      * @param  array<string, array<string, true>>  $enums  FQCN → case names of interest
-     * @return array{0: list<array{string, int, string}>, 1: list<array{string, int}>}
+     * @return array{0: list<array{string, int, string}>, 1: list<array{string, int, string}>}
      */
     private static function classify(string $source, array $enums): array
     {
@@ -631,6 +669,7 @@ final class EnumCaseReferences
         $tokens = self::significant(PhpToken::tokenize($source));
         $count = count($tokens);
         $tables = self::enumTransitionTables($tokens);
+        $boolBodies = self::boolBodies($tokens);
 
         $namespace = '';
         $aliases = [];
@@ -755,7 +794,7 @@ final class EnumCaseReferences
 
             if (($tokens[$i + 3] ?? null)?->text === '(') {
                 if ($enum !== null && isset($enums[$enum]) && in_array(strtolower($tokens[$i + 2]->text), ['from', 'tryfrom'], true)) {
-                    $built[] = [$enum, $token->line];
+                    $built[] = [$enum, $token->line, self::constructionUse($tokens, $i + 3, $boolBodies)];
                 }
 
                 continue;
@@ -965,6 +1004,142 @@ final class EnumCaseReferences
         }
 
         return $ranges;
+    }
+
+    /**
+     * How a construction at `Enum::from(` / `Enum::tryFrom(` is used: `value`,
+     * or the read it is (the class docblock, **Construction from a value**).
+     *
+     * @param  list<PhpToken>  $tokens
+     * @param  list<array{int, int}>  $boolBodies
+     */
+    private static function constructionUse(array $tokens, int $open, array $boolBodies): string
+    {
+        if (self::inRanges($open, $boolBodies)) {
+            return self::READ_IN_A_BOOL_BODY;
+        }
+
+        $close = self::closingParen($tokens, $open);
+        $argument = array_slice($tokens, $open + 1, max(0, $close - $open - 1));
+
+        while ($argument !== [] && $argument[0]->is([T_STRING_CAST, T_INT_CAST])) {
+            array_shift($argument);
+        }
+
+        if (count($argument) === 3
+            && $argument[0]->is(T_VARIABLE)
+            && $argument[1]->is([T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR])
+            && $argument[2]->is(T_STRING)) {
+            return self::READ_OVER_A_PROPERTY;
+        }
+
+        if (($tokens[$close + 1] ?? null)?->is([T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR])
+            && ($tokens[$close + 2] ?? null)?->is(T_STRING)
+            && ($tokens[$close + 3] ?? null)?->text === '(') {
+            return self::READ_ASKED_A_QUESTION;
+        }
+
+        return 'value';
+    }
+
+    /**
+     * The body of every function, method, closure and arrow function declared
+     * to return exactly `bool`: `{`…`}` for the first three, and for an arrow
+     * function the expression after `=>` up to the first `,` `;` `)` `]` or
+     * `}` outside a bracket it opened.
+     *
+     * @param  list<PhpToken>  $tokens
+     * @return list<array{int, int}>
+     */
+    private static function boolBodies(array $tokens): array
+    {
+        $count = count($tokens);
+        $ranges = [];
+
+        for ($i = 0; $i < $count; $i++) {
+            if (! $tokens[$i]->is([T_FUNCTION, T_FN]) || ($tokens[$i - 1] ?? null)?->is([T_USE, T_DOUBLE_COLON, T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR])) {
+                continue;
+            }
+
+            $k = $i + 1;
+
+            if (($tokens[$k] ?? null)?->text === '&') {
+                $k++;
+            }
+
+            if (($tokens[$k] ?? null)?->is(T_STRING)) {
+                $k++;
+            }
+
+            if (($tokens[$k] ?? null)?->text !== '(') {
+                continue;
+            }
+
+            $k = self::closingParen($tokens, $k) + 1;
+
+            if (($tokens[$k] ?? null)?->is(T_USE) && ($tokens[$k + 1] ?? null)?->text === '(') {
+                $k = self::closingParen($tokens, $k + 1) + 1;
+            }
+
+            if (($tokens[$k] ?? null)?->text !== ':') {
+                continue;
+            }
+
+            $type = '';
+
+            for ($k++; $k < $count && $tokens[$k]->text !== '{' && ! $tokens[$k]->is(T_DOUBLE_ARROW) && $tokens[$k]->text !== ';'; $k++) {
+                $type .= $tokens[$k]->text;
+            }
+
+            if (strtolower($type) !== 'bool' || $k >= $count || $tokens[$k]->text === ';') {
+                continue;
+            }
+
+            if ($tokens[$k]->text === '{') {
+                $ranges[] = [$k, self::closingBrace($tokens, $k)];
+
+                continue;
+            }
+
+            $level = 0;
+
+            for ($end = $k + 1; $end < $count; $end++) {
+                $text = $tokens[$end]->text;
+
+                if (in_array($text, ['(', '[', '{'], true) || $tokens[$end]->is([T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES, T_ATTRIBUTE])) {
+                    $level++;
+                } elseif (in_array($text, [')', ']', '}'], true)) {
+                    if ($level-- === 0) {
+                        break;
+                    }
+                } elseif ($level === 0 && in_array($text, [',', ';'], true)) {
+                    break;
+                }
+            }
+
+            $ranges[] = [$k, $end];
+        }
+
+        return $ranges;
+    }
+
+    /**
+     * @param  list<PhpToken>  $tokens
+     */
+    private static function closingParen(array $tokens, int $open): int
+    {
+        $count = count($tokens);
+        $level = 0;
+
+        for ($k = $open; $k < $count; $k++) {
+            if ($tokens[$k]->text === '(') {
+                $level++;
+            } elseif ($tokens[$k]->text === ')' && --$level === 0) {
+                return $k;
+            }
+        }
+
+        return $count - 1;
     }
 
     /**

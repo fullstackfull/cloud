@@ -26,7 +26,12 @@ use Symfony\Component\HttpFoundation\Response;
  * read GET /api/admin/operators and GET /api/admin/customers. The role route
  * now refuses that edit; this is the second layer, so a customer role that
  * came to hold an operator permission some other way — a seeder change, a SQL
- * client — still opens nothing here.
+ * client — still opens nothing here for a login that holds only `customer`.
+ * A customer who was made an operator holds a staff role beside `customer`
+ * (an invitation keeps it) and passes this gate; for that login the third
+ * layer holds: a login holding a staff role takes no permission from
+ * `customer` (User::hasPermissionViaRole()), so the permission each route
+ * names is judged on its staff roles and its direct permissions only.
  *
  * "Staff" is Role::staffRoleNames(): every role the enum declares except
  * `customer`. A permission given directly to a login with no staff role is not

@@ -147,6 +147,12 @@ export interface Invoice {
   amount_refunded?: Money
   is_payable: boolean
   is_settled: boolean
+  /*
+   * Whether the unpaid plan change this invoice bills can be withdrawn - the
+   * way out when the change can no longer be delivered and is_payable is
+   * false.
+   */
+  plan_change_withdrawable?: boolean
   order_id: string | null
   subscription_id?: string | null
   items_count?: number

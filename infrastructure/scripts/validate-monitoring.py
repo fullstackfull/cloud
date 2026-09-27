@@ -162,6 +162,18 @@ PINNED_ROUTES: dict[str, dict[str, str]] = {
         "expr": "sum(lynomia_open_drift_total) > 0",
         "for": "24h",
     },
+    # A scheduled command that keeps failing reaches the platform channel.
+    # RecordScheduledRun counts a command's failures in a row and a success
+    # resets the count, so this reads an outage, not a flap: renewals,
+    # reconciliation and retention stopped, which nothing else says. Before
+    # this rule the series was exported and read by nothing, and a command
+    # failing every run paged no one.
+    "ScheduledCommandFailing": {
+        "receiver": "platform-team",
+        "reads": "lynomia_scheduled_command_consecutive_failures",
+        "expr": "max by (command) (lynomia_scheduled_command_consecutive_failures) >= 3",
+        "for": "5m",
+    },
 }
 
 # Series no critical rule may read, and why.

@@ -31,6 +31,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\RenewSubscription;
+use Lynomia\Modules\Subscriptions\Application\Actions\WithdrawAnUnpaidPlanChange;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Wallet\Application\Actions\PayInvoiceFromWallet;
@@ -260,6 +261,31 @@ final class MoneyPathsTakeTheirLocksInOneOrderTest extends TestCase
         $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status, 'Nothing lapsed, so nothing was measured.');
         $this->assertSame($small->getKey(), $subscription->fresh()?->plan_id);
         $this->assertTakenInOrder($order, ['subscriptions', 'wallets', 'plans'], 'RenewSubscription (a lapse)');
+    }
+
+    #[Test]
+    public function a_customer_withdrawing_an_unpaid_change_takes_the_lapses_order(): void
+    {
+        /*
+         * WithdrawAnUnpaidPlanChange is the lapse, asked for by the customer:
+         * the invoice while it is open, then the subscription, the wallet
+         * (returning the part paid) and the plan the void restores.
+         */
+        [$customer, $user, $subscription, $small, , $large, $largePrice] = $this->aPaidSubscription(onSmall: true);
+
+        app(ApplyPlanChange::class)->execute($subscription, $large, $largePrice, 'lock-order-withdraw', $user);
+
+        /** @var Invoice $upgrade */
+        $upgrade = Invoice::query()->where('subscription_id', $subscription->getKey())->where('status', InvoiceStatus::Open->value)->sole();
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount(Money::ofMinor(1_000, 'KWD'))->create());
+
+        $order = $this->firstLocksOf(function () use ($upgrade, $user): void {
+            app(WithdrawAnUnpaidPlanChange::class)->execute($upgrade->fresh() ?? $upgrade, $user);
+        });
+
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status, 'Nothing was withdrawn, so nothing was measured.');
+        $this->assertSame($small->getKey(), $subscription->fresh()?->plan_id);
+        $this->assertTakenInOrder($order, ['invoices', 'subscriptions', 'wallets', 'plans'], 'WithdrawAnUnpaidPlanChange');
     }
 
     #[Test]
