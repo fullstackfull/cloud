@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\SharedHosting\Application\Actions;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Provisioning\Application\Actions\RecordDrift;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
@@ -15,6 +16,7 @@ use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingProviderException;
 use Lynomia\Modules\SharedHosting\Infrastructure\HostingProviderFactory;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
+use Throwable;
 
 /**
  * Compares what the platform believes about a hosting node with what the panel
@@ -104,28 +106,85 @@ final readonly class ReconcileHostingNodes
                 ]);
 
                 continue;
+            } catch (Throwable $e) {
+                // Anything else on the way to the listing — a node whose
+                // credential is not configured, a fault in an adapter — stops
+                // this node, not the sweep: see the comparison below.
+                $this->stopped($node, $e, 'asking for its account listing');
+
+                continue;
+            }
+
+            try {
+                /*
+                 * One node's comparison is its own transaction (a savepoint
+                 * when the caller already holds one). Anything else that goes
+                 * wrong while comparing it — a drift the database will not
+                 * take, a bug — used to escape execute() before the node was
+                 * stamped: the sweep ended there, the node was still the least
+                 * recently asked, and it was first again on the next run and
+                 * every run after, so no node behind it was ever compared.
+                 *
+                 * Now the failure rolls back what this node had recorded, so
+                 * nothing half-concluded is left behind and the connection is
+                 * usable again (a statement that failed inside a transaction
+                 * leaves every later one refused until it is rolled back), and
+                 * it is kept on the node, logged, and the sweep moves on. A
+                 * failure the rollback or the stamp cannot survive is not
+                 * caught here: it leaves execute() as it did.
+                 */
+                [$counted, $found] = DB::transaction(function () use ($node, $listed): array {
+                    /** @var list<HostingAccount> $rows */
+                    $rows = HostingAccount::query()
+                        ->where('hosting_node_id', $node->getKey())
+                        ->get()
+                        ->all();
+
+                    $found = $this->compare($node, $rows, $listed) + $this->checkCapacity($node, $rows);
+
+                    $node->forceFill([
+                        'reconciled_at' => now(),
+                        'reconcile_attempted_at' => now(),
+                        'reconcile_error' => null,
+                    ])->save();
+
+                    return [count($rows), $found];
+                });
+            } catch (Throwable $e) {
+                $this->stopped($node, $e, 'comparing its account listing with the platform\'s accounts');
+
+                continue;
             }
 
             $nodes++;
-
-            /** @var list<HostingAccount> $rows */
-            $rows = HostingAccount::query()
-                ->where('hosting_node_id', $node->getKey())
-                ->get()
-                ->all();
-
-            $accounts += count($rows);
-            $drifts += $this->compare($node, $rows, $listed);
-            $drifts += $this->checkCapacity($node, $rows);
-
-            $node->forceFill([
-                'reconciled_at' => now(),
-                'reconcile_attempted_at' => now(),
-                'reconcile_error' => null,
-            ])->save();
+            $accounts += $counted;
+            $drifts += $found;
         }
 
         return ['nodes' => $nodes, 'accounts' => $accounts, 'drifts' => $drifts];
+    }
+
+    /**
+     * A node whose reconciliation failed for a reason other than an
+     * unreadable listing: the attempt stamped, so the node goes behind the
+     * others; the failure kept on the node for the operator's node list, by
+     * its class only — the message can carry a statement and its values, and
+     * the log is where those go; and the whole of it logged. `reconciled_at`
+     * is not touched: nothing was concluded.
+     */
+    private function stopped(HostingNode $node, Throwable $e, string $while): void
+    {
+        $node->refresh()->forceFill([
+            'reconcile_attempted_at' => now(),
+            'reconcile_error' => sprintf('Reconciliation failed while %s (%s), so nothing was concluded. The log has the detail.', $while, $e::class),
+        ])->save();
+
+        Log::error('A hosting node\'s reconciliation failed, so nothing was concluded about its accounts.', [
+            'node' => $node->slug,
+            'panel' => $node->panel->value,
+            'while' => $while,
+            'exception' => $e,
+        ]);
     }
 
     /**
