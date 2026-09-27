@@ -1,0 +1,320 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Lynomia\Modules\Subscriptions\Application\Queries;
+
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
+use Lynomia\Modules\Compute\Domain\Services\NodeCapacityPolicy;
+use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
+use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
+use Lynomia\Modules\Provisioning\Application\Services\LocalPlacementFeasibility;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\SharedHosting\Application\Queries\HostingPackageForPlan;
+use Lynomia\Modules\Subscriptions\Application\Actions\QueuePlanChangeAtProvider;
+use Lynomia\Modules\Subscriptions\Application\Actions\QuotePlanChange;
+use Lynomia\Modules\Subscriptions\Application\Actions\ReturnAnUpgradeTheEndPrevented;
+use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
+use Lynomia\Modules\Subscriptions\Domain\ValueObjects\PlanResources;
+use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
+use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
+
+/**
+ * Whether a plan change can be delivered, and whether one has been.
+ *
+ * ---------------------------------------------------------------------------
+ * Can it be delivered (F-07, on the plan-change path)
+ * ---------------------------------------------------------------------------
+ *
+ * Checkout refuses a plan it cannot deliver before any money moves
+ * ({@see LocalPlacementFeasibility}). A plan change did not ask: an operator
+ * who put a hosting plan and its price on sale before mapping its package (the
+ * documented build order), or who withdrew the package behind a plan still on
+ * sale, left a plan the options screen offered with no refusal. The upgrade
+ * was accepted, its invoice paid, the subscription moved and billed at the new
+ * price for ever, and nothing was queued at the panel — money for nothing
+ * (the re-audit after round five).
+ *
+ * {@see refusal()} is asked by {@see QuotePlanChange} (so the options screen
+ * and the change refuse the same plan) and, for a change already accepted, by
+ * the payment of its proration invoice ({@see refusalForTheInvoice()}), as an
+ * order is asked again when it is paid. What it asks is what
+ * {@see QueuePlanChangeAtProvider} needs to queue the change, per product,
+ * and nothing more:
+ *
+ *  - Shared Hosting: the target plan resolves to exactly one package on sale
+ *    ({@see HostingPackageForPlan}) - the answer checkout's placement is given
+ *    for the same plan, and the package the change is queued onto. The
+ *    fleet's room, which checkout also asks, is not: a plan change moves the
+ *    existing account onto another package on its own node and places
+ *    nothing new.
+ *  - VPS, when the shape changes: the service has a machine to resize, and
+ *    the node it runs on can hold its growth (growthTheNodeCannotHold(), the
+ *    ceilings NodeCapacityPolicy holds a placement to). The target plan's
+ *    placement (cluster, address pool, image, a node in
+ *    service), which checkout asks before building a new machine, is not
+ *    asked: a resize is applied to the machine where it already runs and
+ *    reads none of it, and refusing on it would refuse a change that can be
+ *    delivered.
+ *  - Any other product, when the shape changes: refused. Nothing queues a
+ *    change of shape for it (a dedicated server is not resized), so a paid
+ *    change of shape would deliver nothing.
+ *
+ * A subscription with no service has nothing at a provider to change, and is
+ * not refused here.
+ *
+ * ---------------------------------------------------------------------------
+ * Has it been delivered
+ * ---------------------------------------------------------------------------
+ *
+ * {@see wasDelivered()} and {@see aLaterChangeWasSettled()} are what the end
+ * of a subscription reads ({@see ReturnAnUpgradeTheEndPrevented}) and what
+ * the settlement reads ({@see ResizeOnPlanChangeSettlement}), one answer for
+ * both.
+ */
+final readonly class PlanChangeDelivery
+{
+    public function __construct(
+        private HostingPackageForPlan $packages,
+        private NodeCapacityPolicy $capacity,
+    ) {}
+
+    /**
+     * Why the change of this subscription onto this plan cannot be delivered,
+     * in an operator's words; null when it can, or when there is nothing to
+     * deliver.
+     *
+     * @param  PlanResources  $current  what the service runs now, as QuotePlanChange reads it
+     */
+    public function refusal(Subscription $subscription, Plan $plan, PlanResources $current): ?string
+    {
+        $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
+
+        if ($service === null) {
+            return null;
+        }
+
+        if ($service->kind === ProductKind::SharedHosting->value) {
+            $choice = $this->packages->resolve((string) $plan->getKey());
+
+            return $choice->package === null ? $choice->reason : null;
+        }
+
+        if (! $current->differsFrom(PlanResources::fromArray($plan->resources ?? []))) {
+            return null;
+        }
+
+        if ($service->kind === ProductKind::Vps->value) {
+            /** @var VirtualMachine|null $machine */
+            $machine = VirtualMachine::query()->where('service_id', $service->getKey())->first();
+
+            return $machine === null
+                ? 'the service has no virtual machine to resize'
+                : $this->growthTheNodeCannotHold($machine, PlanResources::fromArray($plan->resources ?? []));
+        }
+
+        return 'nothing can change the shape of this product in place';
+    }
+
+    /**
+     * Why the node the machine runs on cannot hold its growth to the target
+     * shape; null when it can, or when the machine does not grow.
+     *
+     * A resize grows the machine where it runs, so the node must hold the
+     * growth: the ceilings a placement is held to (NodeCapacityPolicy) and
+     * only those - usable memory, the capacity threshold on it, the CPU
+     * overcommit ceiling and the node's storage - against what the node has
+     * committed plus the growth. Status, health and architecture are not
+     * asked: the machine is already there. A growth the node cannot hold is
+     * a resize that fails as capacity with the money held; it is refused
+     * before the money moves instead.
+     *
+     * The growth is measured from the machine's recorded shape.
+     *
+     * INTEGRATION SEAM: this is the arithmetic of
+     * NodeCapacityPolicy::assessGrowth() (round six, group D), which this
+     * base does not yet have. When both are merged this method's body
+     * becomes that call - growth from the machine's held capacity commitment
+     * where D records one - so the quote and the resize ask one question.
+     */
+    private function growthTheNodeCannotHold(VirtualMachine $machine, PlanResources $target): ?string
+    {
+        $vcpu = max(0, ($target->vcpu ?? $machine->vcpu) - $machine->vcpu);
+        $memory = max(0, ($target->memoryMib ?? $machine->memory_mib) - $machine->memory_mib);
+        $disk = max(0, ($target->diskGib ?? $machine->disk_gib) - $machine->disk_gib);
+
+        if ($vcpu === 0 && $memory === 0 && $disk === 0) {
+            return null;
+        }
+
+        /** @var ComputeNode|null $node */
+        $node = $machine->node()->first();
+
+        if ($node === null) {
+            return 'the machine is on no node to grow on';
+        }
+
+        $memoryAfter = $node->allocated_memory_mib + $memory;
+
+        if ($memoryAfter > $node->usableMemoryMib() || $memoryAfter > $this->capacity->schedulableMemoryMib($node)) {
+            return 'the node the machine runs on cannot hold its memory growth';
+        }
+
+        if ($node->allocated_cpu_cores + $vcpu > $node->usableCpuCores()) {
+            return 'the node the machine runs on cannot hold its vCPU growth';
+        }
+
+        if ($node->allocated_storage_gib + $disk > $node->storage_gib) {
+            return 'the node the machine runs on cannot hold its disk growth';
+        }
+
+        return null;
+    }
+
+    /**
+     * The same question for the plan change a proration invoice bills, asked
+     * when it is paid. Null for an invoice that bills no recorded plan change.
+     */
+    public function refusalForTheInvoice(Invoice $invoice): ?string
+    {
+        if ($invoice->order_id !== null || $invoice->subscription_id === null) {
+            return null;
+        }
+
+        /** @var PlanChange|null $change */
+        $change = PlanChange::query()->where('proration_invoice_id', $invoice->getKey())->first();
+
+        if ($change === null || $change->to_plan_id === null) {
+            return null;
+        }
+
+        /** @var Subscription|null $subscription */
+        $subscription = Subscription::query()->find($change->subscription_id);
+
+        if ($subscription === null) {
+            return null;
+        }
+
+        /** @var Plan|null $plan */
+        $plan = Plan::query()->find($change->to_plan_id);
+
+        if ($plan === null) {
+            return 'the plan this change moves onto no longer exists';
+        }
+
+        return $this->refusal($subscription, $plan, $this->runningBefore($subscription, $change));
+    }
+
+    /**
+     * What the service ran before this change: its own recorded allocation
+     * where it has one (QuotePlanChange's rule), otherwise the plan the change
+     * left - not the subscription's plan, which is already the target.
+     */
+    private function runningBefore(Subscription $subscription, PlanChange $change): PlanResources
+    {
+        $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
+        $fromService = $service === null ? new PlanResources : PlanResources::fromArray($service->resources ?? []);
+
+        if ($fromService->vcpu !== null || $fromService->memoryMib !== null || $fromService->diskGib !== null) {
+            return $fromService;
+        }
+
+        /** @var Plan|null $from */
+        $from = $change->from_plan_id === null ? null : Plan::query()->find($change->from_plan_id);
+
+        return $from === null ? new PlanResources : PlanResources::fromArray($from->resources ?? []);
+    }
+
+    /**
+     * Whether the settlement of this paid proration invoice was heard while
+     * the subscription was live (PlanChange::$delivered_at), or - for a change
+     * settled before that was recorded, or an invoice with no recorded change
+     * - queued the resize (or the package change) it paid for, under the key
+     * the settlement gives it (`plan-change:<subscription>:<plan>:invoice:<id>`,
+     * {@see QueuePlanChangeAtProvider}). No key a customer chooses reaches a
+     * provisioning job (U-1), so no job of theirs can answer this.
+     */
+    public function wasDelivered(string $subscriptionId, string $invoiceId): bool
+    {
+        $delivered = PlanChange::query()
+            ->where('proration_invoice_id', $invoiceId)
+            ->whereNotNull('delivered_at')
+            ->exists();
+
+        return $delivered || ProvisioningJob::query()
+            ->where('idempotency_key', 'like', sprintf('plan-change:%s:%%:invoice:%s', $subscriptionId, $invoiceId))
+            ->exists();
+    }
+
+    /**
+     * Whether a change of this subscription has been paid for and not yet
+     * delivered: its proration invoice is paid and its settlement has not
+     * been heard (wasDelivered() is false), and no later change was settled
+     * after it.
+     *
+     * The window the queue's lag leaves between a capture and its settlement.
+     * A second change made in it was accepted, and when the subscription then
+     * ended the paid upgrade was taken as superseded by the unpaid one and
+     * kept (X1). Refused while it lasts (PlanChangeRefusal::PreviousChangePending).
+     *
+     * Only changes made in the current period are read. `delivered_at` was
+     * added without a back-fill, and a change settled before it existed that
+     * queued nothing (nothing to resize) looks undelivered for ever; bounded
+     * to the period, such a row cannot hold a subscription's plan changes
+     * past its next renewal.
+     */
+    public function aPaidChangeAwaitsDelivery(Subscription $subscription): bool
+    {
+        /** @var list<PlanChange> $paid */
+        $paid = PlanChange::query()
+            ->where('subscription_id', $subscription->getKey())
+            ->whereNull('delivered_at')
+            ->whereNotNull('proration_invoice_id')
+            ->where('changed_at', '>=', $subscription->current_period_start)
+            ->whereExists(static fn ($invoice) => $invoice
+                ->selectRaw('1')
+                ->from('invoices')
+                ->whereColumn('invoices.id', 'subscription_plan_changes.proration_invoice_id')
+                ->where('invoices.status', InvoiceStatus::Paid->value))
+            ->get()
+            ->all();
+
+        foreach ($paid as $change) {
+            if (! $this->wasDelivered((string) $subscription->getKey(), (string) $change->proration_invoice_id)
+                && ! $this->aLaterChangeWasSettled($change)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether a plan change recorded after this one has been settled - it
+     * owed nothing, or its invoice was paid - and so decided the machine's
+     * shape itself. A later change still waiting on its invoice (or whose
+     * invoice was voided) has not.
+     */
+    public function aLaterChangeWasSettled(PlanChange $change): bool
+    {
+        return PlanChange::query()
+            ->where('subscription_id', $change->subscription_id)
+            ->where(static fn ($later) => $later
+                ->where('changed_at', '>', $change->changed_at)
+                ->orWhere(static fn ($same) => $same
+                    ->where('changed_at', $change->changed_at)
+                    ->where('id', '>', $change->id)))
+            ->where(static fn ($settled) => $settled
+                ->whereNull('proration_invoice_id')
+                ->orWhereExists(static fn ($paid) => $paid
+                    ->selectRaw('1')
+                    ->from('invoices')
+                    ->whereColumn('invoices.id', 'subscription_plan_changes.proration_invoice_id')
+                    ->where('invoices.status', InvoiceStatus::Paid->value)))
+            ->exists();
+    }
+}

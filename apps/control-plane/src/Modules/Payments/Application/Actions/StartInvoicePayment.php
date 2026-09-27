@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Payments\Application\Actions;
 
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Billing\Application\Queries\TheSubscriptionAnInvoiceBills;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceNotPayableException;
@@ -23,6 +24,7 @@ use Lynomia\Modules\Payments\Infrastructure\Models\PaymentAttempt;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Payments\Infrastructure\PaymentProviderManager;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Subscriptions\Application\Queries\PlanChangeDelivery;
 
 /**
  * Opens a payment for an invoice and hands back what the browser must do next.
@@ -61,6 +63,7 @@ final readonly class StartInvoicePayment
     public function __construct(
         private PaymentProviderManager $providers,
         private AssertOrderIsStillDeliverable $deliverable,
+        private PlanChangeDelivery $planChanges,
     ) {}
 
     /**
@@ -80,13 +83,14 @@ final readonly class StartInvoicePayment
         /*
          * Asked before anything else, because everything else costs something.
          *
-         * An order accepted at 10:00 can have had the configuration it needs
-         * removed by 10:05, and the customer presses Pay at 10:10 against an
+         * An order (or a plan change) accepted at 10:00 can have had the
+         * configuration it needs removed by 10:05, and the customer presses
+         * Pay at 10:10 against an
          * invoice that is still perfectly collectible. Opening an intent then
          * puts a real authorisation on a real card for something the platform
          * already knows it cannot place.
          */
-        $this->assertTheOrderCanStillBeDelivered($invoice);
+        $this->assertWhatItBuysCanStillBeDelivered($invoice);
 
         $provider = $this->providers->default();
 
@@ -127,17 +131,34 @@ final readonly class StartInvoicePayment
     }
 
     /**
-     * Re-asks the feasibility question this invoice's order was accepted on.
+     * Re-asks the feasibility question this invoice's order was accepted on,
+     * or, for a proration invoice, the question its plan change was accepted
+     * on.
      *
-     * Only for an invoice that belongs to an order. A renewal or a proration
-     * invoice bills a service that already exists, and refusing to take money
-     * for a machine the customer is already running — because the catalogue
-     * has moved on since they bought it — would be a worse answer than the
-     * problem it solves.
+     * Not for a renewal. A renewal bills a service that already exists, and
+     * refusing to take money for a machine the customer is already running —
+     * because the catalogue has moved on since they bought it — would be a
+     * worse answer than the problem it solves. A proration invoice is not
+     * that: it pays for a change still to be made, and a change that can no
+     * longer be delivered (the package behind the hosting plan withdrawn since
+     * it was accepted) bought nothing (F-07). It is asked of
+     * PlanChangeDelivery, the answer the change was quoted on.
      */
-    private function assertTheOrderCanStillBeDelivered(Invoice $invoice): void
+    private function assertWhatItBuysCanStillBeDelivered(Invoice $invoice): void
     {
         if ($invoice->order_id === null) {
+            $refused = $this->planChanges->refusalForTheInvoice($invoice);
+
+            if ($refused !== null) {
+                Log::warning('A payment was refused because the plan change its invoice bills can no longer be delivered.', [
+                    'invoice_id' => (string) $invoice->getKey(),
+                    'customer_id' => (string) $invoice->customer_id,
+                    'reason' => $refused,
+                ]);
+
+                throw InvoiceNotPayableException::becauseItsPlanChangeCannotBeDelivered((string) $invoice->getKey());
+            }
+
             return;
         }
 

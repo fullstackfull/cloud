@@ -54,9 +54,16 @@ use Throwable;
  * Synchronous, and it never throws, for MoveTheOrderWithWhatItBought's
  * reason: it runs where the service moved — an operator's request that has
  * already deleted a site at the panel, a provisioning worker that has already
- * destroyed a machine — and its failure must not become theirs. A failure is
- * logged; RenewSubscription skips a subscription whose service is TERMINATED
- * all the same, so a subscription this could not move is still not invoiced.
+ * destroyed a machine — and its failure must not become theirs. It runs once
+ * that move has committed (TransitionService announces after the outermost
+ * commit), so the wind-up is the outermost transaction here, and one that
+ * fails on a deadlock or a serialization failure is rolled back whole and
+ * tried again (WindUpAnEndedSubscription::ATTEMPTS). It used to be tried once:
+ * a deadlock was logged and the subscription stayed active, its open invoice
+ * payable, for a terminated service (R4, the re-audit after round five). A
+ * failure that outlasts the attempts, or any other failure, is logged, and the
+ * subscription stays as it was; RenewSubscription skips a subscription whose
+ * service is TERMINATED all the same, so it is still not invoiced again.
  */
 final readonly class EndTheSubscriptionWithItsService
 {

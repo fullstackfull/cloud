@@ -18,6 +18,7 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\QueuePlanChangeAtProvider;
 use Lynomia\Modules\Subscriptions\Application\Actions\ReturnAnUpgradeTheEndPrevented;
+use Lynomia\Modules\Subscriptions\Application\Queries\PlanChangeDelivery;
 use Lynomia\Modules\Subscriptions\Domain\ValueObjects\PlanResources;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
@@ -110,6 +111,7 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
     public function __construct(
         private readonly QueuePlanChangeAtProvider $queueAtProvider,
         private readonly ReturnAnUpgradeTheEndPrevented $returnAnUpgrade,
+        private readonly PlanChangeDelivery $delivery,
     ) {}
 
     public function handle(InvoicePaid $event): void
@@ -177,7 +179,7 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
                 ->whereNull('delivered_at')
                 ->update(['delivered_at' => now()]);
 
-            if ($this->aLaterChangeHasBeenSettled($change)) {
+            if ($this->delivery->aLaterChangeWasSettled($change)) {
                 return;
             }
 
@@ -185,7 +187,7 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
                 subscription: $subscription,
                 planId: (string) $change->to_plan_id,
                 resources: PlanResources::fromArray($change->resources),
-                idempotencyKey: 'invoice:'.$event->invoiceId,
+                delivers: 'invoice:'.$event->invoiceId,
             );
         });
     }
@@ -292,31 +294,7 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
             subscription: $subscription,
             planId: (string) $plan->getKey(),
             resources: PlanResources::fromArray($plan->resources),
-            idempotencyKey: 'invoice:'.$event->invoiceId,
+            delivers: 'invoice:'.$event->invoiceId,
         );
-    }
-
-    /**
-     * Whether a plan change made after this one has already been settled -
-     * it owed nothing, or its invoice was paid - and so has queued the
-     * machine's shape itself.
-     */
-    private function aLaterChangeHasBeenSettled(PlanChange $change): bool
-    {
-        return PlanChange::query()
-            ->where('subscription_id', $change->subscription_id)
-            ->where(static fn ($later) => $later
-                ->where('changed_at', '>', $change->changed_at)
-                ->orWhere(static fn ($same) => $same
-                    ->where('changed_at', $change->changed_at)
-                    ->where('id', '>', $change->id)))
-            ->where(static fn ($settled) => $settled
-                ->whereNull('proration_invoice_id')
-                ->orWhereExists(static fn ($paid) => $paid
-                    ->selectRaw('1')
-                    ->from('invoices')
-                    ->whereColumn('invoices.id', 'subscription_plan_changes.proration_invoice_id')
-                    ->where('invoices.status', InvoiceStatus::Paid->value)))
-            ->exists();
     }
 }

@@ -33,10 +33,11 @@ use Lynomia\Modules\Billing\Http\Controllers\SubscriptionController;
  * **No customer route edits an invoice.** No PATCH, no void, no refund. An
  * invoice is frozen once issued, and every figure on it is moved by the
  * settlement, void and refund actions on the platform's own side. The one POST
- * here is POST {invoice}/wallet-credit, which pays the invoice from the
- * customer's wallet (PayInvoiceFromWallet) - a settlement, through the same
- * action as any other, never a write to what the invoice says it bought.
- * Paying by card is the Payments module's surface.
+ * on an invoice here is POST {invoice}/wallet-credit, which pays the invoice
+ * from the customer's wallet (PayInvoiceFromWallet) - a settlement, through
+ * the same action as any other, never a write to what the invoice says it
+ * bought. (The other two POSTs in this file are on a subscription: cancel and
+ * plan, below.) Paying by card is the Payments module's surface.
  *
  * **No renewal route.** RenewSubscription is the worker's entry point and
  * refuses anything the due-for-renewal scope excludes.
@@ -52,9 +53,13 @@ use Lynomia\Modules\Billing\Http\Controllers\SubscriptionController;
  * the proration as a purchase: an upgrade leaves an invoice and the machine
  * is resized only when it is paid; a downgrade credits the wallet, never with
  * more than the period collected. A change is refused while an invoice for
- * the subscription is open, and onto a plan that is sold out or at the
- * account's limit. It takes the plan and the price and nothing else: the unit
- * count is the one the subscription holds, as the quote priced it.
+ * the subscription is open, onto a plan that is sold out or at the account's
+ * limit, and onto a plan the change could not be delivered onto (a hosting
+ * plan with no single package on sale, say: `not_deliverable`, asked again
+ * when its invoice is paid). It takes the plan and the price and nothing else:
+ * the unit count is the one the subscription holds, as the quote priced it.
+ * The Idempotency-Key it requires names no provisioning job; the change's own
+ * record does.
  *
  * ---------------------------------------------------------------------------
  * Cancellation
@@ -96,8 +101,10 @@ Route::prefix('invoices')->as('invoices.')->group(function (): void {
      * The GET is a quote and takes nothing. The POST requires an
      * Idempotency-Key, because a repeated submission that debited twice would
      * spend a balance the customer only has once, and carries a tighter
-     * limiter than the shared ceiling: it is the one route on this surface
-     * that moves money without a provider in the way.
+     * limiter than the shared ceiling: it spends the wallet directly, with no
+     * payment provider in the way. (It is not the only route here that moves
+     * money without one - a plan change credits the wallet on a downgrade and
+     * issues an invoice on an upgrade, under its own limiter below.)
      */
     Route::get('{invoice}/wallet-credit', [InvoiceController::class, 'walletCreditQuote'])
         ->whereUlid('invoice')

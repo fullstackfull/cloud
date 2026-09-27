@@ -49,8 +49,12 @@ use Throwable;
  * no resize queued and never will (ResizeOnPlanChangeSettlement suppresses it
  * on an ended subscription), so it bought nothing. That one is returned to
  * the wallet here, recorded against it ({@see ReturnAnUpgradeTheEndPrevented},
- * OA-3); an upgrade whose resize was queued before the end was delivered, and
- * is kept. The settlement heard after the end asks the same question, for an
+ * OA-3). One is kept when its settlement was heard while the subscription was
+ * live (PlanChange::$delivered_at, whatever that settlement queued), when -
+ * settled before that was recorded - a resize or package-change job keyed on
+ * its invoice exists, or when a later change was settled after it (owed
+ * nothing, or its invoice was paid); ReturnAnUpgradeTheEndPrevented states
+ * the rule. The settlement heard after the end asks the same question, for an
  * upgrade this did not see, and the two credit it once between them.
  *
  * ---------------------------------------------------------------------------
@@ -81,7 +85,17 @@ use Throwable;
  * payment instead. A deadlock or serialization failure is not ordinary: a
  * savepoint does not recover from it (the transaction is aborted), and it is
  * rethrown so the whole ending fails rather than silently not happening
- * (rethrowWhatAbortsTheTransaction()).
+ * (rethrowWhatAbortsTheTransaction()). What happens next depends on the
+ * caller. Where the wind-up is the outermost transaction - always for
+ * {@see EndTheSubscriptionWithItsService}, which runs once the service's move
+ * has committed, and for a scheduled cancellation ended by the sweep - the
+ * whole ending is rolled back and tried again, up to ATTEMPTS times. Inside a
+ * caller's transaction - an immediate cancellation, which the route records
+ * atomically with its audit entry - the caller's transaction fails with it
+ * and the request is refused. If every attempt fails the error reaches the
+ * caller, and the listener and the sweep log it: the subscription stays as it
+ * was and its open invoices open (renewal still skips a subscription whose
+ * service is terminated).
  *
  * The locks: the open invoices, the subscription (in `$end`), the paid
  * upgrades, then the wallet - every invoice before the wallet.
@@ -92,6 +106,13 @@ use Throwable;
  */
 final readonly class WindUpAnEndedSubscription
 {
+    /**
+     * How many times the ending is tried when it is the outermost transaction
+     * and fails on a deadlock or a serialization failure (Laravel retries only
+     * then; nested, the error is thrown out to the caller's transaction).
+     */
+    private const int ATTEMPTS = 3;
+
     public function __construct(
         private ReturnWhatAnInvoiceStillHolds $returnWhatItHolds,
         private ReturnAnUpgradeTheEndPrevented $returnAnUpgrade,
@@ -163,7 +184,7 @@ final readonly class WindUpAnEndedSubscription
             }
 
             return $ended;
-        });
+        }, self::ATTEMPTS);
     }
 
     /**
@@ -225,7 +246,9 @@ final readonly class WindUpAnEndedSubscription
      * carrying on made the outer transaction "commit" as a rollback: the
      * cancellation answered success while the subscription stayed active and
      * its open invoice stayed open (the round-five verifier's race). Those are
-     * rethrown, so the whole ending fails loudly and is retried or refused.
+     * rethrown, so the whole ending fails: it is tried again when the wind-up
+     * is the outermost transaction (ATTEMPTS), and otherwise fails the
+     * caller's transaction (the class docblock says which callers are which).
      */
     private static function rethrowWhatAbortsTheTransaction(Throwable $e): void
     {
