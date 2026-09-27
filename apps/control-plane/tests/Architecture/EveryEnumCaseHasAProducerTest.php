@@ -82,6 +82,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use ReflectionClassConstant;
 use RuntimeException;
+use Tests\Feature\Infrastructure\AnOperatorPutsADiscoveredNodeIntoServiceTest;
 use Tests\Feature\Rbac\EveryStaffRoleCanBeGivenToAnOperatorTest;
 use Tests\Support\EnumCaseReferences;
 
@@ -150,14 +151,23 @@ use Tests\Support\EnumCaseReferences;
  *    concatenated into SQL, a ternary branch. The entry names the file and the
  *    spelling, and the file's code (its comments left out) must still contain
  *    it. The search is for the text, so a read that spells the case the same
- *    way also satisfies it; the spelling is chosen to name the write. Where
- *    no spelling names the case — the six staff `Role` cases are granted
- *    through one walk of `Role::cases()`, and share that spelling — the
- *    entry also names, as `held`, the data provider of a behavioural test
- *    that exercises the write for each case, and the provider must still
- *    yield the case ({@see EveryStaffRoleCanBeGivenToAnOperatorTest} invites
- *    an operator with each staff role and grants it by a role change). The
- *    spelling cannot tell one of those cases from another; the test can.
+ *    way also satisfies it. So each spelling is the write's own text, taken
+ *    wide enough to take in what makes it a write — the SQL alias it is
+ *    selected as, the list or column default it is declared in, the array
+ *    key or call it is handed to — which no read in its file spells; and a
+ *    spelling that is only a case's name (`Enum::Case`, or `Enum::Case->value`)
+ *    is refused as stale ({@see A_BARE_CASE_NAME}), because any read of the
+ *    case keeps it. Where one spelling produces several cases, it cannot tell
+ *    them apart: the six staff `Role` cases are granted through one walk of
+ *    `Role::cases()`, and `NodeStatus::Active` and `::Draining` share the
+ *    declaration of the list an operator may set. Each such entry also
+ *    names, as `held`, the data provider of a behavioural test that
+ *    exercises the write for each case, and the provider must still yield
+ *    the case ({@see EveryStaffRoleCanBeGivenToAnOperatorTest} invites an
+ *    operator with each staff role and grants it by a role change;
+ *    {@see AnOperatorPutsADiscoveredNodeIntoServiceTest} sets a node to each
+ *    of the two through the route). The spelling cannot tell one of those
+ *    cases from another; the test can.
  *  - **`unwritten`**, for one case: nothing produces it. The entry names the
  *    module that owns the decision — build the writer, delete the case, or
  *    declare it prepared. These, with the sibling gate's `UNPRODUCED`, are the
@@ -182,6 +192,13 @@ use Tests\Support\EnumCaseReferences;
  */
 final class EveryEnumCaseHasAProducerTest extends TestCase
 {
+    /**
+     * A `spelled` entry's spelling that is only a case's name, optionally
+     * with `->value`: a read of the case spells it the same way, so it cannot
+     * tell the write from a read. Refused by {@see staleExcuses()}.
+     */
+    private const string A_BARE_CASE_NAME = '/^\s*[A-Za-z_\\\\][A-Za-z0-9_\\\\]*::[A-Za-z_][A-Za-z0-9_]*(\s*->\s*value)?\s*$/';
+
     /**
      * Enums whose cases arrive as a value or are a vocabulary.
      *
@@ -230,19 +247,19 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
      * @var array<string, array{kind: 'spelled', site: string, spelling: string, held?: string, why: string}|array{kind: 'unwritten', owner: string, why: string}>
      */
     public const array CASES = [
-        ActivityCategory::class.'::Domains' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActivityCategory::Domains->value', 'why' => 'The activity feed selects it as an SQL literal, DB::raw("\'".X->value."\' as category").'],
-        ActivityCategory::class.'::Billing' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActivityCategory::Billing->value', 'why' => 'Selected as an SQL literal by the activity feed.'],
-        ActivityCategory::class.'::Support' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActivityCategory::Support->value', 'why' => 'Selected as an SQL literal by the activity feed.'],
-        ActivityCategory::class.'::Backups' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActivityCategory::Backups->value', 'why' => 'Selected as an SQL literal by the activity feed.'],
-        ActorType::class.'::CustomerUser' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActorType::CustomerUser->value', 'why' => 'Selected as an SQL literal by the activity feed.'],
-        ActorType::class.'::System' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActorType::System->value', 'why' => 'Selected as an SQL literal by the activity feed.'],
-        ActorType::class.'::Unknown' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActorType::Unknown->value', 'why' => 'Selected as an SQL literal by the activity feed.'],
-        GpuAllocationState::class.'::Available' => ['kind' => 'spelled', 'site' => 'database/migrations/2026_04_05_000000_create_gpu_devices.php', 'spelling' => "->default('available')", 'why' => 'A registered card takes the column default; RegisterGpuDevice does not name a state.'],
-        VerificationLevel::class.'::CodeComplete' => ['kind' => 'spelled', 'site' => 'src/Modules/Infrastructure/Domain/Preflight/PreflightReport.php', 'spelling' => '[VerificationLevel::CodeComplete->value, VerificationLevel::Tested->value]', 'why' => 'Every report lists it, as a scalar in a list literal.'],
-        VerificationLevel::class.'::Tested' => ['kind' => 'spelled', 'site' => 'src/Modules/Infrastructure/Domain/Preflight/PreflightReport.php', 'spelling' => '[VerificationLevel::CodeComplete->value, VerificationLevel::Tested->value]', 'why' => 'Every report lists it, as a scalar in a list literal.'],
-        ReadinessAnswer::class.'::NotApplicable' => ['kind' => 'spelled', 'site' => 'src/Modules/ProductReadiness/Domain/Services/ReadinessQuestions.php', 'spelling' => '? ReadinessAnswer::NotApplicable->value', 'why' => 'Written as the scalar in a ternary branch under an array key.'],
-        LicenceState::class.'::Unknown' => ['kind' => 'spelled', 'site' => 'src/Modules/Providers/Infrastructure/Models/Licence.php', 'spelling' => "'state' => 'unknown'", 'why' => 'A new licence takes the model\'s string default.'],
-        WordPressSiteKind::class.'::Production' => ['kind' => 'spelled', 'site' => 'src/Modules/SharedHosting/Infrastructure/Models/WordPressSite.php', 'spelling' => "'kind' => 'production'", 'why' => 'A new site takes the model\'s string default; copies name staging or clone.'],
+        ActivityCategory::class.'::Domains' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActivityCategory::Domains->value."\' as category"', 'why' => 'The activity feed selects it as an SQL literal, DB::raw("\'".X->value."\' as category").'],
+        ActivityCategory::class.'::Billing' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActivityCategory::Billing->value."\' as category"', 'why' => 'Selected as an SQL literal by the activity feed.'],
+        ActivityCategory::class.'::Support' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActivityCategory::Support->value."\' as category"', 'why' => 'Selected as an SQL literal by the activity feed.'],
+        ActivityCategory::class.'::Backups' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActivityCategory::Backups->value."\' as category"', 'why' => 'Selected as an SQL literal by the activity feed.'],
+        ActorType::class.'::CustomerUser' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActorType::CustomerUser->value."\' end as actor_type"', 'why' => 'Selected as an SQL literal by the activity feed.'],
+        ActorType::class.'::System' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActorType::System->value."\' as actor_type"', 'why' => 'Selected as an SQL literal by the activity feed.'],
+        ActorType::class.'::Unknown' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActorType::Unknown->value."\' as actor_type"', 'why' => 'Selected as an SQL literal by the activity feed.'],
+        GpuAllocationState::class.'::Available' => ['kind' => 'spelled', 'site' => 'database/migrations/2026_04_05_000000_create_gpu_devices.php', 'spelling' => "\$table->string('allocation_state', 24)->default('available')", 'why' => 'A registered card takes the column default; RegisterGpuDevice does not name a state.'],
+        VerificationLevel::class.'::CodeComplete' => ['kind' => 'spelled', 'site' => 'src/Modules/Infrastructure/Domain/Preflight/PreflightReport.php', 'spelling' => '$levels = [VerificationLevel::CodeComplete->value, VerificationLevel::Tested->value];', 'why' => 'Every report lists it, as a scalar in a list literal.'],
+        VerificationLevel::class.'::Tested' => ['kind' => 'spelled', 'site' => 'src/Modules/Infrastructure/Domain/Preflight/PreflightReport.php', 'spelling' => '$levels = [VerificationLevel::CodeComplete->value, VerificationLevel::Tested->value];', 'why' => 'Every report lists it, as a scalar in a list literal.'],
+        ReadinessAnswer::class.'::NotApplicable' => ['kind' => 'spelled', 'site' => 'src/Modules/ProductReadiness/Domain/Services/ReadinessQuestions.php', 'spelling' => "'dependencies' => \$product->dependsOn() === []\n                ? ReadinessAnswer::NotApplicable->value", 'why' => 'Written as the scalar in a ternary branch under an array key.'],
+        LicenceState::class.'::Unknown' => ['kind' => 'spelled', 'site' => 'src/Modules/Providers/Infrastructure/Models/Licence.php', 'spelling' => "\$attributes = [\n        'state' => 'unknown',", 'why' => 'A new licence takes the model\'s string default.'],
+        WordPressSiteKind::class.'::Production' => ['kind' => 'spelled', 'site' => 'src/Modules/SharedHosting/Infrastructure/Models/WordPressSite.php', 'spelling' => "\$attributes = [\n        'ssl_status' => 'unknown',\n        'kind' => 'production',", 'why' => 'A new site takes the model\'s string default; copies name staging or clone.'],
 
         AttentionSeverity::class.'::Info' => ['kind' => 'unwritten', 'owner' => 'Activity', 'why' => 'AccountAttention assigns only Critical and Warning; nothing on the dashboard is informational yet.'],
         BackupTrigger::class.'::Scheduled' => ['kind' => 'unwritten', 'owner' => 'Backups', 'why' => 'Every backup is requested by a person (BackupController, and RequestServiceBackup\'s default Manual); no scheduler creates one.'],
@@ -258,19 +275,19 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
         RegistrarCapability::class.'::Renewal' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'No registrar adapter declares it and nothing asks for it.'],
         RegistrarCapability::class.'::PremiumPricing' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'No registrar adapter declares it; DomainPricing refuses premium names by the string premium_pricing.'],
         RegistrarCapability::class.'::MultiYearTerms' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'No registrar adapter declares it and nothing asks for it.'],
-        DomainContactRole::class.'::Registrant' => ['kind' => 'spelled', 'site' => 'src/Modules/Domains/Http/Controllers/DomainController.php', 'spelling' => '[DomainContactRole::Registrant->value =>', 'why' => 'Ordering a domain and updating its contacts both key the one contact the customer gives by this role.'],
+        DomainContactRole::class.'::Registrant' => ['kind' => 'spelled', 'site' => 'src/Modules/Domains/Http/Controllers/DomainController.php', 'spelling' => '[DomainContactRole::Registrant->value => $this->contact($registrant)]', 'why' => 'Ordering a domain and updating its contacts both key the one contact the customer gives by this role.'],
         DomainContactRole::class.'::Administrative' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'The order and contact-update requests accept a registrant only, and DomainController passes only that role to OrderDomainRegistration and UpdateDomainContacts, the only writers of domain contacts.'],
         DomainContactRole::class.'::Technical' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'The order and contact-update requests accept a registrant only; nothing writes a technical contact.'],
         DomainContactRole::class.'::Billing' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'The order and contact-update requests accept a registrant only; nothing writes a billing contact.'],
-        Role::class.'::InfrastructureAdmin' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (an infrastructure admin). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
-        Role::class.'::BillingAdmin' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (a billing admin). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
-        Role::class.'::Support' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (support). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
-        Role::class.'::NetworkEngineer' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (a network engineer). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
-        Role::class.'::Noc' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (the NOC). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
-        Role::class.'::Finance' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (finance). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
-        Role::class.'::Customer' => ['kind' => 'spelled', 'site' => 'src/Modules/Identity/Application/Actions/RegisterCustomer.php', 'spelling' => 'assignRole(Role::Customer->value)', 'why' => 'Registration assigns the customer role by its name.'],
-        NodeStatus::class.'::Active' => ['kind' => 'spelled', 'site' => 'src/Modules/Infrastructure/Application/Actions/ChangeComputeNodeStatus.php', 'spelling' => 'NodeStatus::Active', 'why' => 'An operator puts a node into service: ComputeNodeController builds the status by value from the SETTABLE list this names.'],
-        NodeStatus::class.'::Draining' => ['kind' => 'spelled', 'site' => 'src/Modules/Infrastructure/Application/Actions/ChangeComputeNodeStatus.php', 'spelling' => 'NodeStatus::Draining', 'why' => 'An operator drains a node: built by value from the same SETTABLE list.'],
+        Role::class.'::InfrastructureAdmin' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'array_filter(Role::cases(), static fn (Role $role): bool => $role->isStaffRole())', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (an infrastructure admin). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
+        Role::class.'::BillingAdmin' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'array_filter(Role::cases(), static fn (Role $role): bool => $role->isStaffRole())', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (a billing admin). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
+        Role::class.'::Support' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'array_filter(Role::cases(), static fn (Role $role): bool => $role->isStaffRole())', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (support). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
+        Role::class.'::NetworkEngineer' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'array_filter(Role::cases(), static fn (Role $role): bool => $role->isStaffRole())', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (a network engineer). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
+        Role::class.'::Noc' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'array_filter(Role::cases(), static fn (Role $role): bool => $role->isStaffRole())', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (the NOC). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
+        Role::class.'::Finance' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'array_filter(Role::cases(), static fn (Role $role): bool => $role->isStaffRole())', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (finance). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
+        Role::class.'::Customer' => ['kind' => 'spelled', 'site' => 'src/Modules/Identity/Application/Actions/RegisterCustomer.php', 'spelling' => '$user->assignRole(Role::Customer->value)', 'why' => 'Registration assigns the customer role by its name.'],
+        NodeStatus::class.'::Active' => ['kind' => 'spelled', 'site' => 'src/Modules/Infrastructure/Application/Actions/ChangeComputeNodeStatus.php', 'spelling' => 'SETTABLE = [NodeStatus::Active, NodeStatus::Draining, NodeStatus::Maintenance]', 'held' => AnOperatorPutsADiscoveredNodeIntoServiceTest::class.'::statusesAnOperatorSets', 'why' => 'An operator puts a node into service: ComputeNodeController builds the status by value from the SETTABLE list this spelling is the declaration of, so taking the case out of the list changes the spelling; the behavioural test named in held puts a node into it through the route.'],
+        NodeStatus::class.'::Draining' => ['kind' => 'spelled', 'site' => 'src/Modules/Infrastructure/Application/Actions/ChangeComputeNodeStatus.php', 'spelling' => 'SETTABLE = [NodeStatus::Active, NodeStatus::Draining, NodeStatus::Maintenance]', 'held' => AnOperatorPutsADiscoveredNodeIntoServiceTest::class.'::statusesAnOperatorSets', 'why' => 'An operator drains a node: built by value from the same SETTABLE list, whose declaration is the spelling; the behavioural test named in held drains a node through the route.'],
         NodeStatus::class.'::Offline' => ['kind' => 'unwritten', 'owner' => 'Compute', 'why' => 'ChangeComputeNodeStatus refuses offline and the reconcile sweep records a silent node as unhealthy, not offline; only the simulation-only reference topology loader can write it.'],
         ServerState::class.'::Connected' => ['kind' => 'unwritten', 'owner' => 'Infrastructure', 'why' => 'The deployment path writes registered, profiled and managed; nothing writes connected outside the simulation-only reference topology loader.'],
         ServerState::class.'::Discovered' => ['kind' => 'unwritten', 'owner' => 'Infrastructure', 'why' => 'RegisterServer writes registered, AssignDesiredState profiled and RunDeploymentJob managed; nothing discovers a server into this state (AssignDesiredState only reads it) outside the simulation-only reference topology loader.'],
@@ -453,6 +470,16 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
             DriftStatus::class.'::Resolved — answered for in CASES beside',
         ), 'The gate does not run the pairing check.');
 
+        // A spelling that is only the case's name, as NodeStatus::Draining's
+        // was: a read of the case in the same file kept it after the write
+        // was gone. Refused with or without ->value, and beside a held entry.
+        foreach ([NodeStatus::class.'::Draining' => 'NodeStatus::Draining', ActorType::class.'::System' => 'ActorType::System->value'] as $case => $bare) {
+            $cases = self::CASES;
+            $cases[$case]['spelling'] = $bare;
+
+            $this->assertTrue($reports(self::staleExcuses(self::WHOLE_ENUMS, $cases), "{$case} — the spelling {$bare} is only a case's name"), "A spelled entry whose spelling is the bare {$bare} stood.");
+        }
+
         // A held case whose provider does not yield it, or does not exist.
         foreach ([self::class.'::tablesAndConditions', EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::noSuchProvider'] as $held) {
             $cases = self::CASES;
@@ -491,6 +518,10 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
 
             if ($excuse['kind'] === 'spelled' && ! self::fileSays($excuse['site'], $excuse['spelling'])) {
                 $stale[] = "{$case} — {$excuse['site']} no longer contains {$excuse['spelling']}";
+            }
+
+            if ($excuse['kind'] === 'spelled' && preg_match(self::A_BARE_CASE_NAME, $excuse['spelling']) === 1) {
+                $stale[] = "{$case} — the spelling {$excuse['spelling']} is only a case's name, which a read in {$excuse['site']} spells the same way; spell the write";
             }
 
             if (isset($excuse['held']) && ! in_array(constant($case), self::heldCases($excuse['held']), true)) {
