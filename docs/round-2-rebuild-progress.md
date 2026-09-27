@@ -186,3 +186,9 @@ reproduce; the confirmed unnumbered items are listed there.
 | E | spelled checks read code, not comments (coordinator) | upheld with reservations (a string, heredoc or attribute still satisfies the text search; none in the tree); the owed filter oracle added | `037156e` |
 | F | residues the round-six verifiers recorded: a plan change undeliverable at settlement is returned to the wallet and the customer told; failed and reviewed plan changes say what happened to the money; adoption after a released reservation commits capacity; duplicate OpenAPI schemas; unfilled or English-only notification placeholders (new gate) | rejected once (a returned upgrade made the next downgrade credit a discounted period at list price), repaired; upheld with reservations (a returned change with nothing credited still notifies "0.000 returned"; the no-service fallback name is unpinned); merged `de522ce` | `b84ef35` |
 | G | F-44 held by a gate at last: `NoAssertionComparesAClockReadOnAnUnpinnedClockTest` (the shape had recurred in round-six code, fixed at `02d7364`) | rejected five times on its own claims about what it reads (controls per form, set-up order, static tests), repaired each time; upheld with reservations (the setUp/#[Before] hook exclusion has no control of its own; shapes the docblock disclaims); merged `0f3387b` | `15fa095` |
+
+All seven round-six branches merged at `5b5f219`: backend 5,781 / 5,781, 724
+testsuites `skipped="0"`, exit 0 (the one red of an earlier full run, a clock
+comparison in a round-six test, was fixed at `02d7364` and is what band G's gate
+now refuses); vitest 651 / 651, tsc and eslint clean; `make infra-validate` 0;
+`npm run openapi:lint` valid. An independent re-audit after round six follows.
