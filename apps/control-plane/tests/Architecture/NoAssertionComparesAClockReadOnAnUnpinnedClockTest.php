@@ -34,9 +34,12 @@ use Tests\Support\UnpinnedClockAssertions;
  * 1790505192 against 1790505193; fixed at `02d7364`). Every one was held by
  * an edit and nothing held the shape. This gate does.
  *
- * The cure is always the same and never weakens the claim: pin the clock
- * before the code runs (`$this->freezeSecond()`), or read it once, before,
- * into a variable, and compare with that.
+ * The cure never weakens the claim: pin the clock before the code runs
+ * (`$this->freezeSecond()`), so the code's read and the assertion's read are
+ * the same instant; or, where the code stores a time it was given, assert
+ * that input rather than the clock. Reading an unpinned clock once into a
+ * variable is not a cure: the code reads the clock later than the variable
+ * does, and the two can still straddle a second or a midnight.
  *
  * ===========================================================================
  * WHAT IT READS, AND WHAT IT CANNOT SEE
@@ -58,8 +61,9 @@ use Tests\Support\UnpinnedClockAssertions;
  * `02d7364` with variables followed, the walk reported five more tests
  * (`ApiTokenIssuanceTest`, `RowsAlreadyInFlightKeepTheirOwnClockTest`,
  * `ServerDatesAreTheCustomersTest` twice, `HostingUsageEndpointTest`), and in
- * every one the variable is the test's own read, stored by the test before
- * the code ran and compared with itself — the cure above, not the shape. A
+ * every one the variable is the test's own read handed to the code as input
+ * (an expiry posted, a column written by the test) and compared with what
+ * the code kept of it: an assertion about the input, not about the clock. A
  * bound comparison with a tolerance (`assertLessThanOrEqual`,
  * `assertEqualsWithDelta`, `->lessThan(now())`) is not the shape either: it
  * does not change its answer when a second or a day turns over.
@@ -123,7 +127,8 @@ final class NoAssertionComparesAClockReadOnAnUnpinnedClockTest extends TestCase
             .implode("\n  ", $offences)
             ."\n\nThe code stored its time earlier; the assertion reads the clock again, and a run that crosses a "
             .'second (or midnight) between the two is red. Pin the clock before the code runs '
-            .'($this->freezeSecond()), or read it once, before, into a variable — the claim stays the same.',
+            .'($this->freezeSecond()), or, where the code stores a time it was given, assert that input. Reading an '
+            .'unpinned clock once into a variable is not enough: the code reads it later. The claim stays the same.',
         );
     }
 

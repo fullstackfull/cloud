@@ -148,9 +148,33 @@ final class UnpinnedTest extends TestCase
     }
 
     #[Test]
-    public function found_in_an_interpolated_string(): void
+    public function found_in_a_concatenation(): void
     {
         $this->assertStringContainsString("due {$this->x} ".now()->toDateString(), $mail);
+    }
+
+    #[Test]
+    public function found_in_an_interpolated_string(): void
+    {
+        $this->assertSame("due {$row->at->diffForHumans()}", $mail);
+    }
+
+    #[Test]
+    public function found_a_diff_against_now(): void
+    {
+        $this->assertSame(7, $row->until->diffInDays(now()));
+    }
+
+    #[Test]
+    public function found_a_relative_phrase(): void
+    {
+        $this->assertEquals(Carbon::parse('+7 days')->toDateString(), $row->until->toDateString());
+    }
+
+    #[Test]
+    public function found_a_relative_phrase_in_a_constructor(): void
+    {
+        $this->assertEquals(new CarbonImmutable('tomorrow noon'), $row->at);
     }
 
     #[Test]
@@ -224,7 +248,38 @@ final class UnpinnedTest extends TestCase
     {
         $this->freezeSecond();
         $this->assertSame(date('Y-m-d'), $row->day);
+    }
+
+    #[Test]
+    public function found_a_native_date_time_even_frozen(): void
+    {
+        $this->freezeSecond();
         $this->assertEquals(new \DateTimeImmutable, $row->at);
+    }
+
+    #[Test]
+    public function found_a_native_relative_date_time_even_frozen(): void
+    {
+        $this->freezeSecond();
+        $this->assertEquals(new \DateTime('+1 day'), $row->until);
+    }
+
+    // A closure's pin stays in the closure: it may never be called.
+    #[Test]
+    public function found_after_a_closure_that_freezes(): void
+    {
+        collect([1])->each(function (): void {
+            $this->freezeTime();
+        });
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    // withTestNow restores the clock it found, which was free.
+    #[Test]
+    public function found_after_with_test_now_returns(): void
+    {
+        Carbon::withTestNow('2026-01-01', fn () => null);
+        $this->assertSame(now()->toDateString(), $row->day);
     }
 
     #[Test]
@@ -310,8 +365,9 @@ final class UnpinnedTest extends TestCase
         $this->assertTrue(Row::query()->where('at', '<', now())->exists());
     }
 
-    // The fixed form: read once, before the code runs, in a variable. (A
-    // variable is not followed — see the scanner's docblock.)
+    // A variable is not followed (see the scanner's docblock): this is the
+    // test's own read handed to the code as input, or, unpinned and read
+    // after the code ran, the shape the scanner cannot see.
     #[Test]
     public function clean_read_once_in_a_variable(): void
     {
@@ -325,6 +381,9 @@ final class UnpinnedTest extends TestCase
         $this->assertSame(Carbon::parse('2026-01-01')->toDateString(), $row->day);
         $this->assertSame(Carbon::create(2026, 1, 1)->toDateString(), $row->day);
         $this->assertTrue($row->at->eq(Carbon::parse('2026-01-01')));
+        $this->assertEquals(new \DateTimeImmutable('2026-01-01 00:00:00'), $row->at);
+        $this->assertEquals(new CarbonImmutable('@1790505192'), $row->at);
+        $this->assertEquals(Carbon::parse($row->given), $row->at);
     }
 
     #[Test]
@@ -406,6 +465,30 @@ final class PinnedByAParentTest extends FreezingParent
     public function clean_pinned_by_a_parent(): void
     {
         $this->assertSame(now()->toDateString(), $row->day);
+    }
+}
+
+// `self::` is not virtual: it calls the parent's pinning helper even from
+// the child that overrides it with one that does not pin.
+abstract class PinsThroughSelf extends TestCase
+{
+    protected function pinIt(): void
+    {
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function clean_pinned_through_self(): void
+    {
+        self::pinIt();
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+}
+
+final class OverridesThePinTest extends PinsThroughSelf
+{
+    protected function pinIt(): void
+    {
     }
 }
 

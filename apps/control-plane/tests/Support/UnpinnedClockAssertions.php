@@ -99,14 +99,24 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  *    argument; through `!`, `&&` and `||`.
  *
  * A **clock read** is `now()`, `today()`, `Carbon|CarbonImmutable|Date::now()`,
- * `::today()`, `::yesterday()`, `::tomorrow()`, `::parse()` or `::make()`
- * with nothing or a relative word (`'now'`, `'today'`, …), `new Carbon()`
- * (or `CarbonImmutable`) with nothing or a relative word, and the Carbon
+ * `::today()`, `::yesterday()`, `::tomorrow()`, `::create()` with nothing,
+ * `::parse()` or `::make()` with nothing or a relative literal, `new Carbon()`
+ * (or `CarbonImmutable`) with nothing or a relative literal, and the Carbon
  * methods that read the clock when given nothing (`diffIn*()`,
  * `diffForHumans()`, `isToday()`, …, the `age` property). PHP's own clock —
  * `time()`, `microtime()`, `date($format)`, `gmdate($format)`,
- * `new DateTime()`, `new DateTimeImmutable()` — is also a clock read, and one
- * that freezing does not reach, so it is a finding pinned or not.
+ * `new DateTime()`, `new DateTimeImmutable()` (with nothing or a relative
+ * literal) — is also a clock read, and one that freezing does not reach, so
+ * it is a finding pinned or not.
+ *
+ * A **relative literal** is a first argument that is a plain string literal
+ * whose meaning depends on the moment it is read: {@see self::isRelative()}
+ * resolves it with PHP's `strtotime()` against two base times a year and a
+ * few hours apart and calls it relative when the answers differ (`'now'`,
+ * `'today'`, `'+7 days'`, `'tomorrow noon'`, `'next monday'`), and absolute
+ * when they agree (`'2026-01-01'`, `'@1790505192'`). A string `strtotime()`
+ * cannot parse at all is taken as absolute, and so is any argument that is
+ * not a plain literal (a variable, a concatenation, an interpolation).
  *
  * A clock read **flows into** a value when it is the value, or the receiver of
  * a method chain or a property fetch that makes the value
@@ -123,7 +133,14 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  *
  *  - **A clock read held in a variable.** `$expected = now()->addDay();` and,
  *    later, `assertSame($expected, …)` is not read: the variable could equally
- *    hold the test's own read that it then stored, which is not the shape.
+ *    hold the test's own read that it handed the code as input, and an
+ *    assertion about that input is not the shape. (One that is read after
+ *    the code ran, on an unpinned clock, is the shape, and is not seen.)
+ *  - **Two clock reads in the test's own fixture** whose difference the code
+ *    reports — `'started_at' => now()->subSeconds(20), 'finished_at' =>
+ *    now()`, then an exact duration asserted. No assertion reads the clock,
+ *    so nothing here is a finding; `MetricsExpositionTest` carried it until
+ *    round six pinned its clock.
  *  - **Control flow.** The walk is in source order; a pin inside an `if`, a
  *    loop, or a `try` counts from its position on whether or not the branch
  *    runs, and a closure's body is judged where it is written, not where it
@@ -187,8 +204,6 @@ final class UnpinnedClockAssertions
     private const array CLOCK_CLASSES = ['Carbon', 'CarbonImmutable', 'Date', 'CarbonInterface'];
 
     private const array CLOCK_STATICS = ['now', 'today', 'yesterday', 'tomorrow'];
-
-    private const array RELATIVE_WORDS = ['now', 'today', 'yesterday', 'tomorrow'];
 
     /** Laravel's Wormhole units: `travel($n)->unit()`. */
     private const array WORMHOLE_UNITS = [
@@ -728,7 +743,7 @@ final class UnpinnedClockAssertions
                 return true;
             }
             if (! $nativeOnly && in_array($method, ['parse', 'make', 'create'], true)
-                && ($args === [] || self::isRelativeWord($args[0]->value))) {
+                && ($args === [] || self::isRelative($args[0]->value))) {
                 return $method !== 'create' || $args === [];
             }
             foreach ($args as $arg) {
@@ -743,7 +758,7 @@ final class UnpinnedClockAssertions
         if ($expr instanceof New_) {
             $class = $expr->class instanceof Name ? $expr->class->getLast() : null;
             $args = $expr->getArgs();
-            $relative = $args === [] || self::isRelativeWord($args[0]->value);
+            $relative = $args === [] || self::isRelative($args[0]->value);
             if (in_array($class, ['DateTime', 'DateTimeImmutable'], true)) {
                 return $relative;
             }
@@ -807,8 +822,19 @@ final class UnpinnedClockAssertions
         return false;
     }
 
-    private static function isRelativeWord(Expr $expr): bool
+    /**
+     * Is this a string literal whose meaning depends on when it is read?
+     */
+    public static function isRelative(Expr $expr): bool
     {
-        return $expr instanceof String_ && in_array(strtolower(trim($expr->value)), self::RELATIVE_WORDS, true);
+        if (! $expr instanceof String_) {
+            return false;
+        }
+
+        $utc = new \DateTimeZone('UTC');
+        $first = strtotime($expr->value, (new \DateTimeImmutable('2020-03-04 05:06:07', $utc))->getTimestamp());
+        $second = strtotime($expr->value, (new \DateTimeImmutable('2021-03-05 09:10:11', $utc))->getTimestamp());
+
+        return $first !== false && $second !== false && $first !== $second;
     }
 }
