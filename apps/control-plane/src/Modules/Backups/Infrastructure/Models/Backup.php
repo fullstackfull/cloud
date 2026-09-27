@@ -312,6 +312,39 @@ class Backup extends Model
      */
     public function recordPoll(): void
     {
+        $this->writeOnTheAttemptItRead(['last_polled_at' => now(), 'poll_count' => $this->poll_count + 1]);
+    }
+
+    /**
+     * Write the handle a restore's provider call returned, if the row is
+     * still on the restore that call started — or refuse, as a race.
+     *
+     * The handle arrives after the call, and the call can outlive its
+     * attempt: the row handed to a person once its window passed, settled,
+     * and another restore started. As a plain save it landed on that next
+     * restore, and the sweep then polled this call's task and settled the
+     * next restore by it (F-09). The attempt this copy read is the one
+     * the restore action moved to `restoring`, with no handle yet.
+     *
+     * @throws IllegalBackupTransitionException
+     */
+    public function recordRestoreHandle(string $taskId): void
+    {
+        $this->writeOnTheAttemptItRead(['restore_task_id' => $taskId]);
+    }
+
+    /**
+     * Write `$values` only where the compare-and-set in
+     * {@see self::transitionTo()} would write: the state and the attempt this
+     * copy last read or wrote. Otherwise nothing is written and the refusal
+     * says it was a race.
+     *
+     * @param  array<string, mixed>  $values
+     *
+     * @throws IllegalBackupTransitionException
+     */
+    private function writeOnTheAttemptItRead(array $values): void
+    {
         $expected = BackupState::from((string) $this->getRawOriginal('state'));
 
         $query = $this->onTheAttemptItRead(
@@ -319,10 +352,7 @@ class Backup extends Model
             $this->attemptColumns($expected),
         );
 
-        $polledAt = now();
-        $count = $this->poll_count + 1;
-
-        if ($query->update(['last_polled_at' => $polledAt, 'poll_count' => $count]) === 0) {
+        if ($query->update($values) === 0) {
             $stored = static::query()->whereKey($this->getKey())->toBase()->value('state');
 
             throw $stored === $expected->value
@@ -330,8 +360,7 @@ class Backup extends Model
                 : IllegalBackupTransitionException::movedUnderneath((string) $this->getKey(), $expected, is_string($stored) ? $stored : null, $expected);
         }
 
-        $this->forceFill(['last_polled_at' => $polledAt, 'poll_count' => $count])
-            ->syncOriginalAttributes(['last_polled_at', 'poll_count']);
+        $this->forceFill($values)->syncOriginalAttributes(array_keys($values));
     }
 
     /**

@@ -151,6 +151,44 @@ final class ASweepSettlesOnlyTheAttemptItPolledTest extends VpsApiTestCase
     }
 
     /**
+     * A restore's handle is written after its provider call returns, and it
+     * used to be a plain save onto whatever the row held by then. A call that
+     * outlived its own poll window — the row handed to a person, settled, and
+     * a second restore started meanwhile — wrote the first restore's handle
+     * onto the second: the sweep would then poll the first task and settle
+     * the second restore by it (F-09's harm, by another road). It is written
+     * only onto the attempt the call started.
+     */
+    #[Test]
+    public function a_restore_handle_arriving_after_its_attempt_ended_is_not_written_onto_the_next_one(): void
+    {
+        [$user, $machine, $archive] = $this->anArchive();
+        $window = ARestoreCallWithAWindow::installFor(app(BackupProviderFactory::class), $machine->cluster()->firstOrFail());
+
+        $second = null;
+        $window->duringStartRestore = function () use ($window, $archive, $machine, $user, &$second): void {
+            $window->duringStartRestore = null;
+
+            // The first call is still out when its window closes.
+            $this->travel(13)->hours();
+            app(ReconcileRunningBackups::class)->execute();
+            $this->assertSame(BackupState::NeedsReview, $archive->refresh()->state);
+            Backup::query()->findOrFail($archive->id)->settleReview(false);
+
+            $second = app(RestoreServiceBackup::class)
+                ->execute(Backup::query()->findOrFail($archive->id), $machine->fresh(), $machine->hostname, (string) $user->getKey())
+                ->restore_task_id;
+        };
+
+        app(RestoreServiceBackup::class)->execute(Backup::query()->findOrFail($archive->id), $machine, $machine->hostname);
+
+        $this->assertNotNull($second);
+        $row = $archive->refresh();
+        $this->assertSame(BackupState::Restoring, $row->state);
+        $this->assertSame($second, $row->restore_task_id, 'The second restore keeps its own handle.');
+    }
+
+    /**
      * The indeterminate branch has its own call to `recordPoll()`: a poll
      * that got no answer is still a poll, and is recorded — on the attempt
      * this copy read, or not at all. Written as a plain save, it would land
