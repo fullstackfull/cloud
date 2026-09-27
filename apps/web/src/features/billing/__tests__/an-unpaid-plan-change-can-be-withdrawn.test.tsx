@@ -91,10 +91,21 @@ describe('an unpaid plan change can be withdrawn', () => {
     expect(screen.queryByRole('button', { name: 'Pay' })).toBeNull()
     expect(screen.getByText(/cannot be made right now, so the invoice cannot be paid/)).toBeTruthy()
 
+    // One click asks; nothing is sent until the customer confirms.
     fireEvent.click(withdraw)
+    expect(await screen.findByText('Withdraw this plan change?')).toBeTruthy()
+    const posted = () => calls.some((call) => call.startsWith('POST ') && call.endsWith('/invoices/01JPLANCHANGE/withdraw-plan-change'))
+    expect(posted()).toBe(false)
+
+    // Keeping it sends nothing.
+    fireEvent.click(screen.getByRole('button', { name: 'Keep the change' }))
+    expect(posted()).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Withdraw this plan change' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Withdraw the change' }))
 
     await waitFor(() => {
-      expect(calls.some((call) => call.startsWith('POST ') && call.endsWith('/invoices/01JPLANCHANGE/withdraw-plan-change'))).toBe(true)
+      expect(posted()).toBe(true)
     })
   })
 
