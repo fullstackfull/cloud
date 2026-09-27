@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Support;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use PhpParser\Node;
 use PhpParser\Node\Arg;
 use PhpParser\Node\Expr;
@@ -43,6 +45,13 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  * What it reads and what it does not see is stated here once, because the
  * gate's verdict is only as good as this list.
  *
+ * Every name, function, method, property, operator and node type it
+ * recognises is an element of one of the public constants below, and the
+ * code decides by membership of those constants and nothing spelled
+ * elsewhere. The gate requires a control in its fixture for every element
+ * of every constant ({@see self::VOCABULARY}), so an element added without
+ * a control, or removed while its control stands, turns the gate red.
+ *
  * ===========================================================================
  * WHAT IT READS
  * ===========================================================================
@@ -65,77 +74,95 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  * the hierarchy uses (the methods Laravel's `setUpTraits()` calls), then every
  * `#[Before]`/`@before` method. Then, statement by statement:
  *
- *  - **pins**: `$this->freezeTime()`, `$this->freezeSecond()`,
- *    `$this->travelTo($t)`, `$this->travel($n)->days()` (any unit), and
- *    `Carbon|CarbonImmutable|Date::setTestNow($t)` with an argument that is
- *    not `null`;
- *  - **unpins**: `$this->travelBack()`, `Wormhole::back()`, and
- *    `…::setTestNow()` with no argument or `null`;
- *  - **the callback forms** (`freezeTime(fn)`, `travelTo($t, fn)`,
- *    `travel($n)->days(fn)`, `Carbon::withTestNow($t, fn)`): the closure's
- *    body is walked pinned, and after the call the clock is unpinned (the
- *    framework clears it), or, for `withTestNow`, back as it was;
- *  - **`$this->helper()`, `self::helper()`, `static::helper()`,
- *    `parent::helper()`** that resolve to a method in the set are walked
- *    inline, in the state of the call, and their effect on the bit carries
- *    back — so a helper that freezes pins, and an assertion inside a helper
- *    is judged in the state its caller calls it in;
+ *  - **pins**: `$this->m()` for `m` in {@see self::PIN_METHODS} (with no
+ *    callback), `$this->travel($n)->u()` for `u` in {@see self::WORMHOLE_UNITS}
+ *    (with no callback), and `C::s($t)` for `C` in {@see self::TEST_NOW_CLASSES}
+ *    and `s` in {@see self::TEST_NOW_SETTERS} with an argument that is not
+ *    `null`;
+ *  - **unpins**: `$this->m()` for `m` in {@see self::UNPIN_METHODS},
+ *    `C::m()` for each pair in {@see self::UNPIN_STATICS}, and a
+ *    {@see self::TEST_NOW_SETTERS} call with no argument or `null`;
+ *  - **the callback forms**: a {@see self::PIN_METHODS} call or a Wormhole unit
+ *    given a closure at the callback position walks the closure's body
+ *    pinned, and leaves the clock unpinned after it (the framework clears it);
+ *    `C::s($t, fn)` for `s` in {@see self::TEST_NOW_SCOPES} walks the closure
+ *    pinned and leaves the clock as it found it;
+ *  - **helpers**: a call through each receiver in {@see self::HELPER_SCOPES}
+ *    (`$this->h()`, `self::h()`, `static::h()`, `parent::h()`) that resolves to
+ *    a method in the set is walked inline, in the state of the call, and its
+ *    effect on the bit carries back. `$this`/`static` resolve from the class
+ *    running the test, `self` from the class that wrote the call, `parent`
+ *    from that class's parent;
  *  - **any other closure** is walked in the current state, and what it does to
  *    the bit does not leak out.
  *
- * **Assertions** are calls whose name begins `assert`, on any receiver
- * (`$this`, `self::`, a test response). One is a finding when the clock is not
- * pinned there and the compared value reads the clock:
+ * **Assertions** are calls whose name begins `assert`, on any receiver. One is
+ * a finding when the clock is not pinned there and the compared value reads
+ * the clock:
  *
- *  - an **equality** assertion — {@see self::EQUALITY} lists each with the
- *    argument positions that are compared (a failure message is never read) —
- *    with a clock read flowing into a compared argument;
- *  - a **predicate** assertion (`assertTrue`, `assertFalse`, …) whose argument
- *    is an equality: `===`, `!==`, `==`, `!=` with a clock read flowing into a
- *    side, or a Carbon equality (`eq`, `equalTo`, `ne`, `notEqualTo`,
- *    `isSame*`, `isToday`, `isYesterday`, `isTomorrow`, `isCurrent*`,
- *    `isNext*`/`isLast*` of a unit, `isBirthday`) with a clock read on either
- *    side or, for the ones that compare with now when given nothing, no
- *    argument; through `!`, `&&` and `||`.
+ *  - an **equality** assertion, {@see self::EQUALITY}, which lists each with
+ *    the argument positions it compares (a failure message is never read),
+ *    with a clock read flowing into a compared argument (a named argument
+ *    other than `message` is compared);
+ *  - a **predicate** assertion, {@see self::PREDICATE}, whose argument is an
+ *    equality: a node in {@see self::PREDICATE_OPERATORS} with a clock read
+ *    flowing into either side; a call of a method in
+ *    {@see self::PREDICATE_METHODS} (or beginning with an element of
+ *    {@see self::PREDICATE_PREFIXES}) that reads the clock as below; through
+ *    the nodes in {@see self::PREDICATE_CONNECTIVES} (either side) and
+ *    {@see self::PREDICATE_NEGATIONS}.
  *
- * A **clock read** is `now()`, `today()`, `Carbon|CarbonImmutable|Date::now()`,
- * `::today()`, `::yesterday()`, `::tomorrow()`, `::create()` with nothing,
- * `::parse()` or `::make()` with nothing or a relative literal, `new Carbon()`
- * (or `CarbonImmutable`) with nothing or a relative literal, and the Carbon
- * methods that read the clock when given nothing (`diffIn*()`,
- * `diffForHumans()`, `isToday()`, …, the `age` property). PHP's own clock —
- * `time()`, `microtime()`, `date($format)`, `gmdate($format)`,
- * `new DateTime()`, `new DateTimeImmutable()` (with nothing or a relative
- * literal) — is also a clock read, and one that freezing does not reach, so
- * it is a finding pinned or not.
+ * A **clock read** is:
  *
- * A **relative literal** is a first argument that is a plain string literal
- * whose meaning depends on the moment it is read: {@see self::isRelative()}
- * resolves it with PHP's `strtotime()` against two base times a year and a
- * few hours apart and calls it relative when the answers differ (`'now'`,
- * `'today'`, `'+7 days'`, `'tomorrow noon'`, `'next monday'`), and absolute
- * when they agree (`'2026-01-01'`, `'@1790505192'`). A string `strtotime()`
- * cannot parse at all is taken as absolute, and so is any argument that is
- * not a plain literal (a variable, a concatenation, an interpolation).
+ *  - `f()` for `f` in {@see self::CLOCK_FUNCTIONS};
+ *  - `C::s()` for `C` in {@see self::CLOCK_CLASSES}, `s` in
+ *    {@see self::CLOCK_STATICS};
+ *  - `C::p($literal)` for `p` in {@see self::STATIC_PARSERS} with a relative
+ *    literal first;
+ *  - `new C()` for `C` in {@see self::CLOCK_CONSTRUCTORS}, with nothing or a
+ *    relative literal first;
+ *  - `$x->m()` with no argument, for `m` in {@see self::IMPLICIT_METHODS} or
+ *    beginning with an element of {@see self::IMPLICIT_PREFIXES}, and `$x->p`
+ *    for `p` in {@see self::IMPLICIT_PROPERTIES}.
  *
- * A clock read **flows into** a value when it is the value, or the receiver of
- * a method chain or a property fetch that makes the value
- * (`now()->addDays(7)->toDateString()`, `now()->timestamp`), or an element of
- * an array literal, an operand of an operator, a part of an interpolated
- * string, a cast, a branch of a ternary or `match`, an argument of a plain
- * function (`json_encode`, `sprintf`), an argument of a static call on a
- * clock class (`Carbon::parse(now())`), or an argument of a Carbon method that
- * combines two dates (`diffIn*`, `isSame*`, `eq`, …).
+ * **PHP's own clock**, which freezing does not reach and which is therefore a
+ * finding pinned or not: `f(…)` for `f` in {@see self::NATIVE_FUNCTIONS} with
+ * the argument count that list gives (`null`: any), and `new C()` for `C` in
+ * {@see self::NATIVE_CONSTRUCTORS} with nothing or a relative literal first.
+ *
+ * A **relative literal** is a plain string literal ({@see self::isRelative()})
+ * whose meaning depends on the moment it is read: resolved with PHP's
+ * `strtotime()` against two base times a year and some hours apart, the two
+ * answers differ (`'now'`, `'today'`, `'+7 days'`, `'tomorrow noon'`,
+ * `'next monday'`). One whose answers agree (`'2026-01-01'`,
+ * `'@1790505192'`) is absolute, and so is one `strtotime()` cannot parse
+ * (`'not a date'`, on which Carbon throws). An empty or blank literal (`''`),
+ * which Carbon and PHP read as now, is relative. An argument that is not a
+ * plain literal (a variable, a concatenation, an interpolation, `null`) is
+ * never relative.
+ *
+ * A clock read **flows into** a value when it is the value, or:
+ *
+ *  - the receiver of a node in {@see self::RECEIVER_FLOWS} (a method chain
+ *    `now()->addDays(7)->toDateString()`, a property `now()->timestamp`);
+ *  - a child of a node in {@see self::FLOW_NODES} (an array element, an index,
+ *    an operand of any binary operator, a cast, a ternary's branch, a `match`
+ *    arm, an interpolated part, a unary sign, a clone);
+ *  - an argument of a call of a plain function (`sprintf`, `json_encode`), of a
+ *    static call on a {@see self::CLOCK_CLASSES} class (`Carbon::parse(now())`),
+ *    or of a method in {@see self::COMBINE_METHODS} or beginning with an
+ *    element of {@see self::COMBINE_PREFIXES} (`diffInDays(now())`, `eq(now())`).
  *
  * ===========================================================================
  * WHAT IT CANNOT SEE
  * ===========================================================================
  *
- *  - **A clock read held in a variable.** `$expected = now()->addDay();` and,
- *    later, `assertSame($expected, …)` is not read: the variable could equally
- *    hold the test's own read that it handed the code as input, and an
- *    assertion about that input is not the shape. (One that is read after
- *    the code ran, on an unpinned clock, is the shape, and is not seen.)
+ *  - **A clock read held in a variable**, whenever it was read.
+ *    `$expected = now()->addDay();` and, later, `assertSame($expected, …)` is
+ *    not read. That covers the variable the test handed the code as input
+ *    (not the shape), and equally a variable read on an unpinned clock
+ *    before or after the code ran and never handed to it, which is the shape
+ *    — the code reads the clock at another moment — and is not seen.
  *  - **Two clock reads in the test's own fixture** whose difference the code
  *    reports — `'started_at' => now()->subSeconds(20), 'finished_at' =>
  *    now()`, then an exact duration asserted. No assertion reads the clock,
@@ -145,9 +172,12 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  *    loop, or a `try` counts from its position on whether or not the branch
  *    runs, and a closure's body is judged where it is written, not where it
  *    is called.
- *  - **A clock read passed through a method call that is not a Carbon
- *    combine** (`$this->expectedFor(now())`, `$builder->where('at', now())`)
- *    does not flow; neither does one inside a closure argument.
+ *  - **A clock read passed through any other method call**
+ *    (`$this->expectedFor(now())`, `$builder->where('at', now())`) does not
+ *    flow; neither does one inside a closure argument.
+ *  - **Clock reads spelled any other way**: `Carbon::parse(null)`, a static
+ *    reader called through a variable class or an alias, a Carbon macro, a
+ *    clock read through `app('clock')` or a service.
  *  - **Code outside the set**: a pin or an assertion in a vendor trait or base
  *    class, a helper reached through a variable (`$helper->check()`) or a
  *    dynamic name, a data provider's values.
@@ -198,28 +228,152 @@ final class UnpinnedClockAssertions
     ];
 
     /** Assertions whose one argument is a condition. */
-    private const array PREDICATE = ['assertTrue', 'assertFalse', 'assertNotTrue', 'assertNotFalse'];
+    public const array PREDICATE = ['assertTrue', 'assertFalse', 'assertNotTrue', 'assertNotFalse'];
 
-    /** Classes whose static clock reads freezing reaches, by short name. */
-    private const array CLOCK_CLASSES = ['Carbon', 'CarbonImmutable', 'Date', 'CarbonInterface'];
+    /** In a predicate, an equality whose sides are read. */
+    public const array PREDICATE_OPERATORS = [
+        BinaryOp\Identical::class, BinaryOp\NotIdentical::class, BinaryOp\Equal::class, BinaryOp\NotEqual::class,
+    ];
 
-    private const array CLOCK_STATICS = ['now', 'today', 'yesterday', 'tomorrow'];
+    /** In a predicate, nodes either of whose sides may be the equality. */
+    public const array PREDICATE_CONNECTIVES = [
+        BinaryOp\BooleanAnd::class, BinaryOp\BooleanOr::class, BinaryOp\LogicalAnd::class, BinaryOp\LogicalOr::class,
+    ];
 
-    /** Laravel's Wormhole units: `travel($n)->unit()`. */
-    private const array WORMHOLE_UNITS = [
+    /** In a predicate, nodes whose operand may be the equality. */
+    public const array PREDICATE_NEGATIONS = [Expr\BooleanNot::class];
+
+    /** In a predicate, Carbon methods that are an equality. */
+    public const array PREDICATE_METHODS = [
+        'eq', 'equalTo', 'ne', 'notEqualTo', 'isToday', 'isYesterday', 'isTomorrow', 'isBirthday',
+        'isNextWeek', 'isNextMonth', 'isNextQuarter', 'isNextYear', 'isNextDecade', 'isNextCentury', 'isNextMillennium',
+        'isLastWeek', 'isLastMonth', 'isLastQuarter', 'isLastYear', 'isLastDecade', 'isLastCentury', 'isLastMillennium',
+    ];
+
+    /** In a predicate, prefixes of Carbon methods that are an equality (`isSameDay`, `isCurrentMonth`). */
+    public const array PREDICATE_PREFIXES = ['isSame', 'isCurrent'];
+
+    /** Functions that read the clock, which freezing reaches. */
+    public const array CLOCK_FUNCTIONS = ['now', 'today'];
+
+    /** Classes, by short name, whose static readers and parsers read the clock. */
+    public const array CLOCK_CLASSES = ['Carbon', 'CarbonImmutable', 'Date'];
+
+    /** Static methods that read the clock. */
+    public const array CLOCK_STATICS = ['now', 'today', 'yesterday', 'tomorrow'];
+
+    /** Static methods that read the clock when given a relative literal. */
+    public const array STATIC_PARSERS = ['parse', 'make'];
+
+    /** Classes, by short name, whose constructor reads the clock given nothing or a relative literal. */
+    public const array CLOCK_CONSTRUCTORS = ['Carbon', 'CarbonImmutable'];
+
+    /** Carbon methods that read the clock when given no argument. */
+    public const array IMPLICIT_METHODS = [
+        'isToday', 'isYesterday', 'isTomorrow', 'isBirthday', 'diffForHumans',
+        'isNextWeek', 'isNextMonth', 'isNextQuarter', 'isNextYear', 'isNextDecade', 'isNextCentury', 'isNextMillennium',
+        'isLastWeek', 'isLastMonth', 'isLastQuarter', 'isLastYear', 'isLastDecade', 'isLastCentury', 'isLastMillennium',
+    ];
+
+    /** Prefixes of Carbon methods that read the clock when given no argument (`isCurrentDay()`, `diffInDays()`). */
+    public const array IMPLICIT_PREFIXES = ['isCurrent', 'diffIn', 'floatDiffIn'];
+
+    /** Carbon properties that read the clock. */
+    public const array IMPLICIT_PROPERTIES = ['age'];
+
+    /** Carbon methods whose arguments flow into their result. */
+    public const array COMBINE_METHODS = [
+        'eq', 'equalTo', 'ne', 'notEqualTo', 'isBirthday', 'diffForHumans', 'average', 'max', 'min', 'closest', 'farthest',
+    ];
+
+    /** Prefixes of Carbon methods whose arguments flow into their result (`isSameDay`, `diffInDays`). */
+    public const array COMBINE_PREFIXES = ['isSame', 'diffIn', 'floatDiffIn'];
+
+    /** PHP's own clock: function => the argument count at which it reads it (`null`: any). */
+    public const array NATIVE_FUNCTIONS = [
+        'time' => null, 'microtime' => null, 'date' => 1, 'gmdate' => 1, 'idate' => 1, 'getdate' => 0, 'localtime' => 0,
+    ];
+
+    /** PHP's own clock: classes whose constructor reads it given nothing or a relative literal. */
+    public const array NATIVE_CONSTRUCTORS = ['DateTime', 'DateTimeImmutable'];
+
+    /** Nodes whose receiver (`var`) flows into their value. */
+    public const array RECEIVER_FLOWS = [
+        MethodCall::class, NullsafeMethodCall::class, PropertyFetch::class, NullsafePropertyFetch::class,
+    ];
+
+    /** Nodes any of whose children flow into their value. */
+    public const array FLOW_NODES = [
+        Expr\Array_::class, Node\ArrayItem::class, Expr\ArrayDimFetch::class, BinaryOp::class, Expr\Cast::class,
+        Expr\Ternary::class, Expr\Match_::class, Node\MatchArm::class, Node\Scalar\InterpolatedString::class,
+        Expr\UnaryMinus::class, Expr\UnaryPlus::class, Expr\Clone_::class,
+    ];
+
+    /** `$this->m()` pins; the value is the position of its optional callback. */
+    public const array PIN_METHODS = ['freezeTime' => 0, 'freezeSecond' => 0, 'travelTo' => 1];
+
+    /** Laravel's Wormhole units: `$this->travel($n)->unit()` pins. */
+    public const array WORMHOLE_UNITS = [
         'microsecond', 'microseconds', 'millisecond', 'milliseconds', 'second', 'seconds',
         'minute', 'minutes', 'hour', 'hours', 'day', 'days', 'week', 'weeks',
         'month', 'months', 'year', 'years',
     ];
 
-    /** Carbon methods that read the clock when given nothing to compare with. */
-    private const string IMPLICIT = '/^(isToday|isYesterday|isTomorrow|isCurrent[A-Z]\w*|isNext(Week|Month|Year|Quarter|Decade|Century|Millennium)|isLast(Week|Month|Year|Quarter|Decade|Century|Millennium)|isSame\w+|isBirthday|diffIn\w+|floatDiffIn\w+|diffForHumans)$/';
+    /** `$this->m()` unpins. */
+    public const array UNPIN_METHODS = ['travelBack'];
 
-    /** Carbon methods that compare, or combine, the receiver with an argument. */
-    private const string COMBINE = '/^(eq|equalTo|ne|notEqualTo|isSame\w*|isBirthday|diffIn\w+|floatDiffIn\w+|diffForHumans|average|max|min|closest|farthest)$/';
+    /** `Class::method()` unpins, by short class name. */
+    public const array UNPIN_STATICS = ['Wormhole' => 'back'];
 
-    /** Carbon methods that are an equality, for a predicate assertion. */
-    private const string CARBON_EQUALITY = '/^(eq|equalTo|ne|notEqualTo|isSame\w*|isToday|isYesterday|isTomorrow|isCurrent[A-Z]\w*|isNext(Week|Month|Year|Quarter|Decade|Century|Millennium)|isLast(Week|Month|Year|Quarter|Decade|Century|Millennium)|isBirthday)$/';
+    /** Classes, by short name, whose test-now setters pin. */
+    public const array TEST_NOW_CLASSES = ['Carbon', 'CarbonImmutable', 'Date'];
+
+    /** Static setters that pin given a value and unpin given nothing or `null`. */
+    public const array TEST_NOW_SETTERS = ['setTestNow', 'setTestNowAndTimezone'];
+
+    /** Static methods that pin for the callback they are given, then restore the clock. */
+    public const array TEST_NOW_SCOPES = ['withTestNow'];
+
+    /** Receivers through which a helper in the set is followed. */
+    public const array HELPER_SCOPES = ['this', 'self', 'static', 'parent'];
+
+    /**
+     * Every constant the gate requires a control for, with the kind of
+     * control each element needs (`found` or `clean`) and the prefix of its
+     * name in the fixture: `<kind>_<prefix>__<element>`.
+     *
+     * @var array<string, array{0: 'found'|'clean', 1: string}>
+     */
+    public const array VOCABULARY = [
+        'PREDICATE' => ['found', 'predicate_assertion'],
+        'PREDICATE_OPERATORS' => ['found', 'predicate_operator'],
+        'PREDICATE_CONNECTIVES' => ['found', 'predicate_connective'],
+        'PREDICATE_NEGATIONS' => ['found', 'predicate_negation'],
+        'PREDICATE_METHODS' => ['found', 'predicate_method'],
+        'PREDICATE_PREFIXES' => ['found', 'predicate_prefix'],
+        'CLOCK_FUNCTIONS' => ['found', 'clock_function'],
+        'CLOCK_CLASSES' => ['found', 'clock_class'],
+        'CLOCK_STATICS' => ['found', 'clock_static'],
+        'STATIC_PARSERS' => ['found', 'static_parser'],
+        'CLOCK_CONSTRUCTORS' => ['found', 'clock_constructor'],
+        'IMPLICIT_METHODS' => ['found', 'implicit_method'],
+        'IMPLICIT_PREFIXES' => ['found', 'implicit_prefix'],
+        'IMPLICIT_PROPERTIES' => ['found', 'implicit_property'],
+        'COMBINE_METHODS' => ['found', 'combine_method'],
+        'COMBINE_PREFIXES' => ['found', 'combine_prefix'],
+        'NATIVE_FUNCTIONS' => ['found', 'native_function'],
+        'NATIVE_CONSTRUCTORS' => ['found', 'native_constructor'],
+        'RECEIVER_FLOWS' => ['found', 'receiver_flow'],
+        'FLOW_NODES' => ['found', 'flow_node'],
+        'PIN_METHODS' => ['clean', 'pin_method'],
+        'WORMHOLE_UNITS' => ['clean', 'wormhole_unit'],
+        'UNPIN_METHODS' => ['found', 'unpin_method'],
+        'UNPIN_STATICS' => ['found', 'unpin_static'],
+        'TEST_NOW_CLASSES' => ['clean', 'test_now_class'],
+        'TEST_NOW_SETTERS' => ['clean', 'test_now_setter'],
+        'TEST_NOW_SCOPES' => ['clean', 'test_now_scope'],
+        'HELPER_SCOPES' => ['found', 'helper_scope'],
+    ];
 
     /** @var array<string, array{node: ClassLike, file: string, parent: ?string, traits: list<string>}> */
     private array $classes = [];
@@ -312,6 +466,167 @@ final class UnpinnedClockAssertions
     public function pinsSeen(): int
     {
         return $this->pins;
+    }
+
+    /**
+     * Is this a string literal whose meaning depends on when it is read?
+     */
+    public static function isRelative(Expr $expr): bool
+    {
+        if (! $expr instanceof String_) {
+            return false;
+        }
+
+        // Carbon and PHP read an empty string as now; strtotime() cannot parse it.
+        if (trim($expr->value) === '') {
+            return true;
+        }
+
+        $utc = new DateTimeZone('UTC');
+        $first = strtotime($expr->value, (new DateTimeImmutable('2020-03-04 05:06:07', $utc))->getTimestamp());
+        $second = strtotime($expr->value, (new DateTimeImmutable('2021-03-05 09:10:11', $utc))->getTimestamp());
+
+        return $first !== false && $second !== false && $first !== $second;
+    }
+
+    /**
+     * Does a clock read flow into this value? With $nativeOnly, only PHP's own clock counts.
+     */
+    public static function readsClock(?Node $expr, bool $nativeOnly = false): bool
+    {
+        if ($expr === null) {
+            return false;
+        }
+
+        if ($expr instanceof FuncCall) {
+            $fn = $expr->name instanceof Name ? strtolower($expr->name->getLast()) : null;
+            if ($expr->isFirstClassCallable() || $fn === null) {
+                return false;
+            }
+            $args = $expr->getArgs();
+            if (! $nativeOnly && in_array($fn, self::CLOCK_FUNCTIONS, true)) {
+                return true;
+            }
+            if (array_key_exists($fn, self::NATIVE_FUNCTIONS)
+                && (self::NATIVE_FUNCTIONS[$fn] === null || self::NATIVE_FUNCTIONS[$fn] === count($args))) {
+                return true;
+            }
+
+            return self::anyArgumentReadsClock($args, $nativeOnly);
+        }
+
+        if ($expr instanceof StaticCall) {
+            $class = $expr->class instanceof Name ? $expr->class->getLast() : null;
+            if (! in_array($class, self::CLOCK_CLASSES, true) || $expr->isFirstClassCallable()) {
+                return false;
+            }
+            $method = $expr->name instanceof Identifier ? $expr->name->toString() : null;
+            $args = $expr->getArgs();
+            if (! $nativeOnly && in_array($method, self::CLOCK_STATICS, true)) {
+                return true;
+            }
+            if (! $nativeOnly && in_array($method, self::STATIC_PARSERS, true) && $args !== [] && self::isRelative($args[0]->value)) {
+                return true;
+            }
+
+            return self::anyArgumentReadsClock($args, $nativeOnly);
+        }
+
+        if ($expr instanceof New_) {
+            $class = $expr->class instanceof Name ? $expr->class->getLast() : null;
+            $args = $expr->isFirstClassCallable() ? [] : $expr->getArgs();
+            $relative = $args === [] || self::isRelative($args[0]->value);
+            if (in_array($class, self::NATIVE_CONSTRUCTORS, true)) {
+                return $relative;
+            }
+            if (in_array($class, self::CLOCK_CONSTRUCTORS, true)) {
+                return ! $nativeOnly && $relative;
+            }
+
+            return false;
+        }
+
+        if (self::isOneOf($expr, self::RECEIVER_FLOWS) && self::readsClock($expr->var, $nativeOnly)) {
+            return true;
+        }
+
+        if (($expr instanceof MethodCall || $expr instanceof NullsafeMethodCall)) {
+            if (! $expr->name instanceof Identifier || $expr->isFirstClassCallable()) {
+                return false;
+            }
+            $method = $expr->name->toString();
+            $args = $expr->getArgs();
+            if (! $nativeOnly && $args === [] && self::named($method, self::IMPLICIT_METHODS, self::IMPLICIT_PREFIXES)) {
+                return true;
+            }
+
+            return self::named($method, self::COMBINE_METHODS, self::COMBINE_PREFIXES)
+                && self::anyArgumentReadsClock($args, $nativeOnly);
+        }
+
+        if ($expr instanceof PropertyFetch || $expr instanceof NullsafePropertyFetch) {
+            return ! $nativeOnly && $expr->name instanceof Identifier
+                && in_array($expr->name->toString(), self::IMPLICIT_PROPERTIES, true);
+        }
+
+        if (self::isOneOf($expr, self::FLOW_NODES)) {
+            foreach ($expr->getSubNodeNames() as $name) {
+                $child = $expr->$name;
+                foreach (is_array($child) ? $child : [$child] as $part) {
+                    if ($part instanceof Node && ! $part instanceof InterpolatedStringPart && self::readsClock($part, $nativeOnly)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  list<class-string>  $types
+     */
+    private static function isOneOf(Node $node, array $types): bool
+    {
+        foreach ($types as $type) {
+            if ($node instanceof $type) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  list<string>  $names
+     * @param  list<string>  $prefixes
+     */
+    private static function named(string $method, array $names, array $prefixes): bool
+    {
+        if (in_array($method, $names, true)) {
+            return true;
+        }
+        foreach ($prefixes as $prefix) {
+            if (strlen($method) > strlen($prefix) && str_starts_with($method, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  list<Arg>  $args
+     */
+    private static function anyArgumentReadsClock(array $args, bool $nativeOnly): bool
+    {
+        foreach ($args as $arg) {
+            if (self::readsClock($arg->value, $nativeOnly)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -509,12 +824,10 @@ final class UnpinnedClockAssertions
         $class = $call instanceof StaticCall && $call->class instanceof Name ? $call->class : null;
         $args = $call->isFirstClassCallable() ? [] : $call->getArgs();
 
-        // freezeTime(), freezeSecond(), travelTo($t) — with or without a callback.
-        if ($onThis && in_array($name, ['freezeTime', 'freezeSecond', 'travelTo'], true)) {
-            return $this->pinCall($args, $name === 'travelTo' ? 1 : 0, $pinned, $owner);
+        if ($onThis && $name !== null && array_key_exists($name, self::PIN_METHODS)) {
+            return $this->pinCall($args, self::PIN_METHODS[$name], $pinned, $owner);
         }
 
-        // travel($n)->unit() — with or without a callback.
         if ($call instanceof MethodCall && in_array($name, self::WORMHOLE_UNITS, true)
             && $call->var instanceof MethodCall && $call->var->var instanceof Variable && $call->var->var->name === 'this'
             && $call->var->name instanceof Identifier && $call->var->name->toString() === 'travel') {
@@ -523,16 +836,16 @@ final class UnpinnedClockAssertions
             return $this->pinCall($args, 0, $pinned, $owner);
         }
 
-        if ($onThis && $name === 'travelBack') {
+        if ($onThis && in_array($name, self::UNPIN_METHODS, true)) {
             return false;
         }
 
-        if ($class !== null && $class->getLast() === 'Wormhole' && $name === 'back') {
+        if ($class !== null && (self::UNPIN_STATICS[$class->getLast()] ?? null) === $name) {
             return false;
         }
 
-        if ($class !== null && in_array($class->getLast(), self::CLOCK_CLASSES, true)) {
-            if ($name === 'setTestNow' || $name === 'setTestNowAndTimezone') {
+        if ($class !== null && in_array($class->getLast(), self::TEST_NOW_CLASSES, true)) {
+            if (in_array($name, self::TEST_NOW_SETTERS, true)) {
                 $pinned = $this->walk($args, $pinned, $owner);
                 $value = $args[0]->value ?? null;
                 if ($value === null || ($value instanceof ConstFetch && strtolower($value->name->toString()) === 'null')) {
@@ -543,7 +856,7 @@ final class UnpinnedClockAssertions
                 return true;
             }
 
-            if ($name === 'withTestNow') {
+            if (in_array($name, self::TEST_NOW_SCOPES, true)) {
                 $callback = $args[1]->value ?? null;
                 $this->walk($args[0] ?? null, $pinned, $owner);
                 if ($callback instanceof Closure || $callback instanceof ArrowFunction) {
@@ -562,8 +875,8 @@ final class UnpinnedClockAssertions
         $pinned = $this->walk($args, $pinned, $owner);
 
         if ($name !== null && str_starts_with($name, 'assert') && ! ($call instanceof FuncCall)) {
-            $native = $this->nativeClockIn($name, $args);
-            if ($native || (! $pinned && self::comparesAClockRead($name, $args))) {
+            $native = self::comparesAClockRead($name, $args, true);
+            if ($native || (! $pinned && self::comparesAClockRead($name, $args, false))) {
                 $this->findings[] = [
                     'test' => $this->test,
                     'file' => $this->classes[$owner]['file'] ?? $this->file,
@@ -576,10 +889,13 @@ final class UnpinnedClockAssertions
 
         // A helper in the set, walked inline in the state of the call — an
         // assertion helper of the test's own (`assertStamped()`) included.
-        if ($name !== null && ($onThis || ($class !== null && in_array($class->toLowerString(), ['self', 'static', 'parent'], true)))) {
-            $lookupFrom = $class !== null && $class->toLowerString() === 'parent'
-                ? ($this->classes[$owner]['parent'] ?? null)
-                : ($class !== null && $class->toLowerString() === 'self' ? $owner : $this->testClass);
+        $scope = $onThis ? 'this' : ($class !== null ? $class->toLowerString() : null);
+        if ($name !== null && in_array($scope, self::HELPER_SCOPES, true)) {
+            $lookupFrom = match ($scope) {
+                'parent' => $this->classes[$owner]['parent'] ?? null,
+                'self' => $owner,
+                default => $this->testClass,
+            };
             $method = $this->findMethod($lookupFrom, $name);
             if ($method !== null) {
                 $key = $method[1].'::'.$name;
@@ -622,219 +938,45 @@ final class UnpinnedClockAssertions
     /**
      * @param  list<Arg>  $args
      */
-    private static function comparesAClockRead(string $name, array $args): bool
+    private static function comparesAClockRead(string $name, array $args, bool $nativeOnly): bool
     {
-        foreach (self::comparedArguments($name, $args) as $arg) {
-            if (in_array($name, self::PREDICATE, true) ? self::isEqualityWithAClockRead($arg) : self::readsClock($arg)) {
-                return true;
-            }
-        }
+        $predicate = in_array($name, self::PREDICATE, true);
+        $positions = self::EQUALITY[$name] ?? ($predicate ? [0] : []);
 
-        return false;
-    }
-
-    /**
-     * @param  list<Arg>  $args
-     */
-    private function nativeClockIn(string $name, array $args): bool
-    {
-        foreach (self::comparedArguments($name, $args) as $arg) {
-            if (in_array($name, self::PREDICATE, true) ? self::isEqualityWithAClockRead($arg, true) : self::readsClock($arg, true)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * @param  list<Arg>  $args
-     * @return list<Expr>
-     */
-    private static function comparedArguments(string $name, array $args): array
-    {
-        $positions = self::EQUALITY[$name] ?? (in_array($name, self::PREDICATE, true) ? [0] : []);
-        $compared = [];
         foreach ($args as $i => $arg) {
             if ($arg->unpack) {
                 continue;
             }
-            if ($arg->name !== null ? $arg->name->toString() !== 'message' && $positions !== [] : in_array($i, $positions, true)) {
-                $compared[] = $arg->value;
+            $compared = $arg->name !== null
+                ? $arg->name->toString() !== 'message' && $positions !== []
+                : in_array($i, $positions, true);
+            if ($compared && ($predicate ? self::isEqualityWithAClockRead($arg->value, $nativeOnly) : self::readsClock($arg->value, $nativeOnly))) {
+                return true;
             }
         }
 
-        return $compared;
+        return false;
     }
 
-    private static function isEqualityWithAClockRead(Expr $expr, bool $nativeOnly = false): bool
+    private static function isEqualityWithAClockRead(Expr $expr, bool $nativeOnly): bool
     {
-        if ($expr instanceof Expr\BooleanNot) {
+        if (self::isOneOf($expr, self::PREDICATE_NEGATIONS)) {
             return self::isEqualityWithAClockRead($expr->expr, $nativeOnly);
         }
 
-        if ($expr instanceof BinaryOp\BooleanAnd || $expr instanceof BinaryOp\BooleanOr
-            || $expr instanceof BinaryOp\LogicalAnd || $expr instanceof BinaryOp\LogicalOr) {
+        if (self::isOneOf($expr, self::PREDICATE_CONNECTIVES)) {
             return self::isEqualityWithAClockRead($expr->left, $nativeOnly) || self::isEqualityWithAClockRead($expr->right, $nativeOnly);
         }
 
-        if ($expr instanceof BinaryOp\Identical || $expr instanceof BinaryOp\NotIdentical
-            || $expr instanceof BinaryOp\Equal || $expr instanceof BinaryOp\NotEqual) {
+        if (self::isOneOf($expr, self::PREDICATE_OPERATORS)) {
             return self::readsClock($expr->left, $nativeOnly) || self::readsClock($expr->right, $nativeOnly);
         }
 
         if (($expr instanceof MethodCall || $expr instanceof NullsafeMethodCall) && $expr->name instanceof Identifier
-            && preg_match(self::CARBON_EQUALITY, $expr->name->toString())) {
-            if (! $nativeOnly && ! $expr->isFirstClassCallable() && $expr->getArgs() === [] && preg_match(self::IMPLICIT, $expr->name->toString())) {
-                return true;
-            }
-            if (self::readsClock($expr->var, $nativeOnly)) {
-                return true;
-            }
-            foreach ($expr->isFirstClassCallable() ? [] : $expr->getArgs() as $arg) {
-                if (self::readsClock($arg->value, $nativeOnly)) {
-                    return true;
-                }
-            }
+            && self::named($expr->name->toString(), self::PREDICATE_METHODS, self::PREDICATE_PREFIXES)) {
+            return self::readsClock($expr, $nativeOnly);
         }
 
         return false;
-    }
-
-    /**
-     * Does a clock read flow into this value? With $nativeOnly, only PHP's own clock counts.
-     */
-    public static function readsClock(?Node $expr, bool $nativeOnly = false): bool
-    {
-        if ($expr === null) {
-            return false;
-        }
-
-        if ($expr instanceof FuncCall) {
-            $fn = $expr->name instanceof Name ? strtolower($expr->name->getLast()) : null;
-            $argc = $expr->isFirstClassCallable() ? -1 : count($expr->getArgs());
-            if (! $nativeOnly && in_array($fn, ['now', 'today'], true) && $argc >= 0) {
-                return true;
-            }
-            if (in_array($fn, ['time', 'microtime'], true) && $argc >= 0
-                || in_array($fn, ['date', 'gmdate', 'idate'], true) && $argc === 1
-                || in_array($fn, ['getdate', 'localtime', 'mktime', 'gmmktime'], true) && $argc === 0) {
-                return true;
-            }
-            if ($argc > 0) {
-                foreach ($expr->getArgs() as $arg) {
-                    if (self::readsClock($arg->value, $nativeOnly)) {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
-
-        if ($expr instanceof StaticCall) {
-            $class = $expr->class instanceof Name ? $expr->class->getLast() : null;
-            if (! in_array($class, self::CLOCK_CLASSES, true) || $expr->isFirstClassCallable()) {
-                return false;
-            }
-            $method = $expr->name instanceof Identifier ? $expr->name->toString() : null;
-            $args = $expr->getArgs();
-            if (! $nativeOnly && in_array($method, self::CLOCK_STATICS, true)) {
-                return true;
-            }
-            if (! $nativeOnly && in_array($method, ['parse', 'make', 'create'], true)
-                && ($args === [] || self::isRelative($args[0]->value))) {
-                return $method !== 'create' || $args === [];
-            }
-            foreach ($args as $arg) {
-                if (self::readsClock($arg->value, $nativeOnly)) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        if ($expr instanceof New_) {
-            $class = $expr->class instanceof Name ? $expr->class->getLast() : null;
-            $args = $expr->getArgs();
-            $relative = $args === [] || self::isRelative($args[0]->value);
-            if (in_array($class, ['DateTime', 'DateTimeImmutable'], true)) {
-                return $relative;
-            }
-            if (in_array($class, ['Carbon', 'CarbonImmutable'], true)) {
-                return ! $nativeOnly && $relative;
-            }
-
-            return false;
-        }
-
-        if ($expr instanceof MethodCall || $expr instanceof NullsafeMethodCall) {
-            if (self::readsClock($expr->var, $nativeOnly)) {
-                return true;
-            }
-            if (! $expr->name instanceof Identifier || $expr->isFirstClassCallable()) {
-                return false;
-            }
-            $method = $expr->name->toString();
-            if (! $nativeOnly && $expr->getArgs() === [] && preg_match(self::IMPLICIT, $method)) {
-                return true;
-            }
-            if (preg_match(self::COMBINE, $method)) {
-                foreach ($expr->getArgs() as $arg) {
-                    if (self::readsClock($arg->value, $nativeOnly)) {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
-
-        if ($expr instanceof PropertyFetch || $expr instanceof NullsafePropertyFetch) {
-            if (! $nativeOnly && $expr->name instanceof Identifier && $expr->name->toString() === 'age') {
-                return true;
-            }
-
-            return self::readsClock($expr->var, $nativeOnly);
-        }
-
-        if ($expr instanceof Closure || $expr instanceof ArrowFunction || $expr instanceof Variable
-            || $expr instanceof Expr\Assign || $expr instanceof Expr\Isset_ || $expr instanceof Expr\Empty_
-            || $expr instanceof Expr\Instanceof_ || $expr instanceof Expr\ClassConstFetch || $expr instanceof Expr\StaticPropertyFetch) {
-            return false;
-        }
-
-        if ($expr instanceof Expr\Array_ || $expr instanceof Node\ArrayItem || $expr instanceof Expr\ArrayDimFetch
-            || $expr instanceof BinaryOp || $expr instanceof Expr\Cast || $expr instanceof Expr\Ternary
-            || $expr instanceof Expr\Match_ || $expr instanceof Node\MatchArm || $expr instanceof Node\Scalar\InterpolatedString
-            || $expr instanceof Expr\UnaryMinus || $expr instanceof Expr\UnaryPlus || $expr instanceof Expr\Clone_) {
-            foreach ($expr->getSubNodeNames() as $name) {
-                $child = $expr->$name;
-                foreach (is_array($child) ? $child : [$child] as $part) {
-                    if ($part instanceof Node && ! $part instanceof InterpolatedStringPart && self::readsClock($part, $nativeOnly)) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Is this a string literal whose meaning depends on when it is read?
-     */
-    public static function isRelative(Expr $expr): bool
-    {
-        if (! $expr instanceof String_) {
-            return false;
-        }
-
-        $utc = new \DateTimeZone('UTC');
-        $first = strtotime($expr->value, (new \DateTimeImmutable('2020-03-04 05:06:07', $utc))->getTimestamp());
-        $second = strtotime($expr->value, (new \DateTimeImmutable('2021-03-05 09:10:11', $utc))->getTimestamp());
-
-        return $first !== false && $second !== false && $first !== $second;
     }
 }

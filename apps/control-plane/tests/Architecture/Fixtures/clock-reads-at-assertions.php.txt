@@ -99,10 +99,63 @@ final class UnpinnedTest extends TestCase
         $this->assertTrue($row->created_at->isToday());
     }
 
+    // isSameDay() with no argument throws (Carbon 3): not a clock read.
     #[Test]
-    public function found_is_same_day_with_nothing(): void
+    public function clean_is_same_day_with_nothing(): void
     {
         $this->assertTrue($row->created_at->isSameDay());
+    }
+
+    // Carbon::create() with nothing is year 0, not now; make() with nothing is null.
+    #[Test]
+    public function clean_create_and_make_with_nothing(): void
+    {
+        $this->assertEquals(Carbon::create(), $row->at);
+        $this->assertEquals(Carbon::make($row->given), $row->at);
+    }
+
+    // An empty literal is read as now by Carbon::parse() and the constructors.
+    #[Test]
+    public function found_an_empty_literal(): void
+    {
+        $this->assertEquals(Carbon::parse(''), $row->at);
+    }
+
+    // A literal strtotime() cannot read is not relative (Carbon throws on it).
+    #[Test]
+    public function clean_an_unreadable_literal(): void
+    {
+        $this->assertEquals(Carbon::parse('not a date'), $row->at);
+    }
+
+    // A PHP clock function given a timestamp does not read the clock.
+    #[Test]
+    public function clean_a_native_function_given_a_timestamp(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(date('Y-m-d', 1790505192), $row->day);
+        $this->assertSame(getdate(1790505192), $row->parts);
+    }
+
+    // A clock read flows through a plain function's arguments ...
+    #[Test]
+    public function found_through_a_function_argument(): void
+    {
+        $this->assertSame(json_encode([now()]), $row->json);
+    }
+
+    // ... and a clock class's static call's arguments, and no other static call's.
+    #[Test]
+    public function found_through_a_clock_static_argument(): void
+    {
+        $this->assertEquals(Carbon::instance(now()), $row->at);
+    }
+
+    #[Test]
+    public function clean_through_another_static_argument(): void
+    {
+        $this->assertEquals(Row::stampOf(now()), $row->stamp);
+        $this->assertEquals($row->at->format(now()->format('Y')), $row->stamp);
     }
 
     #[Test]
@@ -529,5 +582,1221 @@ final class PinnedBeforeTest extends TestCase
     {
         $this->travelBack();
         $this->assertSame(now()->toDateString(), $row->day);
+    }
+}
+
+// One control per element of every constant the scanner recognises by
+// (UnpinnedClockAssertions::VOCABULARY, and EQUALITY per compared position).
+// Named <found|clean>_<prefix>__<element>; NoAssertionComparesAClockReadOnAnUnpinnedClockTest
+// requires one for every element and refuses any that names an element no longer listed.
+abstract class ElementParent extends TestCase
+{
+    protected function assertStampedByParent(object $row): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+final class ByElementTest extends ElementParent
+{
+    // PREDICATE
+    #[Test]
+    public function found_predicate_assertion__assertTrue(): void
+    {
+        $this->assertTrue($row->day === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_assertion__assertFalse(): void
+    {
+        $this->assertFalse($row->day === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_assertion__assertNotTrue(): void
+    {
+        $this->assertNotTrue($row->day === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_assertion__assertNotFalse(): void
+    {
+        $this->assertNotFalse($row->day === now()->toDateString());
+    }
+
+    // PREDICATE_OPERATORS
+    #[Test]
+    public function found_predicate_operator__Identical(): void
+    {
+        $this->assertTrue($row->day === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_operator__NotIdentical(): void
+    {
+        $this->assertTrue($row->day !== now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_operator__Equal(): void
+    {
+        $this->assertTrue($row->day == now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_operator__NotEqual(): void
+    {
+        $this->assertTrue($row->day != now()->toDateString());
+    }
+
+    // PREDICATE_CONNECTIVES
+    #[Test]
+    public function found_predicate_connective__BooleanAnd(): void
+    {
+        $this->assertTrue($ready && $row->day === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_connective__BooleanOr(): void
+    {
+        $this->assertTrue($ready || $row->day === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_connective__LogicalAnd(): void
+    {
+        $this->assertTrue($ready and $row->day === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_connective__LogicalOr(): void
+    {
+        $this->assertTrue($ready or $row->day === now()->toDateString());
+    }
+
+    // PREDICATE_NEGATIONS
+    #[Test]
+    public function found_predicate_negation__BooleanNot(): void
+    {
+        $this->assertTrue(! ($row->day === now()->toDateString()));
+    }
+
+    // PREDICATE_METHODS
+    #[Test]
+    public function found_predicate_method__eq(): void
+    {
+        $this->assertTrue($row->at->eq(now()));
+    }
+
+    #[Test]
+    public function found_predicate_method__equalTo(): void
+    {
+        $this->assertTrue($row->at->equalTo(now()));
+    }
+
+    #[Test]
+    public function found_predicate_method__ne(): void
+    {
+        $this->assertTrue($row->at->ne(now()));
+    }
+
+    #[Test]
+    public function found_predicate_method__notEqualTo(): void
+    {
+        $this->assertTrue($row->at->notEqualTo(now()));
+    }
+
+    #[Test]
+    public function found_predicate_method__isToday(): void
+    {
+        $this->assertTrue($row->at->isToday());
+    }
+
+    #[Test]
+    public function found_predicate_method__isYesterday(): void
+    {
+        $this->assertTrue($row->at->isYesterday());
+    }
+
+    #[Test]
+    public function found_predicate_method__isTomorrow(): void
+    {
+        $this->assertTrue($row->at->isTomorrow());
+    }
+
+    #[Test]
+    public function found_predicate_method__isBirthday(): void
+    {
+        $this->assertTrue($row->at->isBirthday());
+    }
+
+    #[Test]
+    public function found_predicate_method__isNextWeek(): void
+    {
+        $this->assertTrue($row->at->isNextWeek());
+    }
+
+    #[Test]
+    public function found_predicate_method__isNextMonth(): void
+    {
+        $this->assertTrue($row->at->isNextMonth());
+    }
+
+    #[Test]
+    public function found_predicate_method__isNextQuarter(): void
+    {
+        $this->assertTrue($row->at->isNextQuarter());
+    }
+
+    #[Test]
+    public function found_predicate_method__isNextYear(): void
+    {
+        $this->assertTrue($row->at->isNextYear());
+    }
+
+    #[Test]
+    public function found_predicate_method__isNextDecade(): void
+    {
+        $this->assertTrue($row->at->isNextDecade());
+    }
+
+    #[Test]
+    public function found_predicate_method__isNextCentury(): void
+    {
+        $this->assertTrue($row->at->isNextCentury());
+    }
+
+    #[Test]
+    public function found_predicate_method__isNextMillennium(): void
+    {
+        $this->assertTrue($row->at->isNextMillennium());
+    }
+
+    #[Test]
+    public function found_predicate_method__isLastWeek(): void
+    {
+        $this->assertTrue($row->at->isLastWeek());
+    }
+
+    #[Test]
+    public function found_predicate_method__isLastMonth(): void
+    {
+        $this->assertTrue($row->at->isLastMonth());
+    }
+
+    #[Test]
+    public function found_predicate_method__isLastQuarter(): void
+    {
+        $this->assertTrue($row->at->isLastQuarter());
+    }
+
+    #[Test]
+    public function found_predicate_method__isLastYear(): void
+    {
+        $this->assertTrue($row->at->isLastYear());
+    }
+
+    #[Test]
+    public function found_predicate_method__isLastDecade(): void
+    {
+        $this->assertTrue($row->at->isLastDecade());
+    }
+
+    #[Test]
+    public function found_predicate_method__isLastCentury(): void
+    {
+        $this->assertTrue($row->at->isLastCentury());
+    }
+
+    #[Test]
+    public function found_predicate_method__isLastMillennium(): void
+    {
+        $this->assertTrue($row->at->isLastMillennium());
+    }
+
+    // PREDICATE_PREFIXES
+    #[Test]
+    public function found_predicate_prefix__isSame(): void
+    {
+        $this->assertTrue($row->at->isSameDay(now()));
+    }
+
+    #[Test]
+    public function found_predicate_prefix__isCurrent(): void
+    {
+        $this->assertTrue($row->at->isCurrentDay());
+    }
+
+    // CLOCK_FUNCTIONS
+    #[Test]
+    public function found_clock_function__now(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function found_clock_function__today(): void
+    {
+        $this->assertEquals(today(), $row->at);
+    }
+
+    // CLOCK_CLASSES
+    #[Test]
+    public function found_clock_class__Carbon(): void
+    {
+        $this->assertEquals(Carbon::now(), $row->at);
+    }
+
+    #[Test]
+    public function found_clock_class__CarbonImmutable(): void
+    {
+        $this->assertEquals(CarbonImmutable::now(), $row->at);
+    }
+
+    #[Test]
+    public function found_clock_class__Date(): void
+    {
+        $this->assertEquals(Date::now(), $row->at);
+    }
+
+    // CLOCK_STATICS
+    #[Test]
+    public function found_clock_static__now(): void
+    {
+        $this->assertEquals(Carbon::now(), $row->at);
+    }
+
+    #[Test]
+    public function found_clock_static__today(): void
+    {
+        $this->assertEquals(Carbon::today(), $row->at);
+    }
+
+    #[Test]
+    public function found_clock_static__yesterday(): void
+    {
+        $this->assertEquals(Carbon::yesterday(), $row->at);
+    }
+
+    #[Test]
+    public function found_clock_static__tomorrow(): void
+    {
+        $this->assertEquals(Carbon::tomorrow(), $row->at);
+    }
+
+    // STATIC_PARSERS
+    #[Test]
+    public function found_static_parser__parse(): void
+    {
+        $this->assertEquals(Carbon::parse('+7 days'), $row->at);
+    }
+
+    #[Test]
+    public function found_static_parser__make(): void
+    {
+        $this->assertEquals(Carbon::make('+7 days'), $row->at);
+    }
+
+    // CLOCK_CONSTRUCTORS
+    #[Test]
+    public function found_clock_constructor__Carbon(): void
+    {
+        $this->assertEquals(new Carbon, $row->at);
+    }
+
+    #[Test]
+    public function found_clock_constructor__CarbonImmutable(): void
+    {
+        $this->assertEquals(new CarbonImmutable, $row->at);
+    }
+
+    // IMPLICIT_METHODS
+    #[Test]
+    public function found_implicit_method__isToday(): void
+    {
+        $this->assertSame($expected, $row->at->isToday());
+    }
+
+    #[Test]
+    public function found_implicit_method__isYesterday(): void
+    {
+        $this->assertSame($expected, $row->at->isYesterday());
+    }
+
+    #[Test]
+    public function found_implicit_method__isTomorrow(): void
+    {
+        $this->assertSame($expected, $row->at->isTomorrow());
+    }
+
+    #[Test]
+    public function found_implicit_method__isBirthday(): void
+    {
+        $this->assertSame($expected, $row->at->isBirthday());
+    }
+
+    #[Test]
+    public function found_implicit_method__diffForHumans(): void
+    {
+        $this->assertSame($expected, $row->at->diffForHumans());
+    }
+
+    #[Test]
+    public function found_implicit_method__isNextWeek(): void
+    {
+        $this->assertSame($expected, $row->at->isNextWeek());
+    }
+
+    #[Test]
+    public function found_implicit_method__isNextMonth(): void
+    {
+        $this->assertSame($expected, $row->at->isNextMonth());
+    }
+
+    #[Test]
+    public function found_implicit_method__isNextQuarter(): void
+    {
+        $this->assertSame($expected, $row->at->isNextQuarter());
+    }
+
+    #[Test]
+    public function found_implicit_method__isNextYear(): void
+    {
+        $this->assertSame($expected, $row->at->isNextYear());
+    }
+
+    #[Test]
+    public function found_implicit_method__isNextDecade(): void
+    {
+        $this->assertSame($expected, $row->at->isNextDecade());
+    }
+
+    #[Test]
+    public function found_implicit_method__isNextCentury(): void
+    {
+        $this->assertSame($expected, $row->at->isNextCentury());
+    }
+
+    #[Test]
+    public function found_implicit_method__isNextMillennium(): void
+    {
+        $this->assertSame($expected, $row->at->isNextMillennium());
+    }
+
+    #[Test]
+    public function found_implicit_method__isLastWeek(): void
+    {
+        $this->assertSame($expected, $row->at->isLastWeek());
+    }
+
+    #[Test]
+    public function found_implicit_method__isLastMonth(): void
+    {
+        $this->assertSame($expected, $row->at->isLastMonth());
+    }
+
+    #[Test]
+    public function found_implicit_method__isLastQuarter(): void
+    {
+        $this->assertSame($expected, $row->at->isLastQuarter());
+    }
+
+    #[Test]
+    public function found_implicit_method__isLastYear(): void
+    {
+        $this->assertSame($expected, $row->at->isLastYear());
+    }
+
+    #[Test]
+    public function found_implicit_method__isLastDecade(): void
+    {
+        $this->assertSame($expected, $row->at->isLastDecade());
+    }
+
+    #[Test]
+    public function found_implicit_method__isLastCentury(): void
+    {
+        $this->assertSame($expected, $row->at->isLastCentury());
+    }
+
+    #[Test]
+    public function found_implicit_method__isLastMillennium(): void
+    {
+        $this->assertSame($expected, $row->at->isLastMillennium());
+    }
+
+    // IMPLICIT_PREFIXES
+    #[Test]
+    public function found_implicit_prefix__isCurrent(): void
+    {
+        $this->assertSame($expected, $row->at->isCurrentDay());
+    }
+
+    #[Test]
+    public function found_implicit_prefix__diffIn(): void
+    {
+        $this->assertSame($expected, $row->at->diffInDays());
+    }
+
+    #[Test]
+    public function found_implicit_prefix__floatDiffIn(): void
+    {
+        $this->assertSame($expected, $row->at->floatDiffInDays());
+    }
+
+    // IMPLICIT_PROPERTIES
+    #[Test]
+    public function found_implicit_property__age(): void
+    {
+        $this->assertSame(30, $row->born->age);
+    }
+
+    // COMBINE_METHODS
+    #[Test]
+    public function found_combine_method__eq(): void
+    {
+        $this->assertSame($expected, $row->at->eq(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__equalTo(): void
+    {
+        $this->assertSame($expected, $row->at->equalTo(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__ne(): void
+    {
+        $this->assertSame($expected, $row->at->ne(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__notEqualTo(): void
+    {
+        $this->assertSame($expected, $row->at->notEqualTo(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__isBirthday(): void
+    {
+        $this->assertSame($expected, $row->at->isBirthday(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__diffForHumans(): void
+    {
+        $this->assertSame($expected, $row->at->diffForHumans(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__average(): void
+    {
+        $this->assertSame($expected, $row->at->average(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__max(): void
+    {
+        $this->assertSame($expected, $row->at->max(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__min(): void
+    {
+        $this->assertSame($expected, $row->at->min(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__closest(): void
+    {
+        $this->assertSame($expected, $row->at->closest(now(), $other));
+    }
+
+    #[Test]
+    public function found_combine_method__farthest(): void
+    {
+        $this->assertSame($expected, $row->at->farthest(now(), $other));
+    }
+
+    // COMBINE_PREFIXES
+    #[Test]
+    public function found_combine_prefix__isSame(): void
+    {
+        $this->assertSame($expected, $row->at->isSameDay(now()));
+    }
+
+    #[Test]
+    public function found_combine_prefix__diffIn(): void
+    {
+        $this->assertSame($expected, $row->at->diffInDays(now()));
+    }
+
+    #[Test]
+    public function found_combine_prefix__floatDiffIn(): void
+    {
+        $this->assertSame($expected, $row->at->floatDiffInDays(now()));
+    }
+
+    // NATIVE_FUNCTIONS
+    #[Test]
+    public function found_native_function__time(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(time(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_native_function__microtime(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(microtime(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_native_function__date(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(date('Y'), $row->stamp);
+    }
+
+    #[Test]
+    public function found_native_function__gmdate(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(gmdate('Y'), $row->stamp);
+    }
+
+    #[Test]
+    public function found_native_function__idate(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(idate('Y'), $row->stamp);
+    }
+
+    #[Test]
+    public function found_native_function__getdate(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(getdate(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_native_function__localtime(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(localtime(), $row->stamp);
+    }
+
+    // NATIVE_CONSTRUCTORS
+    #[Test]
+    public function found_native_constructor__DateTime(): void
+    {
+        $this->freezeSecond();
+        $this->assertEquals(new \DateTime, $row->at);
+    }
+
+    #[Test]
+    public function found_native_constructor__DateTimeImmutable(): void
+    {
+        $this->freezeSecond();
+        $this->assertEquals(new \DateTimeImmutable, $row->at);
+    }
+
+    // RECEIVER_FLOWS
+    #[Test]
+    public function found_receiver_flow__MethodCall(): void
+    {
+        $this->assertSame(now()->toDateString(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_receiver_flow__NullsafeMethodCall(): void
+    {
+        $this->assertSame(now()?->toDateString(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_receiver_flow__PropertyFetch(): void
+    {
+        $this->assertSame(now()->timestamp, $row->stamp);
+    }
+
+    #[Test]
+    public function found_receiver_flow__NullsafePropertyFetch(): void
+    {
+        $this->assertSame(now()?->timestamp, $row->stamp);
+    }
+
+    // FLOW_NODES
+    #[Test]
+    public function found_flow_node__Array_(): void
+    {
+        $this->assertEquals([now()], $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__ArrayItem(): void
+    {
+        $this->assertEquals(['at' => now()], $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__ArrayDimFetch(): void
+    {
+        $this->assertEquals([now()][0], $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__BinaryOp(): void
+    {
+        $this->assertEquals('on '.now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__Cast(): void
+    {
+        $this->assertEquals((string) now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__Ternary(): void
+    {
+        $this->assertEquals($ready ? now() : null, $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__Match_(): void
+    {
+        $this->assertEquals(match ($ready) { default => now() }, $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__MatchArm(): void
+    {
+        $this->assertEquals(match ($ready) { true => now(), default => null }, $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__InterpolatedString(): void
+    {
+        $this->assertEquals("due {$row->at->diffForHumans()}", $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__UnaryMinus(): void
+    {
+        $this->assertEquals(-now()->timestamp, $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__UnaryPlus(): void
+    {
+        $this->assertEquals(+now()->timestamp, $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__Clone_(): void
+    {
+        $this->assertEquals(clone now(), $row->stamp);
+    }
+
+    // PIN_METHODS
+    #[Test]
+    public function clean_pin_method__freezeTime(): void
+    {
+        $this->freezeTime();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_pin_method__freezeSecond(): void
+    {
+        $this->freezeSecond();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_pin_method__travelTo(): void
+    {
+        $this->travelTo(Carbon::parse('2026-01-01 00:00:00'));
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // WORMHOLE_UNITS
+    #[Test]
+    public function clean_wormhole_unit__microsecond(): void
+    {
+        $this->travel(1)->microsecond();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__microseconds(): void
+    {
+        $this->travel(1)->microseconds();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__millisecond(): void
+    {
+        $this->travel(1)->millisecond();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__milliseconds(): void
+    {
+        $this->travel(1)->milliseconds();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__second(): void
+    {
+        $this->travel(1)->second();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__seconds(): void
+    {
+        $this->travel(1)->seconds();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__minute(): void
+    {
+        $this->travel(1)->minute();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__minutes(): void
+    {
+        $this->travel(1)->minutes();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__hour(): void
+    {
+        $this->travel(1)->hour();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__hours(): void
+    {
+        $this->travel(1)->hours();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__day(): void
+    {
+        $this->travel(1)->day();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__days(): void
+    {
+        $this->travel(1)->days();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__week(): void
+    {
+        $this->travel(1)->week();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__weeks(): void
+    {
+        $this->travel(1)->weeks();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__month(): void
+    {
+        $this->travel(1)->month();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__months(): void
+    {
+        $this->travel(1)->months();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__year(): void
+    {
+        $this->travel(1)->year();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__years(): void
+    {
+        $this->travel(1)->years();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // UNPIN_METHODS
+    #[Test]
+    public function found_unpin_method__travelBack(): void
+    {
+        $this->freezeSecond();
+        $this->travelBack();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // UNPIN_STATICS
+    #[Test]
+    public function found_unpin_static__Wormhole(): void
+    {
+        $this->freezeSecond();
+        Wormhole::back();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // TEST_NOW_CLASSES
+    #[Test]
+    public function clean_test_now_class__Carbon(): void
+    {
+        Carbon::setTestNow('2026-01-01 00:00:00');
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_test_now_class__CarbonImmutable(): void
+    {
+        CarbonImmutable::setTestNow('2026-01-01 00:00:00');
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_test_now_class__Date(): void
+    {
+        Date::setTestNow('2026-01-01 00:00:00');
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // TEST_NOW_SETTERS
+    #[Test]
+    public function clean_test_now_setter__setTestNow(): void
+    {
+        Carbon::setTestNow('2026-01-01 00:00:00');
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_test_now_setter__setTestNowAndTimezone(): void
+    {
+        Carbon::setTestNowAndTimezone('2026-01-01 00:00:00', 'UTC');
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // TEST_NOW_SCOPES
+    #[Test]
+    public function clean_test_now_scope__withTestNow(): void
+    {
+        Carbon::withTestNow('2026-01-01 00:00:00', fn () => $this->assertEquals(now(), $this->row->at));
+    }
+
+    // HELPER_SCOPES
+    #[Test]
+    public function found_helper_scope__this(): void
+    {
+        $this->assertStampedHere($row);
+    }
+
+    #[Test]
+    public function found_helper_scope__self(): void
+    {
+        self::assertStampedHere($row);
+    }
+
+    #[Test]
+    public function found_helper_scope__static(): void
+    {
+        static::assertStampedHere($row);
+    }
+
+    #[Test]
+    public function found_helper_scope__parent(): void
+    {
+        parent::assertStampedByParent($row);
+    }
+
+    // EQUALITY: one control per compared position
+    #[Test]
+    public function found_equality__assertSame__0(): void
+    {
+        $this->assertSame(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertSame__1(): void
+    {
+        $this->assertSame($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertNotSame__0(): void
+    {
+        $this->assertNotSame(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertNotSame__1(): void
+    {
+        $this->assertNotSame($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertEquals__0(): void
+    {
+        $this->assertEquals(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertEquals__1(): void
+    {
+        $this->assertEquals($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertNotEquals__0(): void
+    {
+        $this->assertNotEquals(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertNotEquals__1(): void
+    {
+        $this->assertNotEquals($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertEqualsCanonicalizing__0(): void
+    {
+        $this->assertEqualsCanonicalizing(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertEqualsCanonicalizing__1(): void
+    {
+        $this->assertEqualsCanonicalizing($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertEqualsIgnoringCase__0(): void
+    {
+        $this->assertEqualsIgnoringCase(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertEqualsIgnoringCase__1(): void
+    {
+        $this->assertEqualsIgnoringCase($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertStringContainsString__0(): void
+    {
+        $this->assertStringContainsString(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertStringContainsString__1(): void
+    {
+        $this->assertStringContainsString($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertStringNotContainsString__0(): void
+    {
+        $this->assertStringNotContainsString(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertStringNotContainsString__1(): void
+    {
+        $this->assertStringNotContainsString($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertStringStartsWith__0(): void
+    {
+        $this->assertStringStartsWith(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertStringStartsWith__1(): void
+    {
+        $this->assertStringStartsWith($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertStringEndsWith__0(): void
+    {
+        $this->assertStringEndsWith(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertStringEndsWith__1(): void
+    {
+        $this->assertStringEndsWith($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertContains__0(): void
+    {
+        $this->assertContains(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertContains__1(): void
+    {
+        $this->assertContains($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertNotContains__0(): void
+    {
+        $this->assertNotContains(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertNotContains__1(): void
+    {
+        $this->assertNotContains($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertContainsEquals__0(): void
+    {
+        $this->assertContainsEquals(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertContainsEquals__1(): void
+    {
+        $this->assertContainsEquals($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertArrayHasKey__0(): void
+    {
+        $this->assertArrayHasKey(now());
+    }
+
+    #[Test]
+    public function found_equality__assertMatchesRegularExpression__0(): void
+    {
+        $this->assertMatchesRegularExpression(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertMatchesRegularExpression__1(): void
+    {
+        $this->assertMatchesRegularExpression($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertJsonStringEqualsJsonString__0(): void
+    {
+        $this->assertJsonStringEqualsJsonString(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertJsonStringEqualsJsonString__1(): void
+    {
+        $this->assertJsonStringEqualsJsonString($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertDatabaseHas__1(): void
+    {
+        $this->assertDatabaseHas($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertDatabaseMissing__1(): void
+    {
+        $this->assertDatabaseMissing($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertJsonPath__1(): void
+    {
+        $this->assertJsonPath($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertJson__0(): void
+    {
+        $this->assertJson(now());
+    }
+
+    #[Test]
+    public function found_equality__assertExactJson__0(): void
+    {
+        $this->assertExactJson(now());
+    }
+
+    #[Test]
+    public function found_equality__assertJsonFragment__0(): void
+    {
+        $this->assertJsonFragment(now());
+    }
+
+    #[Test]
+    public function found_equality__assertJsonMissing__0(): void
+    {
+        $this->assertJsonMissing(now());
+    }
+
+    #[Test]
+    public function found_equality__assertJsonMissingExact__0(): void
+    {
+        $this->assertJsonMissingExact(now());
+    }
+
+    #[Test]
+    public function found_equality__assertSee__0(): void
+    {
+        $this->assertSee(now());
+    }
+
+    #[Test]
+    public function found_equality__assertSeeText__0(): void
+    {
+        $this->assertSeeText(now());
+    }
+
+    #[Test]
+    public function found_equality__assertDontSee__0(): void
+    {
+        $this->assertDontSee(now());
+    }
+
+    #[Test]
+    public function found_equality__assertSessionHas__1(): void
+    {
+        $this->assertSessionHas($row->stamp, now());
+    }
+
+    private function assertStampedHere(object $row): void
+    {
+        $this->assertEquals(now(), $row->at);
     }
 }
