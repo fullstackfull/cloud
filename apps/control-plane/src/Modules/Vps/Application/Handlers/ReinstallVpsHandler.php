@@ -240,6 +240,24 @@ final readonly class ReinstallVpsHandler implements ProvisioningHandler
             );
         }
 
+        if (! $subnet->hasGateway()) {
+            /*
+             * The guest's default route is its block's gateway, restated
+             * below, and nothing else. A machine built in a block registered
+             * with no gateway (before the create refused one) would come back
+             * with `gw=` empty: rebuilt into a server nobody can reach.
+             * Refused before the disk is touched; the block needs a gateway
+             * the platform can restate, or the machine a new address.
+             */
+            return $this->refuse(
+                $operation,
+                ReinstallState::Failed,
+                FailureClass::Permanent,
+                'vps.reinstall_gateway_missing',
+                'The subnet holding this machine\'s address names no gateway, so a rebuilt guest could not be given a default route.',
+            );
+        }
+
         $preserved = [
             'provider_id' => (string) $machine->provider_id,
             'node' => $node->provider_name,

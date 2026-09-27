@@ -109,14 +109,26 @@ Four cases are handled differently, and each says so:
   once it is registered, and a VPS build refuses, permanently, an address on no such segment
   (`vps.network_not_attachable`). Held space, IPv6 and a management pool's blocks need none.
 
+- **A block registered without a gateway** is accepted: a dedicated server's install profile
+  can carry a default route of its own (see [dedicated.md](dedicated.md)). A VPS cannot — its
+  cloud-init default route is the block's gateway and nothing else — so for a VPS an address
+  in such a block is not one it can be given: checkout refuses a VPS plan whose pool holds no
+  active IPv4 subnet with a gateway holding a host address, `mapping.network` does not count
+  it, the build's reservation passes it over, and a build that meets one anyway (the row
+  changed after the reservation) is refused permanently with `vps.subnet_has_no_gateway`
+  rather than built with `gw=` empty; a reinstall of a machine in one is refused with
+  `vps.reinstall_gateway_missing`. No route changes a registered block's gateway.
+
 `infra:preflight`'s `mapping.network` passes only when the active pools hold at least one
 address the allocator could give a customer machine and a build could attach it at
 (`IpAllocator::customerAttachableCount`: in a subnet whose network is active, customer-facing
-and has a bridge — `Network::canCarryACustomerMachine()`, the rule the build refuses by). A
-pass names how many allocatable addresses it left out for being on no such network. A VPS
-build reserves from exactly the counted subnets (`IpAllocator::reserve(..., attachableOnly: true)`),
-so it is never handed one of the left-out addresses; when only those remain it waits on
-`ipam.pool_exhausted`, whose sentence says it counted only addresses on such a network.
+and has a bridge — `Network::canCarryACustomerMachine()`, the rule the build refuses by — and
+that names a gateway, `Subnet::hasGateway()`). A pass names how many allocatable addresses it
+left out for being on no such network or in a block with no gateway. A VPS build reserves
+from exactly the counted subnets (`IpAllocator::reserve(..., attachableOnly: true)`), so it is
+never handed one of the left-out addresses; when only those remain it waits on
+`ipam.pool_exhausted`, whose sentence says it counted only addresses on such a network, in a
+block with a gateway.
 
 ## Blocks in one realm never overlap
 

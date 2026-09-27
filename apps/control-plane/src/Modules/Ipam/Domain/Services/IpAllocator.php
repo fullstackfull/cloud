@@ -59,11 +59,15 @@ final readonly class IpAllocator
      * @param  string  $provisioningJobId  The job the addresses are held for; the reaper reads this to
      *                                     find out whether the claim is still worth honouring.
      * @param  bool  $attachableOnly  Take addresses only from subnets whose network a customer machine
-     *                                can be plugged into (Network::canCarryACustomerMachine()). A VPS
-     *                                build asks for this: an address anywhere else is one it refuses
-     *                                permanently, and without the filter the first block in text order
-     *                                is chosen every time, so one bridgeless block in a pool failed every
-     *                                build while the preflight counted the pool's good addresses.
+     *                                can be plugged into (Network::canCarryACustomerMachine()) and that
+     *                                name a gateway (Subnet::hasGateway()). A VPS build asks for this: an
+     *                                address anywhere else is one it refuses permanently, and without the
+     *                                filter the first block in text order is chosen every time, so one
+     *                                bridgeless block in a pool failed every build while the preflight
+     *                                counted the pool's good addresses. The gateway is the machine's
+     *                                only default route; a block registered without one (legitimate for
+     *                                a dedicated server, whose profile can carry one) built a VPS with
+     *                                `gw=` empty.
      * @return list<IpReservation>
      *
      * @throws IpPoolExhaustedException
@@ -194,7 +198,8 @@ final readonly class IpAllocator
     /**
      * How many of customerAllocatableCount()'s addresses are in a subnet whose
      * network a customer machine can be plugged into
-     * (Network::canCarryACustomerMachine()).
+     * (Network::canCarryACustomerMachine()) and that names a gateway
+     * (Subnet::hasGateway()).
      *
      * Exactly the addresses reserve() takes from when a VPS build asks with
      * `attachableOnly` — the same subnet list, filtered by the same helper —
@@ -950,8 +955,8 @@ final readonly class IpAllocator
 
     /**
      * The subnets, of those given, whose network a customer machine can be
-     * plugged into — in the order given, which is the order reserve() takes
-     * addresses in.
+     * plugged into and that name a gateway to route it by — in the order
+     * given, which is the order reserve() takes addresses in.
      *
      * @param  list<string>  $subnetIds
      * @return list<string>
@@ -967,6 +972,7 @@ final readonly class IpAllocator
             ->with('network')
             ->get()
             ->filter(static fn (Subnet $subnet): bool => $subnet->network?->canCarryACustomerMachine() === true)
+            ->filter(static fn (Subnet $subnet): bool => $subnet->hasGateway())
             ->map(static fn (Subnet $subnet): string => trim((string) $subnet->getKey()))
             ->all();
 

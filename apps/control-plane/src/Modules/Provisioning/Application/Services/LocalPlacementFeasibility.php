@@ -99,9 +99,10 @@ use Lynomia\Modules\SharedHosting\Domain\Services\HostingNodeScheduler;
  *    such cluster and one such IPv4 pool must exist. And, for a sale only
  *    (resolveForSale()), the cluster must have a compute node in service — a `compute_nodes` row whose status the
  *    scheduler accepts placement on (NodeStatus::acceptsPlacement(), only
- *    ACTIVE) — and the pool an active IPv4 subnet holding a host address (an
- *    `ip_addresses` row not stamped `unavailable`), because IpAllocator
- *    reserves only from those rows. Both are rows an operator writes, like a
+ *    ACTIVE) — and the pool an active IPv4 subnet with a gateway holding a
+ *    host address (an `ip_addresses` row not stamped `unavailable`), because
+ *    IpAllocator reserves only from those rows, and for a VPS only in a block
+ *    with a gateway (a machine's default route is the block's gateway). Both are rows an operator writes, like a
  *    hosting node: an active cluster with no node, or only nodes still in the
  *    maintenance SyncClusterInventory creates them in, and a pool with no
  *    subnet, used to be sold, paid and built straight into needs_review
@@ -468,7 +469,7 @@ final readonly class LocalPlacementFeasibility
         }
 
         if (! $this->holdsAHostAddress($poolId)) {
-            return PlacementResolution::blocked('the IP pool has no active IPv4 subnet holding a host address');
+            return PlacementResolution::blocked('the IP pool has no active IPv4 subnet with a gateway holding a host address');
         }
 
         return $resolution;
@@ -502,6 +503,13 @@ final readonly class LocalPlacementFeasibility
      * gateway, and whatever an operator took out of service. A host that is
      * reserved, assigned or quarantined counts: the pool is configured, and
      * waiting for one to come free is capacity.
+     *
+     * Only in a subnet that names a gateway (the SQL spelling of
+     * Subnet::hasGateway()): a virtual machine takes its default route from
+     * the block's gateway and nothing else, and the allocator does not give a
+     * VPS an address in a block with none. Such a block is legitimate for a
+     * dedicated server, whose profile can carry a default route, and is asked
+     * about there, not here.
      */
     private function holdsAHostAddress(string $poolId): bool
     {
@@ -513,6 +521,8 @@ final readonly class LocalPlacementFeasibility
                     ->where('ip_pool_id', $poolId)
                     ->where('is_active', true)
                     ->where('ip_version', 4)
+                    ->whereNotNull('gateway')
+                    ->where('gateway', '!=', '')
                     ->select('id'),
             )
             ->exists();
