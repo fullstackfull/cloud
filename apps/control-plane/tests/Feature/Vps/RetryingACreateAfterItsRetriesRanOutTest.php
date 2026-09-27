@@ -8,6 +8,7 @@ use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Compute\Application\Actions\ReleaseNodeCapacity;
 use Lynomia\Modules\Compute\Application\Actions\ReserveNodeCapacity;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
@@ -112,8 +113,10 @@ final class RetryingACreateAfterItsRetriesRanOutTest extends TestCase
 
         $this->runUntilItStops($job);
 
-        $this->assertSame(ProvisioningJobStatus::Failed, $job->status, (string) $job->last_error);
-        $this->assertSame('vps.network_not_attachable', $job->result['error']['code'] ?? null);
+        // Not reserved from a block no machine can be attached at: the build
+        // waits on capacity until its attempts run out.
+        $this->assertSame(ProvisioningJobStatus::NeedsReview, $job->status, (string) $job->last_error);
+        $this->assertSame('ipam.pool_exhausted', $job->result['error']['code'] ?? null);
         $this->assertFalse(NodeCapacityReservation::query()->where('reservation_key', $job->idempotency_key)->sole()->isLive());
 
         Network::query()->update(['bridge' => 'vmbr1']);
@@ -214,6 +217,46 @@ final class RetryingACreateAfterItsRetriesRanOutTest extends TestCase
 
         $this->assertSame(0, $this->node->refresh()->vm_count, 'the release read the released row and gave nothing back');
         $this->assertSame(0, NodeCapacityReservation::query()->where('reservation_key', $job->idempotency_key)->whereNull('released_at')->count());
+    }
+
+    #[Test]
+    public function a_stale_release_gives_back_what_the_live_row_recorded_on_its_own_node(): void
+    {
+        /*
+         * A releaser that read the key's OLD reservation — on pve-01, two
+         * vCPUs — arrives after that one was released and a retry committed
+         * the key again on pve-02 with another shape. It passes its stale
+         * node and figures. The release goes by the locked live row: pve-02
+         * gives back what that row recorded, and pve-01 — which holds some
+         * other machine's commitment — is not touched.
+         */
+        $other = $this->addNode('pve-02');
+        $stale = new VmResources(vcpu: 2, memoryMib: 4096, diskGib: 40);
+
+        NodeCapacityReservation::query()->create([
+            'node_id' => $this->node->id,
+            'reservation_key' => 'job-key-3',
+            'vcpu' => 2,
+            'memory_mib' => 4096,
+            'disk_gib' => 40,
+            'released_at' => now()->subMinute(),
+        ]);
+        app(ReserveNodeCapacity::class)->execute($other, new VmResources(vcpu: 4, memoryMib: 8192, diskGib: 80), reservationKey: 'job-key-3');
+        app(ReserveNodeCapacity::class)->execute($this->node, $stale, reservationKey: 'someone-elses-machine');
+
+        app(ReleaseNodeCapacity::class)->execute($this->node, $stale, reservationKey: 'job-key-3');
+
+        $this->assertSame(
+            ['vm_count' => 0, 'allocated_cpu_cores' => 0, 'allocated_memory_mib' => 0, 'allocated_storage_gib' => 0],
+            $other->refresh()->only(['vm_count', 'allocated_cpu_cores', 'allocated_memory_mib', 'allocated_storage_gib']),
+            'the live row\'s node was not given back what it recorded',
+        );
+        $this->assertSame(
+            ['vm_count' => 1, 'allocated_cpu_cores' => 2, 'allocated_memory_mib' => 4096, 'allocated_storage_gib' => 40],
+            $this->node->refresh()->only(['vm_count', 'allocated_cpu_cores', 'allocated_memory_mib', 'allocated_storage_gib']),
+            'the stale node lost another machine\'s commitment',
+        );
+        $this->assertSame(0, NodeCapacityReservation::query()->where('reservation_key', 'job-key-3')->whereNull('released_at')->count());
     }
 
     private function runUntilItStops(ProvisioningJob $job): void

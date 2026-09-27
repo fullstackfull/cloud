@@ -24,6 +24,7 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Ipam\Application\Actions\SeedSubnetAddresses;
+use Lynomia\Modules\Ipam\Infrastructure\Models\IpReservation;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
@@ -109,18 +110,60 @@ final class VpsNetworkAttachmentTest extends TestCase
     #[Test]
     public function a_subnet_with_no_network_is_refused_rather_than_attached_to_a_default_bridge(): void
     {
+        /*
+         * Refused one step earlier than it used to be: the reservation takes
+         * addresses only from subnets whose network can carry a customer
+         * machine, so an address on no network is never reserved at all —
+         * and the build waits on capacity instead of failing permanently on
+         * an address it should never have been given (it used to be
+         * `vps.network_not_attachable`, Permanent, after the reservation).
+         */
         $recorder = $this->recordingProvider();
 
-        $result = app(CreateVpsHandler::class)->execute($this->job(null));
+        $job = $this->job(null);
+        $result = app(CreateVpsHandler::class)->execute($job);
 
         $this->assertFalse($result->successful);
-        $this->assertSame(FailureClass::Permanent, $result->failureClass);
-        $this->assertSame('vps.network_not_attachable', $result->errorCode);
+        $this->assertSame(FailureClass::Capacity, $result->failureClass);
+        $this->assertSame('ipam.pool_exhausted', $result->errorCode);
+        $this->assertStringContainsString('on a network a customer machine can be attached to', (string) $result->errorMessage);
+        $this->assertSame(0, IpReservation::query()->where('provisioning_job_id', $job->id)->count(), 'an address on no network was reserved');
 
         // And nothing was asked of the hypervisor: the refusal happens before
         // the one irreversible step.
         $this->assertNull($recorder->request);
         $this->assertSame(0, VirtualMachine::query()->count());
+    }
+
+    #[Test]
+    public function a_block_no_machine_can_be_attached_at_is_passed_over_for_one_it_can(): void
+    {
+        /*
+         * A pool holding a bridgeless block whose addresses sort first, and a
+         * good one. The allocator takes addresses in the order of their text, so
+         * the bad block used to be handed to every build, and every build
+         * failed on it while the preflight counted the good block's
+         * addresses. It is passed over now.
+         */
+        $good = Network::factory()->create(['bridge' => 'vmbr1', 'vlan_id' => 1234]);
+        $job = $this->job($good);
+
+        // Its addresses (.1 to .5) sort before the good block's (.10 to .14)
+        // in the text order the allocator takes them in.
+        $bad = Subnet::factory()->forBlock('198.51.100.0/29', gateway: '198.51.100.6')->create([
+            'ip_pool_id' => $job->payload['ip_pool_id'],
+            'network_id' => Network::factory()->create(['bridge' => null])->getKey(),
+        ]);
+        app(SeedSubnetAddresses::class)->execute($bad);
+
+        $recorder = $this->recordingProvider();
+
+        $result = app(CreateVpsHandler::class)->execute($job);
+
+        $this->assertTrue($result->successful, (string) $result->errorMessage);
+        $this->assertSame('vmbr1', $recorder->request?->networkBridge);
+        $this->assertStringStartsWith('198.51.100.', (string) $result->metadata['primary_ipv4']);
+        $this->assertGreaterThanOrEqual(8, (int) substr((string) $result->metadata['primary_ipv4'], strlen('198.51.100.')));
     }
 
     #[Test]
@@ -137,8 +180,10 @@ final class VpsNetworkAttachmentTest extends TestCase
 
         $result = app(CreateVpsHandler::class)->execute($this->job($network));
 
+        // Never reserved, never attached: the reservation passes over a
+        // management segment's addresses entirely.
         $this->assertFalse($result->successful);
-        $this->assertSame('vps.network_not_attachable', $result->errorCode);
+        $this->assertSame('ipam.pool_exhausted', $result->errorCode);
         $this->assertNull($recorder->request);
     }
 

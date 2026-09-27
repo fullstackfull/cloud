@@ -85,11 +85,15 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * placed on — and, when the cluster refuses a create under it, on every node
  * the platform has on record for the cluster, since a hypervisor id is taken
  * cluster-wide and a machine at it on a node no attempt was placed on is
- * otherwise found by nothing (whatTheClusterHasAt()). Each name a create under the identity is sent with is written
- * down immediately before it is sent (`ProvisioningJob::recordCreateSentWith()`),
- * and only then: a machine found is judged against those names, read as the
- * row holds them once it has been found. What the look finds decides the
- * attempt:
+ * otherwise found by nothing (whatTheClusterHasAt()). Each name a create
+ * under the identity is sent with is written down immediately before it is
+ * sent (`ProvisioningJob::recordCreateSentWith()`), and only then: a machine
+ * found is judged against those names, read as the row holds them once it has
+ * been found — except a machine found after the cluster refused this
+ * attempt's own create, on a node no attempt under the identity was placed
+ * on, which is judged against the names sent before that create: the refused
+ * create built nothing, and none was sent to that node. What the look finds
+ * decides the attempt:
  *
  *  - **Nothing** — build.
  *  - **A machine carrying a name a create under this identity is recorded as
@@ -151,7 +155,12 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * and built nothing (refused, or lost before the cluster acted on it), or
  * after one was recorded and never left, carrying the very name that create
  * was recorded with and nothing that contradicts the plan's shape, is taken
- * to be this build's. And at an id pinned on the payload, with no name
+ * to be this build's by a LATER attempt — not by the attempt whose own create
+ * was just refused, when the stranger is on a node no attempt was placed on:
+ * that attempt judges it against the names sent before its create, so on a
+ * first attempt it is a stranger by name, whatever it is called. A machine an
+ * earlier attempt built and that was then moved to another node carries a
+ * name sent before, and is still taken for this build's. And at an id pinned on the payload, with no name
  * recorded, a stranger carrying the payload's name and nothing that
  * contradicts the plan's shape is taken to be this build's on a job's third
  * attempt or later, and on a second whose first neither reserved an identity
@@ -506,6 +515,10 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
                 provisioningJobId: (string) $job->getKey(),
                 customer: $customer,
                 count: (int) ($payload['ipv4_count'] ?? 1),
+                // Only where this machine can be plugged in: the network
+                // check below refuses any other address permanently, and the
+                // preflight counts only these (customerAttachableCount()).
+                attachableOnly: true,
             );
         } catch (IpPoolExhaustedException $e) {
             // Also capacity: addresses are freed by quarantine expiry and by
@@ -541,6 +554,14 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
          * network with no bridge recorded is refused rather than guessed at:
          * the platform cannot say where the machine would be plugged in, and a
          * guess is exactly what is dangerous here.
+         *
+         * The reservation above already takes addresses only from subnets
+         * whose network passes the same rule (`attachableOnly`), so this
+         * refusal is reached only when the network changed between the
+         * reservation and this read (a job's earlier reservation is reused
+         * only from the same filtered subnet list). It stays,
+         * because the cost of the two disagreeing is a machine on the wrong
+         * segment.
          */
         $network = $address->subnet->network()->first();
 
@@ -568,7 +589,14 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
          * the address or at the network above sent nothing, and a stranger
          * named as this build names its machine is not this build's on its
          * account.
+         *
+         * The names recorded until now are read first and kept: if the
+         * cluster refuses this create, the create built nothing, and a
+         * machine the refusal leads to on a node no attempt was placed on is
+         * judged against them — not against the name this refused create was
+         * about to carry (see the refusal below).
          */
+        $sentBeforeThisSend = $job->namesACreateWasSentWith();
         $job->recordCreateSentWith($hostname);
 
         try {
@@ -604,7 +632,31 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
                 $elsewhere = $this->whatTheClusterHasAt($provider, $identity);
 
                 if ($elsewhere !== null) {
-                    return $this->becauseSomethingIsAlreadyThere($job, $payload, $elsewhere, $identity, $resources, $earlierSendsAreRecorded);
+                    /*
+                     * Whose it is, judged against what was sent before this
+                     * create when it sits on a node no attempt under the
+                     * identity was placed on, as the row holds them now:
+                     * this create was refused and built nothing, and no
+                     * create under the identity was sent to that node, so
+                     * the name this one carried is no evidence about it. A
+                     * name an earlier attempt sent still counts — that
+                     * attempt's machine may have been moved there. On a node
+                     * an attempt WAS placed on — another worker holding the
+                     * job may have built there, and records the node before
+                     * it sends — every recorded name counts, as anywhere
+                     * else.
+                     */
+                    $placedOn = $job->fresh()?->reservedProviderIdentity()->nodes ?? $identity->nodes;
+
+                    return $this->becauseSomethingIsAlreadyThere(
+                        $job,
+                        $payload,
+                        $elsewhere,
+                        $identity,
+                        $resources,
+                        $earlierSendsAreRecorded,
+                        judgedAgainst: in_array($elsewhere->nodeName, $placedOn, true) ? null : $sentBeforeThisSend,
+                    );
                 }
             }
 
@@ -716,7 +768,13 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
      * operator can act on rather than a dead end — on a node an attempt was
      * placed on, found by the look before the build; on any other node the
      * platform has on record for the cluster, found once the cluster refuses
-     * the create at the id (whatTheClusterHasAt()). A stranger on a node the
+     * the create at the id (whatTheClusterHasAt()). "Can act on" means the
+     * repoint: a stranger by name is one, and on a node no attempt was placed
+     * on that includes one carrying this build's own name when no earlier
+     * create was sent with it — the refused create's name is not evidence.
+     * What it does not mean: a machine the platform cannot tell from its own
+     * build (no name, or a name an earlier create was sent with) is left for
+     * a person to look at, not repointed around. A stranger on a node the
      * platform has no row for, or one that does not answer, is still found by
      * neither: the refusal is then the only finding.
      *
@@ -804,11 +862,15 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
      * or one that does not answer: a machine at the id there leaves the
      * refusal as the only finding.
      *
-     * What is found is judged by becauseSomethingIsAlreadyThere(), exactly as
-     * a machine on the build's own node is — so one carrying a name a create
-     * under the identity was sent with is not taken for a stranger (it may be
-     * this build's, moved), and one that is somebody else's by name licenses
-     * the repoint.
+     * What is found is judged by becauseSomethingIsAlreadyThere(). On a node
+     * an attempt under the identity was placed on, exactly as anywhere else.
+     * On any other node, against the names sent BEFORE the create that was
+     * just refused: that create built nothing and none was sent there, so
+     * the name it carried is no evidence of ownership, and a stranger that
+     * happens to carry it is a stranger by name, licensing the repoint. One
+     * carrying a name an earlier attempt sent is not taken for a stranger —
+     * it may be that attempt's machine, moved — and is never delivered
+     * without an operator's adoption.
      */
     private function whatTheClusterHasAt(ComputeProvider $provider, ReservedProviderIdentity $identity): ?RemoteVmState
     {
@@ -877,6 +939,10 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
      *
      * @param  array<string, mixed>  $payload
      * @param  bool  $earlierSendsAreRecorded  everyEarlierAttemptIsShownToHaveRecordedItsSends(), as read when this attempt began.
+     * @param  list<string>|null  $judgedAgainst  The names to judge the machine against in place of those the row
+     *                                            holds now: those sent before this attempt's own create, when that
+     *                                            create was refused and the machine is on a node no attempt was
+     *                                            placed on. Null for the row's names.
      */
     private function becauseSomethingIsAlreadyThere(
         ProvisioningJob $job,
@@ -885,8 +951,10 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
         ReservedProviderIdentity $identity,
         VmResources $resources,
         bool $earlierSendsAreRecorded,
+        ?array $judgedAgainst = null,
     ): ProvisioningResult {
-        $sent = $job->namesACreateWasSentWith();
+        $afterItsOwnRefusal = $judgedAgainst !== null;
+        $sent = $judgedAgainst ?? $job->namesACreateWasSentWith();
         $unrecorded = $sent === [] && $this->mayHaveSentUnrecorded($identity, $payload, $earlierSendsAreRecorded);
 
         // The identity with its names as the row holds them now, and apart
@@ -920,6 +988,10 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
             // sent with it: pinned, an earlier attempt not shown to have run
             // after sends were recorded, and nothing recorded.
             'payload_name_taken_as_sent' => $unrecorded,
+            // Whether this attempt's own create was refused and the machine
+            // is on a node no attempt was placed on, so that `called_names`
+            // are those sent before it.
+            'judged_after_its_own_refusal' => $afterItsOwnRefusal,
         ];
 
         if ($reason === self::REASON_NAMED_AS_CALLED) {
@@ -971,7 +1043,17 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
             return ProvisioningResult::failed(
                 FailureClass::Permanent,
                 self::IDENTITY_TAKEN,
-                $sent === [] && ! $unrecorded
+                $afterItsOwnRefusal
+                    ? sprintf(
+                        'The cluster refused this build\'s create under provider identity %s, and the id is used on node %s, where no attempt of this build was placed, by a machine named "%s". %s Nothing was built; repoint this job to a new identity.',
+                        $identity->providerId,
+                        $machine->nodeName,
+                        (string) $machine->name,
+                        $sent === [] && ! $unrecorded
+                            ? 'No earlier create under the identity is recorded as sent, so it is not this build\'s whatever it is called.'
+                            : 'That is not a name any earlier create under the identity was sent with.',
+                    )
+                    : ($sent === [] && ! $unrecorded
                     ? sprintf(
                         'Provider identity %s is already used on node %s by a machine named "%s", and no create under this identity has been sent yet, so it is not this build\'s whatever it is called. Nothing was built; repoint this job to a new identity.',
                         $identity->providerId,
@@ -983,7 +1065,7 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
                         $identity->providerId,
                         $machine->nodeName,
                         (string) $machine->name,
-                    ),
+                    )),
                 metadata: $metadata,
             );
         }

@@ -113,8 +113,10 @@ Four cases are handled differently, and each says so:
 address the allocator could give a customer machine and a build could attach it at
 (`IpAllocator::customerAttachableCount`: in a subnet whose network is active, customer-facing
 and has a bridge — `Network::canCarryACustomerMachine()`, the rule the build refuses by). A
-pass names how many allocatable addresses it left out for being on no such network; while any
-are, the allocator, which does not read the network, may still hand a build one of them.
+pass names how many allocatable addresses it left out for being on no such network. A VPS
+build reserves from exactly the counted subnets (`IpAllocator::reserve(..., attachableOnly: true)`),
+so it is never handed one of the left-out addresses; when only those remain it waits on
+`ipam.pool_exhausted`, whose sentence says it counted only addresses on such a network.
 
 ## Blocks in one realm never overlap
 

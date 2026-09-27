@@ -282,12 +282,16 @@ final readonly class MappingChain
      * counts {@see IpAllocator::customerAttachableCount()} — the same rows,
      * restricted to subnets whose network passes
      * Network::canCarryACustomerMachine(), the rule the build itself refuses
-     * by — and names how many it left out. The operator's subnet route now
+     * by — and names how many it left out. And the allocator takes a VPS
+     * build's address from exactly those subnets (reserve() with
+     * `attachableOnly`, filtered by the same helper as the count), so what
+     * this counts is what a build can be given. The operator's subnet route
      * refuses a customer block with no customer network (RegisterSubnet), but
      * it does not require the bridge (a dedicated server is not attached by
-     * one), a network's bridge and `is_active` can be edited afterwards, and
-     * rows written before the route refused are still there; this count is
-     * what reads all three.
+     * one); a network's bridge can be cleared afterwards through the network
+     * route (its `is_active` cannot be switched off while an active subnet
+     * uses it — the route refuses that); and rows written before the subnet
+     * route refused are still there. This count is what reads all three.
      *
      * ===========================================================================
      * WHAT A PASS HERE STILL DOES NOT SAY
@@ -307,12 +311,14 @@ final readonly class MappingChain
      *   (c) Handed a subnet rather than a pool, the allocator reads that
      *       subnet alone. Nothing in the build path does that today.
      *
-     *   (d) That the address reserve() picks is one of the addresses counted.
-     *       reserve() does not read the network; in a pool holding blocks on
-     *       an attachable segment and blocks on none, this passes on the
-     *       first and the build may be handed an address from the second,
-     *       and is refused `vps.network_not_attachable`. The summary says how
-     *       many addresses it left out, which is when this can happen.
+     *   (d) Not a term any more: a VPS build's reservation reads the network
+     *       and takes addresses only from the subnets counted here. It used
+     *       not to, and — the subnet list being ordered by the block's text —
+     *       one bridgeless block in a pool was picked by every build and
+     *       failed it, while this passed on the pool's other blocks. What is
+     *       left is the race every term here shares: a network changed
+     *       between the reservation and the build's own read of it, which
+     *       the build refuses (`vps.network_not_attachable`).
      *
      * And one term that is not about the estate: the allocator's read is
      * `FOR UPDATE SKIP LOCKED`, so a row another transaction holds and has
