@@ -1,0 +1,450 @@
+<?php
+
+// Read by NoAssertionComparesAClockReadOnAnUnpinnedClockTest as its controls.
+// Not loaded; the .txt suffix keeps it out of every PHP scanner.
+//
+// Every test named found_* must be a finding and every test named clean_*
+// must not; the gate checks both lists against what the scanner reports.
+
+declare(strict_types=1);
+
+namespace Fixture\Clock;
+
+use Carbon\Carbon;
+use Carbon\CarbonImmutable;
+use Illuminate\Foundation\Testing\Wormhole;
+use Illuminate\Support\Facades\Date;
+use PHPUnit\Framework\Attributes\Before;
+use PHPUnit\Framework\Attributes\Test;
+use Tests\TestCase;
+
+final class UnpinnedTest extends TestCase
+{
+    // The shape at 031f6c9 (HostingReconciliationTest).
+    #[Test]
+    public function found_the_reconciliation_stamp(): void
+    {
+        app(ReconcileHostingNodes::class)->execute();
+        $this->assertSame(now()->getTimestamp(), $this->node->fresh()?->reconciled_at?->getTimestamp());
+    }
+
+    // The shape at e0aa0ab (HeldQuarantineClockTest).
+    #[Test]
+    public function found_the_quarantine_date(): void
+    {
+        $this->allocator->startHeldQuarantines($mine);
+        $this->assertSame(
+            now()->addDays(7)->toDateString(),
+            IpAddress::query()->findOrFail($a->ip_address_id)->quarantined_until?->toDateString(),
+        );
+    }
+
+    #[Test]
+    public function found_today(): void
+    {
+        $this->assertEquals(today(), $row->due_on);
+    }
+
+    #[Test]
+    public function found_carbon_now(): void
+    {
+        $this->assertSame(Carbon::now()->format('Y-m-d'), $row->day);
+    }
+
+    #[Test]
+    public function found_carbon_immutable_today(): void
+    {
+        $this->assertNotSame(CarbonImmutable::today()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function found_date_facade(): void
+    {
+        $this->assertSame(Date::now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function found_new_carbon(): void
+    {
+        $this->assertEquals((new Carbon)->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function found_new_carbon_immutable_now(): void
+    {
+        $this->assertEquals(new CarbonImmutable('now'), $row->at);
+    }
+
+    #[Test]
+    public function found_carbon_parse_now(): void
+    {
+        $this->assertEquals(Carbon::parse('today'), $row->at);
+    }
+
+    #[Test]
+    public function found_an_equality_in_assert_true(): void
+    {
+        $this->assertTrue($row->at->toDateString() === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_a_carbon_equality_in_assert_false(): void
+    {
+        $this->assertFalse(! $row->at->eq(now()));
+    }
+
+    #[Test]
+    public function found_is_today(): void
+    {
+        $this->assertTrue($row->created_at->isToday());
+    }
+
+    #[Test]
+    public function found_is_same_day_with_nothing(): void
+    {
+        $this->assertTrue($row->created_at->isSameDay());
+    }
+
+    #[Test]
+    public function found_a_database_row(): void
+    {
+        $this->assertDatabaseHas('rows', ['day' => today()->toDateString()]);
+    }
+
+    #[Test]
+    public function found_a_json_path(): void
+    {
+        $this->getJson('/x')->assertOk()->assertJsonPath('data.at', now()->toIso8601String());
+    }
+
+    #[Test]
+    public function found_a_json_body(): void
+    {
+        $this->getJson('/x')->assertJson(['data' => ['on' => now()->toDateString()]]);
+    }
+
+    #[Test]
+    public function found_a_diff_with_nothing(): void
+    {
+        $this->assertSame(7, $row->ends_at->diffInDays());
+    }
+
+    #[Test]
+    public function found_a_diff_with_now(): void
+    {
+        $this->assertSame(7.0, now()->diffInDays($row->ends_at));
+    }
+
+    #[Test]
+    public function found_a_property_of_now(): void
+    {
+        $this->assertSame(now()->timestamp, $row->at->timestamp);
+    }
+
+    #[Test]
+    public function found_in_an_array(): void
+    {
+        $this->assertSame(['on' => today()->toDateString()], $body);
+    }
+
+    #[Test]
+    public function found_in_an_interpolated_string(): void
+    {
+        $this->assertStringContainsString("due {$this->x} ".now()->toDateString(), $mail);
+    }
+
+    #[Test]
+    public function found_through_a_function(): void
+    {
+        $this->assertSame(sprintf('on %s', today()->toDateString()), $line);
+    }
+
+    #[Test]
+    public function found_with_named_arguments(): void
+    {
+        $this->assertSame(actual: $row->day, expected: now()->toDateString());
+    }
+
+    #[Test]
+    public function found_as_a_static_assertion(): void
+    {
+        self::assertSame(now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function found_after_the_clock_is_let_go(): void
+    {
+        $this->freezeTime();
+        $this->travelBack();
+        $this->assertSame(now()->getTimestamp(), $row->at->getTimestamp());
+    }
+
+    #[Test]
+    public function found_after_a_frozen_callback_returns(): void
+    {
+        $this->freezeTime(function (): void {
+            $this->run();
+        });
+        $this->assertSame(now()->getTimestamp(), $row->at->getTimestamp());
+    }
+
+    #[Test]
+    public function found_after_set_test_now_is_cleared(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-01-01'));
+        Carbon::setTestNow(null);
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function found_after_the_wormhole_goes_back(): void
+    {
+        $this->travel(3)->days();
+        Wormhole::back();
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function found_before_the_pin(): void
+    {
+        $this->assertSame(now()->toDateString(), $row->day);
+        $this->freezeSecond();
+    }
+
+    // Freezing does not reach PHP's own clock.
+    #[Test]
+    public function found_the_native_clock_even_frozen(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(time(), $row->at->getTimestamp());
+    }
+
+    #[Test]
+    public function found_a_native_date_even_frozen(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(date('Y-m-d'), $row->day);
+        $this->assertEquals(new \DateTimeImmutable, $row->at);
+    }
+
+    #[Test]
+    public function found_in_an_assertion_helper(): void
+    {
+        $this->assertStampedNow($row);
+    }
+
+    #[Test]
+    public function found_in_a_helper_of_a_helper(): void
+    {
+        $this->check($row);
+    }
+
+    #[Test]
+    public function clean_frozen_first(): void
+    {
+        $this->freezeSecond();
+        $this->run();
+        $this->assertSame(now()->getTimestamp(), $row->at->getTimestamp());
+    }
+
+    #[Test]
+    public function clean_travelled_to(): void
+    {
+        $this->travelTo(Carbon::parse('2026-01-01 00:00:00'));
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function clean_travelled_by_a_unit(): void
+    {
+        $this->travel(2)->days();
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function clean_set_test_now(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-01-01'));
+        $this->assertSame(today()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function clean_inside_a_frozen_callback(): void
+    {
+        $this->freezeTime(function (): void {
+            $this->run();
+            $this->assertSame(now()->getTimestamp(), $this->row->at->getTimestamp());
+        });
+        $this->travelTo(now(), fn () => $this->assertSame(now()->toDateString(), $this->row->day));
+        $this->travel(1)->hours(fn () => $this->assertTrue($this->row->at->isToday()));
+    }
+
+    #[Test]
+    public function clean_with_test_now(): void
+    {
+        Carbon::withTestNow('2026-01-01', fn () => $this->assertSame(now()->toDateString(), $this->row->day));
+    }
+
+    #[Test]
+    public function clean_bound_comparisons(): void
+    {
+        $this->assertLessThanOrEqual(now()->getTimestamp(), $row->at->getTimestamp());
+        $this->assertGreaterThan(now()->subMinute()->getTimestamp(), $row->at->getTimestamp());
+        $this->assertEqualsWithDelta(now()->getTimestamp(), $row->at->getTimestamp(), 2);
+        $this->assertTrue($row->at->lessThan(now()->addSecond()));
+        $this->assertTrue($row->at->isPast());
+        $this->assertFalse($row->at->isAfter(now()));
+        $this->assertNotNull($row->at ?? now());
+    }
+
+    #[Test]
+    public function clean_a_clock_read_only_in_the_message(): void
+    {
+        $this->assertSame(1, $count, 'Counted at '.now()->toDateTimeString());
+    }
+
+    #[Test]
+    public function clean_a_clock_read_as_a_query_bound(): void
+    {
+        $this->assertSame(1, Row::query()->where('at', '<', now())->count());
+        $this->assertTrue(Row::query()->where('at', '<', now())->exists());
+    }
+
+    // The fixed form: read once, before the code runs, in a variable. (A
+    // variable is not followed — see the scanner's docblock.)
+    #[Test]
+    public function clean_read_once_in_a_variable(): void
+    {
+        $now = now()->toImmutable();
+        $this->assertSame($now->addDays(7)->getTimestamp(), $row->until->getTimestamp());
+    }
+
+    #[Test]
+    public function clean_not_a_clock_read(): void
+    {
+        $this->assertSame(Carbon::parse('2026-01-01')->toDateString(), $row->day);
+        $this->assertSame(Carbon::create(2026, 1, 1)->toDateString(), $row->day);
+        $this->assertTrue($row->at->eq(Carbon::parse('2026-01-01')));
+    }
+
+    #[Test]
+    public function clean_a_helper_that_freezes(): void
+    {
+        $this->holdTheClock();
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function clean_an_assertion_helper_called_frozen(): void
+    {
+        $this->freezeSecond();
+        $this->assertStampedNow($row);
+    }
+
+    private function assertStampedNow(object $row): void
+    {
+        $this->assertSame(now()->getTimestamp(), $row->at->getTimestamp());
+    }
+
+    private function check(object $row): void
+    {
+        $this->assertStampedNow($row);
+    }
+
+    private function holdTheClock(): void
+    {
+        $this->freezeSecond();
+    }
+}
+
+final class PinnedBySetUpTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function clean_pinned_by_set_up(): void
+    {
+        $this->assertSame(now()->getTimestamp(), $row->at->getTimestamp());
+    }
+
+    #[Test]
+    public function found_let_go_after_set_up(): void
+    {
+        $this->travelBack();
+        $this->assertSame(now()->getTimestamp(), $row->at->getTimestamp());
+    }
+}
+
+abstract class FreezingParent extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Carbon::setTestNow('2026-01-01 00:00:00');
+    }
+
+    // Abstract: its tests are read through the class that runs them.
+    #[Test]
+    public function clean_inherited_and_pinned(): void
+    {
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+}
+
+final class PinnedByAParentTest extends FreezingParent
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+    }
+
+    #[Test]
+    public function clean_pinned_by_a_parent(): void
+    {
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+}
+
+trait FreezesTheClock
+{
+    protected function setUpFreezesTheClock(): void
+    {
+        $this->freezeTime();
+    }
+}
+
+final class PinnedByATraitTest extends TestCase
+{
+    use FreezesTheClock;
+
+    #[Test]
+    public function clean_pinned_by_a_trait(): void
+    {
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+}
+
+final class PinnedBeforeTest extends TestCase
+{
+    #[Before]
+    public function holdIt(): void
+    {
+        $this->freezeSecond();
+    }
+
+    public function test_clean_pinned_by_a_before_method(): void
+    {
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    /** @test */
+    public function found_a_doc_tagged_test_let_go(): void
+    {
+        $this->travelBack();
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+}
