@@ -452,6 +452,14 @@ final class AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest exten
      * login. Status, every header but Date, and the whole body with the
      * address itself masked must be identical.
      *
+     * The clock is frozen before the first request, so every response's
+     * cookies expire at the same instant, and a cookie's lifetime is its
+     * expiry less that frozen instant. Symfony's `Cookie::getMaxAge()` is
+     * `expire - time()`: PHP's own clock, which freezing does not reach, read
+     * when the string is built. Compared that way, a run whose second turned
+     * between one response and the reading of its cookies was red, 7199
+     * against 7200 (the full suite at bf36e3f).
+     *
      * @param  list<string>  $addresses
      * @return array<string, array{status: int, headers: array<string, mixed>, body: string}>
      */
@@ -459,6 +467,7 @@ final class AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest exten
     {
         $control = 'never-had-a-login-'.substr(md5(implode(',', $addresses)), 0, 8).'@lynomia.test';
         $seen = [];
+        $this->freezeSecond();
 
         foreach ([...$addresses, $control] as $address) {
             $delegate = User::factory()->create(['email_verified_at' => now()]);
@@ -472,13 +481,15 @@ final class AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest exten
             // Date moves with the clock and X-Request-Id is minted for each
             // request, whatever it asks; a cookie's value is fresh ciphertext
             // on every response, so the cookies are compared by name, path,
-            // domain and lifetime rather than by their encrypted bytes.
+            // domain and lifetime rather than by their encrypted bytes. The
+            // lifetime is read against the frozen clock, not getMaxAge(),
+            // which reads PHP's own.
             $headers = $response->headers->all();
             $this->assertNotEmpty($headers['x-request-id'] ?? null);
             unset($headers['date'], $headers['x-request-id'], $headers['set-cookie']);
             $headers['cookies'] = array_map(
                 static fn (Cookie $cookie): string => implode('|', [
-                    $cookie->getName(), $cookie->getPath(), (string) $cookie->getDomain(), (string) $cookie->getMaxAge(),
+                    $cookie->getName(), $cookie->getPath(), (string) $cookie->getDomain(), (string) ($cookie->getExpiresTime() - now()->getTimestamp()),
                     $cookie->isSecure() ? 'secure' : '', $cookie->isHttpOnly() ? 'httponly' : '', (string) $cookie->getSameSite(),
                 ]),
                 $response->headers->getCookies(),

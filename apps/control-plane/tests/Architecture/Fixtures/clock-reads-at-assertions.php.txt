@@ -1571,6 +1571,46 @@ final class ByElementTest extends ElementParent
         $this->assertEquals(new \DateTimeImmutable, $row->at);
     }
 
+    // NATIVE_METHODS: Symfony's Cookie::getMaxAge() is expire - time().
+    #[Test]
+    public function found_native_method__getMaxAge(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(7200, $cookie->getMaxAge());
+    }
+
+    // The same lifetime read against the frozen clock the expiry was made on.
+    #[Test]
+    public function clean_a_cookie_lifetime_against_a_frozen_clock(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(7200, $cookie->getExpiresTime() - now()->getTimestamp());
+    }
+
+    // getMaxAge() given an argument is not the vendor's clock read.
+    #[Test]
+    public function clean_a_native_method_given_an_argument(): void
+    {
+        $this->assertSame(7200, $cookie->getMaxAge($ttl));
+    }
+
+    // isCleared() is expire < time(): a bound, like isPast(), not listed.
+    #[Test]
+    public function clean_is_cleared_is_a_bound(): void
+    {
+        $this->assertSame(true, $cookie->isCleared());
+    }
+
+    // The bf36e3f shape: getMaxAge() inside a closure argument, held in a
+    // variable, then compared. Not seen (disclosed).
+    #[Test]
+    public function clean_a_native_method_in_a_closure_into_a_variable(): void
+    {
+        $this->freezeSecond();
+        $seen = array_map(static fn ($cookie): string => (string) $cookie->getMaxAge(), $cookies);
+        $this->assertSame(['7200'], $seen);
+    }
+
     // RECEIVER_FLOWS
     #[Test]
     public function found_receiver_flow__MethodCall(): void
