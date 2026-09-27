@@ -154,14 +154,21 @@ class Backup extends Model
      *
      * And it is a compare-and-set, not a save over whatever is there. The
      * table's current state is read under a row lock and must still be the
-     * one this copy was read in; otherwise nothing is written and the refusal
-     * says it was a race ({@see IllegalBackupTransitionException::wasRaced()}).
+     * one this copy was read in, and so must the attempt this copy read
+     * ({@see self::attemptColumns()}); otherwise nothing is written and the
+     * refusal says it was a race ({@see IllegalBackupTransitionException::wasRaced()}).
      * Every sweep in this module loads a batch and then makes one provider
      * call per row, and every request reads, checks, asks something else and
      * then writes; checking only the copy in memory let the verification sweep
      * write `verifying` over a restore a customer had started meanwhile, and a
      * stale `delete_requested` move to `deleting` an archive that had been
      * kept and was being restored.
+     *
+     * The state alone was not enough either. One archive can be `restoring`
+     * twice, and a sweep that read the row during the first restore, polled
+     * that restore's finished task and compared only the state wrote
+     * `Restored` — or `Succeeded` — over a second restore it never polled,
+     * releasing the machine while the second restore was writing it (F-09).
      *
      * @throws IllegalBackupTransitionException
      */
@@ -201,8 +208,130 @@ class Backup extends Model
                 );
             }
 
+            $attempt = $this->attemptColumns($expected);
+
+            if ($attempt !== [] && ! $this->onTheAttemptItRead(static::query()->whereKey($this->getKey()), $attempt)->exists()) {
+                throw IllegalBackupTransitionException::attemptChanged(
+                    (string) $this->getKey(),
+                    $expected,
+                    $attempt,
+                    $next,
+                );
+            }
+
             $this->forceFill([...$attributes, 'state' => $next])->save();
         });
+    }
+
+    /**
+     * The columns that tell one attempt at `$state` from another.
+     *
+     * A state a row can enter more than once needs them, because the state
+     * alone reads the same for every attempt:
+     *
+     *  - `restoring` — an archive can be restored again, and each attempt has
+     *    its own handle and its own start;
+     *  - `verifying` — the transition table allows another verification
+     *    after `verified`, again with its own handle and start;
+     *  - `delete_requested`, and the `deleting` it leads to — a request can be
+     *    called off and a new one made, with its own time;
+     *  - `needs_review` — which operation it interrupted, and that
+     *    operation's attempt.
+     *
+     * `requested` and `running` have none: a row is created once, and nothing
+     * leads back to either. The resting states (`succeeded`, `verified`,
+     * `restored`) have no attempt to name; a move out of one is guarded by
+     * the state and by whatever lock its caller reads the row under.
+     *
+     * @return list<string>
+     */
+    private function attemptColumns(BackupState $state): array
+    {
+        return match ($state) {
+            BackupState::Restoring => ['restore_task_id', 'restore_started_at'],
+            BackupState::Verifying => ['verification_task_id', 'verification_started_at'],
+            BackupState::DeleteRequested, BackupState::Deleting => ['deletion_requested_at'],
+            BackupState::NeedsReview => ['quarantined_from', ...$this->interruptedAttemptColumns()],
+            default => [],
+        };
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function interruptedAttemptColumns(): array
+    {
+        $interrupted = BackupState::tryFrom((string) $this->getRawOriginal('quarantined_from'));
+
+        return $interrupted === null || $interrupted === BackupState::NeedsReview
+            ? []
+            : $this->attemptColumns($interrupted);
+    }
+
+    /**
+     * Narrow `$query` to a row that still carries the attempt this copy last
+     * read or wrote — its original values, not whatever a caller has since
+     * assigned.
+     *
+     * Compared by the database, so a timestamp reads equal whichever of its
+     * spellings each side holds.
+     *
+     * @param  Builder<Backup>  $query
+     * @param  list<string>  $columns
+     * @return Builder<Backup>
+     */
+    private function onTheAttemptItRead(Builder $query, array $columns): Builder
+    {
+        foreach ($columns as $column) {
+            $read = $this->getRawOriginal($column);
+
+            if ($read === null) {
+                $query->whereNull($column);
+            } else {
+                $query->where($column, $read);
+            }
+        }
+
+        return $query;
+    }
+
+    /**
+     * Record that the provider was asked about this row, if the row is still
+     * on the operation and attempt this copy read — or refuse, as a race.
+     *
+     * The poll bookkeeping used to be a plain save. A sweep that loaded the
+     * row during one restore, and reached it after that restore had settled
+     * and another had started, stamped `last_polled_at` and a poll count on
+     * the new restore, which had never been asked about: it lost its place at
+     * the front of the next sweep (`last_polled_at nulls first`) and carried
+     * a count that was not its own. It is written only where the
+     * compare-and-set in {@see self::transitionTo()} would write, and the same
+     * refusal says why not (F-09).
+     *
+     * @throws IllegalBackupTransitionException
+     */
+    public function recordPoll(): void
+    {
+        $expected = BackupState::from((string) $this->getRawOriginal('state'));
+
+        $query = $this->onTheAttemptItRead(
+            static::query()->whereKey($this->getKey())->where('state', $expected->value),
+            $this->attemptColumns($expected),
+        );
+
+        $polledAt = now();
+        $count = $this->poll_count + 1;
+
+        if ($query->update(['last_polled_at' => $polledAt, 'poll_count' => $count]) === 0) {
+            $stored = static::query()->whereKey($this->getKey())->toBase()->value('state');
+
+            throw $stored === $expected->value
+                ? IllegalBackupTransitionException::attemptChanged((string) $this->getKey(), $expected, $this->attemptColumns($expected), $expected)
+                : IllegalBackupTransitionException::movedUnderneath((string) $this->getKey(), $expected, is_string($stored) ? $stored : null, $expected);
+        }
+
+        $this->forceFill(['last_polled_at' => $polledAt, 'poll_count' => $count])
+            ->syncOriginalAttributes(['last_polled_at', 'poll_count']);
     }
 
     /**
