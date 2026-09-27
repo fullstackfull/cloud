@@ -183,6 +183,8 @@ final class AFailureWhileReconcilingOneNodeStopsOnlyThatNodeTest extends TestCas
         $outcome = app(ReconcileHostingNodes::class)->execute();
 
         $this->assertSame(1, $outcome['nodes']);
+        $this->assertSame(1, $outcome['failed'], 'An adapter fault on the way to the listing was not counted as a failed node.');
+        $this->assertSame(0, $outcome['unread']);
         $stopped = $faulty->fresh();
         $this->assertSame('2026-09-10 12:00:00', $stopped?->reconcile_attempted_at?->format('Y-m-d H:i:s'));
         $this->assertSame('Reconciliation failed while asking for its account listing ('.RuntimeException::class.'), so nothing was concluded. The log has the detail.', $stopped?->reconcile_error);
@@ -290,6 +292,66 @@ final class AFailureWhileReconcilingOneNodeStopsOnlyThatNodeTest extends TestCas
             ->assertFailed();
 
         $this->assertSame('2026-09-10 12:00:00', $fine->fresh()?->reconciled_at?->format('Y-m-d H:i:s'));
+    }
+
+    #[Test]
+    public function the_command_fails_when_a_node_failed_on_the_way_to_its_listing(): void
+    {
+        $faulty = $this->node('node-fault', '2026-09-01 00:00:00');
+        $panel = Mockery::mock(HostingProvider::class);
+        $panel->shouldReceive('listAccounts')->andThrow(new RuntimeException('an adapter fault'));
+        $this->app->singleton(HostingProviderFactory::class);
+        app(HostingProviderFactory::class)->swap($faulty, $panel);
+        $this->node('node-fine', '2026-09-02 00:00:00');
+        $this->listings(['node-fine' => 'list[]=']);
+
+        $this->artisan('hosting:reconcile')
+            ->expectsOutputToContain('1 nodes checked, 0 accounts compared, 0 disagreements recorded, 0 listings not read, 1 nodes failed.')
+            ->assertFailed();
+    }
+
+    /**
+     * A missing credential does not reach the sweep as a fault: both adapters
+     * translate the configuration error into a HostingProviderException
+     * before any request is made, so it is a listing not read, kept on the
+     * node, and does not fail the command.
+     */
+    #[Test]
+    public function a_missing_credential_is_a_listing_not_read(): void
+    {
+        HostingNode::factory()->create([
+            'slug' => 'node-bare', 'hostname' => 'node-bare.lynomia.test', 'panel' => HostingPanel::DirectAdmin,
+            'api_endpoint' => 'https://node-bare.lynomia.test:2222', 'credentials_reference' => 'nobody-configured-this',
+            'status' => HostingNodeStatus::Active, 'account_count' => 0,
+            'reconcile_attempted_at' => '2026-09-01 00:00:00', 'reconciled_at' => '2026-09-01 00:00:00',
+        ]);
+        $this->listings([]);
+
+        $this->artisan('hosting:reconcile')
+            ->expectsOutputToContain('0 nodes checked, 0 accounts compared, 0 disagreements recorded, 1 listings not read, 0 nodes failed.')
+            ->assertSuccessful();
+    }
+
+    /**
+     * The SQLSTATE is read as well as Laravel's detector. The detector knows a
+     * serialization failure by its code, but a deadlock only by its English
+     * message, and PostgreSQL words its messages in the server's
+     * lc_messages: a deadlock reported in another language is still 40P01.
+     * Inside a caller's transaction it is let out as it was thrown.
+     */
+    #[Test]
+    public function a_deadlock_worded_in_another_language_inside_a_callers_transaction_is_let_out(): void
+    {
+        $this->refuseDriftNamed('poison', '40P01', 'interblocage détecté');
+        $this->node('node-fails', '2026-09-01 00:00:00');
+        $this->listings(['node-fails' => 'list[]=poison']);
+
+        try {
+            app(ReconcileHostingNodes::class)->execute();
+            $this->fail('A deadlock the detector does not recognise by its message was swallowed.');
+        } catch (QueryException $e) {
+            $this->assertSame('40P01', $e->errorInfo[0] ?? null);
+        }
     }
 
     #[Test]

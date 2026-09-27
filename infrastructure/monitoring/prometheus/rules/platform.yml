@@ -293,6 +293,48 @@ groups:
           runbook: docs/runbooks/drift.md
           runbook_url: https://docs.prod.example/runbooks/drift
 
+  - name: platform.scheduler
+    rules:
+      - alert: ScheduledCommandFailing
+        # A scheduled command has failed three runs in a row. RecordScheduledRun
+        # counts failures in a row per command — a non-zero exit or an
+        # exception — and a success resets the count to zero, so this reads an
+        # outage and not a flap. Renewals, expiry sweeps, reconciliation and
+        # retention all run from the scheduler, and a command failing every run
+        # is silent: nothing errors where a customer sees it, the work simply
+        # stops. hosting:reconcile and backups:reconcile exit non-zero on
+        # purpose when a node or a backup could not be reconciled; this is
+        # where that reaches a person.
+        #
+        # Three, because one failure is a provider blip and two can be the
+        # same blip seen twice. How long three takes is the command's own
+        # schedule: minutes for a per-minute command, twelve hours for
+        # hosting:reconcile. The threshold is a starting point that has not
+        # been watched against a deployment. `max by (command)` so that one
+        # command is one alert whichever target exported it. validate-
+        # monitoring.py pins this expression whole, its `for`, and the
+        # receiver (PINNED_ROUTES).
+        #
+        # It does not catch a command that has stopped being invoked at all:
+        # that command's count stops moving. That is
+        # lynomia_scheduled_command_last_success_timestamp_seconds, which no
+        # rule reads yet; the runbook says how to look.
+        expr: max by (command) (lynomia_scheduled_command_consecutive_failures) >= 3
+        for: 5m
+        labels:
+          severity: warning
+          component: control-plane
+        annotations:
+          summary: '{{ $labels.command }} has failed {{ $value | printf "%.0f" }} scheduled runs in a row'
+          description: >-
+            The scheduled command {{ $labels.command }} has failed every run for its
+            last {{ $value | printf "%.0f" }} runs, so the work it does has not been
+            done since its last success. The failure of the last run is in the
+            scheduled_runs table (last_failure) and the full error in the control
+            plane's log. Run it by hand to read the error.
+          runbook: docs/runbooks/scheduler-stale.md
+          runbook_url: https://docs.prod.example/runbooks/scheduler-stale
+
   - name: platform.queue
     rules:
       - alert: QueueBacklogGrowing

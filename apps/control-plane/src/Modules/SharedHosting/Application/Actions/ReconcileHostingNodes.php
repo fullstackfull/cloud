@@ -202,6 +202,11 @@ final readonly class ReconcileHostingNodes
      * transaction, the node's own transaction was the outermost and was rolled
      * back whole, so the failure is recorded on the node like any other.
      *
+     * Known by the SQLSTATE as well as by Laravel's detector, because the
+     * detector knows a deadlock only by its English message ("deadlock
+     * detected"), and PostgreSQL words its messages in the server's
+     * lc_messages: a deadlock reported in another language is still 40P01.
+     *
      * And a statement refused because the transaction was already aborted
      * (25P02), at any level: there is nothing the node could be stamped with.
      */
