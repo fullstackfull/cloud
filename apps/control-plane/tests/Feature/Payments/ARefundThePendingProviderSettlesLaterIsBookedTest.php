@@ -13,8 +13,10 @@ use Lynomia\Modules\Payments\Application\Actions\IngestWebhookEvent;
 use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
 use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
 use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
+use Lynomia\Modules\Payments\Domain\Exceptions\RefundNotYetRecordedException;
 use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Payments\Infrastructure\Models\WebhookEvent;
 use Lynomia\Modules\Payments\Infrastructure\Providers\FakePaymentProvider;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
@@ -93,15 +95,61 @@ final class ARefundThePendingProviderSettlesLaterIsBookedTest extends TestCase
     }
 
     #[Test]
-    public function an_update_for_a_refund_this_platform_never_made_changes_nothing(): void
+    public function a_refund_event_quicker_than_the_refunds_own_answer_is_answered_for_a_redelivery_not_lost(): void
+    {
+        /*
+         * R1. IssueRefund stores the provider's reference for the refund only
+         * once the provider has answered; an event arriving before that was
+         * acknowledged (200, processed) and lost, and the row stayed pending.
+         */
+        [$invoice, $capture] = $this->paidInvoice(5_005);
+        $refund = app(IssueRefund::class)->execute($capture, Money::ofMinor(5_005, 'KWD'), 'customer asked');
+        $reference = (string) $refund->provider_reference;
+
+        // The row as it stood before the answer was written.
+        $refund->forceFill(['provider_reference' => null])->save();
+
+        $early = (new FakePaymentProvider)->emitWebhook(ProviderEventKind::RefundSucceeded, $reference, Money::ofMinor(5_005, 'KWD'), refundStatus: RefundStatus::Succeeded);
+
+        $server = ['CONTENT_TYPE' => 'application/json'];
+        foreach ($early->headers as $name => $value) {
+            $server['HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
+        }
+
+        $this->call('POST', route('webhooks.receive', ['provider' => 'fake']), server: $server, content: $early->rawPayload)
+            ->assertStatus(503);
+
+        /** @var WebhookEvent $record */
+        $record = WebhookEvent::query()->sole();
+        $this->assertFalse($record->status->isSettled(), 'The event was marked handled, so no redelivery would ever settle the refund.');
+        $this->assertSame(RefundStatus::Pending, $refund->fresh()?->status);
+
+        // The answer is written; the provider redelivers the same event.
+        $refund->forceFill(['provider_reference' => $reference])->save();
+        app(IngestWebhookEvent::class)->execute('fake', $early->rawPayload, $early->headers);
+
+        $this->assertSame(RefundStatus::Succeeded, $refund->fresh()?->status);
+        $this->assertSame(5_005, $invoice->refresh()->amount_refunded_minor);
+        $this->assertTrue($record->fresh()?->status->isSettled());
+    }
+
+    #[Test]
+    public function an_update_for_a_refund_no_row_carries_changes_nothing_and_is_not_settled(): void
     {
         [$invoice] = $this->paidInvoice(5_005);
 
         $update = (new FakePaymentProvider)->emitWebhook(ProviderEventKind::RefundSucceeded, 'fake_re_nobody_knows', Money::ofMinor(5_005, 'KWD'), refundStatus: RefundStatus::Succeeded);
-        app(IngestWebhookEvent::class)->execute('fake', $update->rawPayload, $update->headers);
+
+        try {
+            app(IngestWebhookEvent::class)->execute('fake', $update->rawPayload, $update->headers);
+            $this->fail('An unknown refund was acknowledged.');
+        } catch (RefundNotYetRecordedException $e) {
+            $this->assertSame(503, $e->httpStatus());
+        }
 
         $this->assertSame(0, Refund::query()->count());
         $this->assertSame(0, $invoice->refresh()->amount_refunded_minor);
+        $this->assertFalse(WebhookEvent::query()->sole()->status->isSettled());
     }
 
     /**

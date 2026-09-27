@@ -166,7 +166,9 @@ final readonly class IngestWebhookEvent
              * the provider answered `pending`: nothing else ever moved such a
              * row, so the money was promised to the customer, reserved against
              * the capture, and never booked (SettleRefundFromProvider). One the
-             * provider answered final already is confirmed and left alone.
+             * provider answered final already is confirmed and left alone; one
+             * no row carries yet throws, so the event stays unsettled and the
+             * provider redelivers it.
              */
             ProviderEventKind::RefundSucceeded => $this->settleRefund->execute($provider->name(), $event),
             ProviderEventKind::Unknown => null,

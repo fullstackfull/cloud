@@ -168,6 +168,7 @@ return [
         'provider_request_failed' => 'The payment provider did not accept the request. Try again in a moment.',
         'refund_exceeds_capture' => 'A refund cannot exceed the amount taken.',
         'refund_exceeds_what_is_held' => 'Part of this payment has already been returned to the customer\'s wallet, so it cannot also be refunded to the card.',
+        'refund_not_yet_recorded' => 'This refund is not recorded yet. It will be retried.',
         'transaction_not_refundable' => 'This payment cannot be refunded.',
         'unattributable' => 'This payment could not be matched to an invoice.',
         'unknown_provider' => 'That payment method is not available.',

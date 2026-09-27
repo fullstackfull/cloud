@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Payments\Domain\DTOs\ProviderEvent;
 use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
 use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
+use Lynomia\Modules\Payments\Domain\Exceptions\RefundNotYetRecordedException;
 use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
@@ -51,10 +52,13 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
  * twice. The row is locked while it is decided, which is also what the two
  * copies of a redelivered event serialise on.
  *
- * A refund event naming a refund this platform has no row for (one made in
- * the provider's own dashboard, or one whose answer IssueRefund has not yet
- * written) is logged and acknowledged. It is not retried: nothing here can
- * make that row appear.
+ * A refund event naming a refund no row carries yet is answered retryably
+ * (RefundNotYetRecordedException, 503) and the webhook row left unsettled:
+ * IssueRefund stores the provider's reference only once the provider has
+ * answered, so an event quicker than that answer used to be acknowledged and
+ * lost, and the row stayed pending for ever. The provider's redelivery finds
+ * the row. A refund made in the provider's own dashboard gets the same answer
+ * until the provider stops retrying; every attempt is on the webhook row.
  */
 final readonly class SettleRefundFromProvider
 {
@@ -82,13 +86,13 @@ final readonly class SettleRefundFromProvider
                 ->first();
 
             if ($refund === null) {
-                Log::warning('A provider reported a refund this platform has no record of; nothing was changed.', [
+                Log::warning('A provider reported a refund no refund row carries yet; answered for a redelivery.', [
                     'provider' => $provider,
                     'refund_reference' => $event->refundReference,
                     'provider_event_id' => $event->providerEventId,
                 ]);
 
-                return null;
+                throw RefundNotYetRecordedException::forReference($provider, (string) $event->refundReference);
             }
 
             /** @var Transaction $capture */
