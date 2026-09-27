@@ -5,14 +5,18 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Vps\Application\Services;
 
 use Closure;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Compute\Application\Actions\RestateNodeCommitment;
 use Lynomia\Modules\Compute\Domain\Exceptions\NodeCapacityExceededException;
 use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
+use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
+use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
 use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
+use Throwable;
 
 /**
  * A machine's node commitment, as a resize reads and restates it.
@@ -34,16 +38,33 @@ final readonly class MachineCommitment
 {
     public function __construct(
         private RestateNodeCommitment $commitment,
+        private ComputeProviderFactory $providers,
     ) {}
 
     /**
      * Why a resize of this machine to the target would be refused for
-     * capacity before the hypervisor is asked, as the rows stand; null when
-     * it would not, or when there is no node to ask about.
+     * capacity before the hypervisor is asked to change it; null when it
+     * would not, or when there is no node to ask about.
+     *
+     * One question with the resize's (ResizeVpsHandler): the resize reads the
+     * machine from the hypervisor, asks only when the target is larger than
+     * that in some dimension (grows()), and asks the node and pool only for
+     * what the ceiling adds above what the machine runs and what is held
+     * (RestateNodeCommitment::execute()'s $alreadyRuns). So this reads the
+     * machine from the hypervisor too (whatItRuns()) and asks the same dry
+     * run. When the hypervisor cannot be read, the machine may run less than
+     * its row says, so it is asked as if nothing were running beyond what is
+     * held - the stricter answer: a quote that passes is a change the resize
+     * does not refuse for capacity. Measured from the row instead, the quote
+     * passed a machine behind its row that the resize then refused after the
+     * money moved, and refused a machine ahead of its row a change the resize
+     * would deliver (q2, q1: the verification of round seven D).
      */
     public function whyTheGrowthWouldNotFit(VirtualMachine $machine, ?int $vcpu, ?int $memoryMib, ?int $diskGib): ?string
     {
-        if (! $this->grows($machine, $vcpu, $memoryMib, $diskGib)) {
+        $runs = $this->whatItRuns($machine);
+
+        if ($runs !== null && ! $this->grows($machine, $vcpu, $memoryMib, $diskGib, $runs)) {
             return null;
         }
 
@@ -61,6 +82,39 @@ final readonly class MachineCommitment
             $node,
             $this->poolFor($held, $machine, $node),
             $this->ceiling($machine, $vcpu, $memoryMib, $diskGib),
+            $runs,
+        );
+    }
+
+    /**
+     * The machine's shape as the hypervisor reports it now - each figure it
+     * does not report taken from the row, as the resize takes it - or null
+     * when it cannot be read: no confirmed provider id, node or cluster, no
+     * such machine, or any failure to ask.
+     */
+    public function whatItRuns(VirtualMachine $machine): ?VmResources
+    {
+        /** @var ComputeNode|null $node */
+        $node = $machine->node()->first();
+        /** @var ComputeCluster|null $cluster */
+        $cluster = $machine->cluster()->first();
+
+        if (! $machine->existsRemotely() || $node === null || $cluster === null) {
+            return null;
+        }
+
+        try {
+            $state = $this->providers->for($cluster)->getVm($node->provider_name, (string) $machine->provider_id);
+        } catch (QueryException $e) {
+            throw $e;
+        } catch (Throwable) {
+            return null;
+        }
+
+        return $state === null ? null : new VmResources(
+            vcpu: $state->vcpu ?? $machine->vcpu,
+            memoryMib: $state->memoryMib ?? $machine->memory_mib,
+            diskGib: $state->diskGib ?? $machine->disk_gib,
         );
     }
 
@@ -110,12 +164,13 @@ final readonly class MachineCommitment
      * RestateNodeCommitment's own order - the order the destroy takes them.
      *
      * @param  VmResources|Closure(NodeCapacityReservation|null): VmResources  $shape
+     * @param  VmResources|null  $alreadyRuns  what the machine runs now, when read (RestateNodeCommitment::execute())
      *
      * @throws NodeCapacityExceededException when $refuse and the node or pool cannot hold an increase
      */
-    public function restate(VirtualMachine $machine, ComputeNode $node, VmResources|Closure $shape, bool $refuse): bool
+    public function restate(VirtualMachine $machine, ComputeNode $node, VmResources|Closure $shape, bool $refuse, ?VmResources $alreadyRuns = null): bool
     {
-        return DB::transaction(function () use ($machine, $node, $shape, $refuse): bool {
+        return DB::transaction(function () use ($machine, $node, $shape, $refuse, $alreadyRuns): bool {
             if (VirtualMachine::query()->whereKey($machine->getKey())->lockForUpdate()->first(['id']) === null) {
                 return false;
             }
@@ -130,6 +185,7 @@ final readonly class MachineCommitment
                 refuseWhatDoesNotFit: $refuse,
                 serviceId: $machine->service_id,
                 customerId: $held?->customer_id,
+                alreadyRuns: $alreadyRuns,
             );
 
             return true;

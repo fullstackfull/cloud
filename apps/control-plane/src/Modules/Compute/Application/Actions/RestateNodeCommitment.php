@@ -78,6 +78,10 @@ final readonly class RestateNodeCommitment
      *                                                                                 Two resizes of one machine settled from the machine each held in
      *                                                                                 memory left the commitment at the one that settled last, not at the
      *                                                                                 machine's shape (B1, round six).
+     * @param  VmResources|null  $alreadyRuns  what the machine is known to run on $node now, when the caller
+     *                                         has read it: only what the shape adds above it (and above what is
+     *                                         held there) is refused, because the rest is already there
+     *                                         (alreadyAbove()). Everything is still committed.
      *
      * @throws NodeCapacityExceededException when $refuseWhatDoesNotFit and an increase does not fit
      */
@@ -89,8 +93,9 @@ final readonly class RestateNodeCommitment
         bool $refuseWhatDoesNotFit,
         ?string $serviceId = null,
         ?string $customerId = null,
+        ?VmResources $alreadyRuns = null,
     ): NodeCapacityReservation {
-        return DB::transaction(function () use ($reservationKey, $node, $storageId, $shape, $refuseWhatDoesNotFit, $serviceId, $customerId): NodeCapacityReservation {
+        return DB::transaction(function () use ($reservationKey, $node, $storageId, $shape, $refuseWhatDoesNotFit, $serviceId, $customerId, $alreadyRuns): NodeCapacityReservation {
             /** @var NodeCapacityReservation|null $held */
             $held = NodeCapacityReservation::query()
                 ->where('reservation_key', $reservationKey)
@@ -115,7 +120,8 @@ final readonly class RestateNodeCommitment
             ['same_node' => $sameNode, 'same_pool' => $samePool, 'gain' => $gain, 'pool_gain' => $poolGain] = $this->plan($held, $to, $storageId, $shape);
 
             if ($refuseWhatDoesNotFit) {
-                $this->refuseWhatDoesNotFit($target, $gain, $targetPool, $poolGain);
+                ['gain' => $asked, 'pool_gain' => $poolAsked] = self::alreadyAbove($gain, $poolGain, $shape, $alreadyRuns);
+                $this->refuseWhatDoesNotFit($target, $asked, $targetPool, $poolAsked);
             }
 
             // Given back where the row was, when it moves.
@@ -162,7 +168,7 @@ final readonly class RestateNodeCommitment
      *
      * @param  VmResources|Closure(NodeCapacityReservation|null): VmResources  $shape
      */
-    public function whyItWouldNotFit(string $reservationKey, ComputeNode $node, ?string $storageId, VmResources|Closure $shape): ?string
+    public function whyItWouldNotFit(string $reservationKey, ComputeNode $node, ?string $storageId, VmResources|Closure $shape, ?VmResources $alreadyRuns = null): ?string
     {
         /** @var NodeCapacityReservation|null $held */
         $held = NodeCapacityReservation::query()
@@ -183,7 +189,8 @@ final readonly class RestateNodeCommitment
         $plan = $this->plan($held, (string) $target->getKey(), $storageId, $shape);
 
         try {
-            $this->refuseWhatDoesNotFit($target, $plan['gain'], $pool, $plan['pool_gain']);
+            ['gain' => $asked, 'pool_gain' => $poolAsked] = self::alreadyAbove($plan['gain'], $plan['pool_gain'], $shape, $alreadyRuns);
+            $this->refuseWhatDoesNotFit($target, $asked, $pool, $poolAsked);
         } catch (NodeCapacityExceededException $e) {
             return $e->getMessage();
         }
@@ -213,6 +220,34 @@ final readonly class RestateNodeCommitment
                 'disk' => $shape->diskGib - ($was?->diskGib ?? 0),
             ],
             'pool_gain' => $shape->diskGib - ($samePool ? $held->disk_gib : 0),
+        ];
+    }
+
+    /**
+     * What is asked of the node and pool: the gain, less what the machine is
+     * known to run there already - per dimension, the smaller of the gain
+     * and what the shape adds above $alreadyRuns. A machine that runs a shape
+     * its commitment does not hold (a growth that landed unrecorded, or no
+     * commitment at all) occupies it on the node whatever the ledger says;
+     * committing it records that, and refusing it would not make the machine
+     * smaller. Null: the gain, all of it.
+     *
+     * @param  array{vcpu: int, memory: int, disk: int}  $gain
+     * @return array{gain: array{vcpu: int, memory: int, disk: int}, pool_gain: int}
+     */
+    private static function alreadyAbove(array $gain, int $poolGain, VmResources $shape, ?VmResources $alreadyRuns): array
+    {
+        if ($alreadyRuns === null) {
+            return ['gain' => $gain, 'pool_gain' => $poolGain];
+        }
+
+        return [
+            'gain' => [
+                'vcpu' => min($gain['vcpu'], $shape->vcpu - $alreadyRuns->vcpu),
+                'memory' => min($gain['memory'], $shape->memoryMib - $alreadyRuns->memoryMib),
+                'disk' => min($gain['disk'], $shape->diskGib - $alreadyRuns->diskGib),
+            ],
+            'pool_gain' => min($poolGain, $shape->diskGib - $alreadyRuns->diskGib),
         ];
     }
 

@@ -62,8 +62,14 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  *  - VPS, when the shape changes: the service has a machine to resize, and
  *    its node and pool can hold its growth - the refusal the resize itself
  *    makes before it grows the machine, asked as a dry run
- *    (growthTheNodeCannotHold()); a target no larger than the machine in any
- *    dimension is not asked, as the resize does not ask it. The target plan's
+ *    (growthTheNodeCannotHold()). Growth is measured as the resize measures
+ *    it, from the machine as the hypervisor reports it (a target no larger
+ *    than that in any dimension is not asked, and only what the target adds
+ *    above what the machine runs is), and, when the hypervisor cannot be
+ *    read, asked as if the machine ran nothing beyond what its commitment
+ *    holds - the stricter answer, so a quote that passes is a change the
+ *    resize does not refuse for capacity (MachineCommitment::
+ *    whyTheGrowthWouldNotFit()). The target plan's
  *    placement (cluster, address pool, image, a node in
  *    service), which checkout asks before building a new machine, is not
  *    asked: a resize is applied to the machine where it already runs and
@@ -140,10 +146,12 @@ final readonly class PlanChangeDelivery
      * (MachineCommitment::whyTheGrowthWouldNotFit(), over
      * RestateNodeCommitment::whyItWouldNotFit()): the growth is measured from
      * the machine's live capacity commitment as ResizeVpsHandler finds it -
-     * to the larger, per dimension, of what is held and the target - and
-     * held to the node's ceilings on what grows (NodeCapacityPolicy::assessGrowth())
+     * to the larger, per dimension, of what is held and the target - less
+     * what the machine is read at the hypervisor to run already, and held to
+     * the node's ceilings on what grows (NodeCapacityPolicy::assessGrowth())
      * and to the pool's uncommitted space. So the quote and the resize ask one
-     * question. This used to measure from the machine's recorded shape
+     * question; when the hypervisor cannot be read the quote asks the
+     * stricter one (the class docblock). This used to measure from the machine's recorded shape
      * against the node alone: a machine whose commitment is held raised was
      * refused a change the resize would take without asking for anything,
      * and a growth its pool could not hold was sold and then refused at the
@@ -227,8 +235,10 @@ final readonly class PlanChangeDelivery
      *
      *  - A VPS with a machine: the machine's row (virtual_machines) - the
      *    shape the hypervisor confirmed, written by every resize that
-     *    completes (ResizeVpsHandler), and the shape the resize itself reads
-     *    to decide what grows and whether the disk would shrink.
+     *    completes (ResizeVpsHandler), and the shape the resize refuses a
+     *    disk shrink against. What grows, and whether the node can hold it,
+     *    the resize measures from the machine as the hypervisor reports it,
+     *    and so does the capacity question here (growthTheNodeCannotHold()).
      *  - Otherwise the service's own recorded allocation where it has one,
      *    and else the plan given (the subscription's, or the one the change
      *    left).

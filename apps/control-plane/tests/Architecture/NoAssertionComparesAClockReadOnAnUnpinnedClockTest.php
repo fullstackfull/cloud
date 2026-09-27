@@ -264,6 +264,7 @@ final class NoAssertionComparesAClockReadOnAnUnpinnedClockTest extends TestCase
         'clean_a_clock_read_handed_to_a_variadic_parameter' => 'a variadic parameter is not bound',
         'found_a_native_clock_read_handed_to_a_helper_even_frozen' => 'a bound parameter carries PHP\'s own clock as such',
         'found_a_clock_read_handed_to_a_helper_that_pins_first' => 'a bound parameter is judged by the pin at the call, not at the comparison',
+        'found_a_clock_read_handed_on_by_a_helper_that_pins_first' => 'a bound parameter handed on binds the next helper whatever the pin is then',
         'clean_a_pinned_clock_read_handed_to_a_helper_that_lets_go' => 'a read made on a pinned clock is not bound',
         'found_a_test_now_closure_from_callable' => 'Closure::fromCallable() given to a test-now setter does not pin',
         'clean_a_test_now_closure_returned_by_a_method_pins' => 'a closure returned by a call is not seen (disclosed): it pins',
@@ -345,6 +346,33 @@ final class NoAssertionComparesAClockReadOnAnUnpinnedClockTest extends TestCase
             "Missed (positive controls not reported):\n  ".implode("\n  ", array_diff($expected, $found))
             ."\nWrongly reported (negative controls):\n  ".implode("\n  ", array_diff($found, $expected)),
         );
+    }
+
+    /**
+     * The "(PHP's own clock, which freezing does not reach)" label is a
+     * finding's own claim, and is held here: a control's findings carry it
+     * exactly when the control is named for PHP's own clock (`native` in its
+     * name) or is one of the three that compare `time()` inside a pin's,
+     * travel()'s or a setter's argument. A finding labelled for a clock
+     * freezing does reach would send its reader to the wrong cure, and the
+     * other way round.
+     */
+    #[Test]
+    public function a_finding_says_it_is_phps_own_clock_exactly_when_it_is(): void
+    {
+        $scanner = new UnpinnedClockAssertions([self::FIXTURE => (string) file_get_contents(self::root().'/'.self::FIXTURE)]);
+        $mislabelled = [];
+
+        foreach ($scanner->findings() as $finding) {
+            $control = substr($finding['test'], (int) strrpos($finding['test'], '::') + 2);
+            $comparesTime = in_array($control, ['found_an_assertion_inside_a_pin_argument', 'found_an_assertion_inside_a_travel_argument', 'found_an_assertion_inside_a_setter_argument'], true);
+            if ($finding['native'] !== (str_contains($control, 'native') || $comparesTime)) {
+                $mislabelled[] = $control.($finding['native'] ? ' is labelled PHP\'s own clock' : ' is not labelled PHP\'s own clock');
+            }
+        }
+
+        $this->assertSame([], array_values(array_unique($mislabelled)));
+        $this->assertGreaterThan(5, count(array_filter($scanner->findings(), static fn (array $f): bool => $f['native'])), 'No finding is labelled, so the label is not held.');
     }
 
     #[Test]

@@ -221,6 +221,7 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
         $currentVcpu = $actual->vcpu ?? $machine->vcpu;
         $currentMemory = $actual->memoryMib ?? $machine->memory_mib;
         $currentDisk = $actual->diskGib ?? $machine->disk_gib;
+        $runs = new VmResources($currentVcpu, $currentMemory, $currentDisk);
 
         /*
          * The disk field is a growth, not a size. The provider contract says
@@ -284,7 +285,9 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
                 $this->commitment->ceiling($machine, $targetVcpu, $targetMemory, $targetDisk),
                 // A shrink is recorded, never refused (MachineCommitment::grows()),
                 // measured from the machine as the hypervisor reported it above.
-                refuse: $this->commitment->grows($machine, $targetVcpu, $targetMemory, $targetDisk, new VmResources($currentVcpu, $currentMemory, $currentDisk)),
+                refuse: $this->commitment->grows($machine, $targetVcpu, $targetMemory, $targetDisk, $runs),
+                // Only what the ceiling adds above what the machine runs is asked.
+                alreadyRuns: $runs,
             )) {
                 return $this->goneWhileResizing($machineId);
             }
