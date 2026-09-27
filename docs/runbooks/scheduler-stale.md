@@ -80,5 +80,8 @@ one that has stopped being invoked: no alert watches that.
 
 Do not silence `ScheduledCommandFailing` for a command you expect to keep
 failing. `hosting:reconcile` and `backups:reconcile` exit non-zero on purpose
-when reconciling a node or a backup failed; the node list and the backup
-review queue say which, and the alert clears once a run succeeds.
+when reconciling a node or a backup failed. For `hosting:reconcile` the node
+list says which (the node's `reconcile_error`). For `backups:reconcile` the
+backup stays in its in-flight state and is named only in the log line "A backup
+could not be reconciled with its provider." with its `backup_id` — it is not in
+the review queue. The alert clears once a run succeeds.

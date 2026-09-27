@@ -308,8 +308,8 @@ groups:
         #
         # Three, because one failure is a provider blip and two can be the
         # same blip seen twice. How long three takes is the command's own
-        # schedule: minutes for a per-minute command, twelve hours for
-        # hosting:reconcile. The threshold is a starting point that has not
+        # schedule: minutes for a per-minute command, eight hours after its
+        # first failure for hosting:reconcile (every four hours). The threshold is a starting point that has not
         # been watched against a deployment. `max by (command)` so that one
         # command is one alert whichever target exported it. validate-
         # monitoring.py pins this expression whole, its `for`, and the

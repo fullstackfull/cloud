@@ -117,9 +117,11 @@ final readonly class ReconcileHostingNodes
 
                 continue;
             } catch (Throwable $e) {
-                // Anything else on the way to the listing — a node whose
-                // credential is not configured, a fault in an adapter — stops
-                // this node, not the sweep: see the comparison below.
+                // Anything else on the way to the listing — a fault in an
+                // adapter — stops this node, not the sweep: see the comparison
+                // below. (A node whose credential is not configured is not
+                // this: both adapters turn that into a HostingProviderException,
+                // so it is counted as a listing not read, above.)
                 self::rethrowWhatAbortsTheCallersTransaction($e);
 
                 $this->stopped($node, $e, 'asking for its account listing');
