@@ -320,9 +320,10 @@ final readonly class QuotePlanChange
              * minutes of the payment, and the refusal ends with it; a
              * settlement whose listener exhausts its retries is never heard,
              * and the refusal then lasts until the period after the change's
-             * own has ended (the bound aPaidChangeAwaitsDelivery() states -
-             * one period more than it was, because a renewal can come
-             * between a capture and its settlement), which is why the
+             * own has ended, and at least seven days after that period
+             * began (the bound PlanChangeDelivery::lookBackFrom() states -
+             * wider than one period, because a renewal can come between a
+             * capture and its settlement), which is why the
              * customer's sentence sends them to support rather than
              * promising minutes.
              */

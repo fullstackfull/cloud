@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Subscriptions\Application\Queries;
 
+use Carbon\CarbonImmutable;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
@@ -86,6 +87,9 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  */
 final readonly class PlanChangeDelivery
 {
+    /** The least lookBackFrom() reads behind the current period, in days. */
+    public const int LOOK_BACK_DAYS = 7;
+
     public function __construct(
         private HostingPackageForPlan $packages,
         private MachineCommitment $commitment,
@@ -294,11 +298,14 @@ final readonly class PlanChangeDelivery
      * ended the paid upgrade was taken as superseded by the unpaid one and
      * kept (X1). Refused while it lasts (PlanChangeRefusal::PreviousChangePending).
      *
-     * Only changes made in the current period and the one before it are
-     * read. `delivered_at` was added without a back-fill, and a change
-     * settled before it existed that queued nothing (nothing to resize) looks
-     * undelivered for ever; bounded, such a row cannot hold a subscription's
-     * plan changes past its second renewal. The period before is read
+     * Only changes made since lookBackFrom() are read: the start of the
+     * period before the current one, or seven days before the current
+     * period began, whichever is earlier. `delivered_at` was added without a
+     * back-fill, and a change settled before it existed that queued nothing
+     * (nothing to resize) looks undelivered for ever; bounded, such a row
+     * cannot hold a subscription's plan changes past its second renewal, or
+     * past seven days after the current period began on a period shorter
+     * than a week. The period before is read
      * because a renewal can come between a capture and its settlement: a
      * change paid in the last minutes of a period and settled after the
      * renewal was not read at all, the next change was accepted, and when it
@@ -315,7 +322,7 @@ final readonly class PlanChangeDelivery
             ->whereNull('delivered_at')
             ->whereNull('returned_at')
             ->whereNotNull('proration_invoice_id')
-            ->where('changed_at', '>=', $subscription->billing_period->retreat($subscription->current_period_start))
+            ->where('changed_at', '>=', $this->lookBackFrom($subscription))
             ->whereExists(static fn ($invoice) => $invoice
                 ->selectRaw('1')
                 ->from('invoices')
@@ -332,6 +339,31 @@ final readonly class PlanChangeDelivery
         }
 
         return false;
+    }
+
+    /**
+     * How far back aPaidChangeAwaitsDelivery() reads: the start of the period
+     * before the current one (BillingPeriod::retreat()), or LOOK_BACK_DAYS
+     * before the current period began, whichever is earlier.
+     *
+     * The period before, because a renewal can come between a capture and
+     * its settlement. At least a week, because on an hourly (or daily)
+     * period "the period before" is an hour (or a day) and the settlement
+     * can be later than that: its listener retries for about six and a half
+     * minutes (ResizeOnPlanChangeSettlement::backoff(), five tries), and a
+     * payments queue held up behind a worker that is down waits as long as
+     * the outage. A week covers an outage of up to a week; a settlement heard
+     * later than that is not read, and the next change is accepted. What it
+     * costs: a legacy row with no delivered_at holds a short-period
+     * subscription's plan changes for that week.
+     */
+    private function lookBackFrom(Subscription $subscription): CarbonImmutable
+    {
+        $start = CarbonImmutable::instance($subscription->current_period_start);
+        $periodBefore = $subscription->billing_period->retreat($start);
+        $atLeast = $start->subDays(self::LOOK_BACK_DAYS);
+
+        return $periodBefore->lessThan($atLeast) ? $periodBefore : $atLeast;
     }
 
     /**
