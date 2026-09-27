@@ -10,8 +10,8 @@ use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
-use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
+use Lynomia\Modules\Subscriptions\Application\Queries\PlanChangeDelivery;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 
@@ -48,15 +48,20 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *    whether a resize job existed, and such an upgrade was returned at the
  *    end. For a change settled before `delivered_at` existed, and a
  *    proration invoice with no recorded change, a resize or package-change
- *    job keyed on the invoice still counts as delivered;
- *  - it is the subscription's newest plan change, when the change is
- *    recorded: an upgrade a later change superseded was settled by that
- *    change (its credit is drawn on this invoice), not left undelivered.
+ *    job keyed on the invoice still counts as delivered
+ *    (PlanChangeDelivery::wasDelivered());
+ *  - no later change was settled, when the change is recorded: an upgrade a
+ *    later settled change superseded - a later change that owed nothing, or
+ *    whose invoice was paid, and whose credit was drawn on this invoice -
+ *    was settled by that change, not left undelivered. A later change still
+ *    unpaid (voided as the subscription ends) supersedes nothing, and the
+ *    upgrade is returned (X1).
  */
 final readonly class ReturnAnUpgradeTheEndPrevented
 {
     public function __construct(
         private ReturnWhatAnInvoiceStillHolds $returnWhatItHolds,
+        private PlanChangeDelivery $delivery,
     ) {}
 
     /**
@@ -83,7 +88,9 @@ final readonly class ReturnAnUpgradeTheEndPrevented
             ->where('kind', InvoiceItemKind::Proration->value)
             ->exists();
 
-        if (! $isAnUpgrade || $this->wasDelivered($subscription, $invoice) || $this->wasSuperseded($invoice)) {
+        if (! $isAnUpgrade
+            || $this->delivery->wasDelivered((string) $subscription->getKey(), (string) $invoice->getKey())
+            || $this->wasSuperseded($invoice)) {
             return 0;
         }
 
@@ -106,40 +113,20 @@ final readonly class ReturnAnUpgradeTheEndPrevented
     }
 
     /**
-     * Whether the settlement was heard while the subscription was live
-     * (PlanChange::$delivered_at), or - for a change settled before that was
-     * recorded, or an invoice with no recorded change - queued the resize (or
-     * the package change) this invoice paid for, under the key
-     * QueuePlanChangeAtProvider gives it.
+     * Superseded only by a later change that was settled - it owed nothing,
+     * or its invoice was paid - the rule the settlement itself applies
+     * (PlanChangeDelivery::aLaterChangeWasSettled()). Any later change used to
+     * count, so an upgrade paid and not delivered, followed by a second
+     * upgrade never paid (its invoice voided when the subscription ended),
+     * was kept at the end: 27.000 KWD for nothing (X1, the re-audit after
+     * round five). A later change that was never settled decided nothing and
+     * drew nothing from this invoice.
      */
-    private function wasDelivered(Subscription $subscription, Invoice $invoice): bool
-    {
-        $delivered = PlanChange::query()
-            ->where('proration_invoice_id', $invoice->getKey())
-            ->whereNotNull('delivered_at')
-            ->exists();
-
-        return $delivered || ProvisioningJob::query()
-            ->where('idempotency_key', 'like', sprintf('plan-change:%s:%%:invoice:%s', $subscription->getKey(), $invoice->getKey()))
-            ->exists();
-    }
-
     private function wasSuperseded(Invoice $invoice): bool
     {
         /** @var PlanChange|null $change */
         $change = PlanChange::query()->where('proration_invoice_id', $invoice->getKey())->first();
 
-        if ($change === null) {
-            return false;
-        }
-
-        return PlanChange::query()
-            ->where('subscription_id', $change->subscription_id)
-            ->where(static fn ($later) => $later
-                ->where('changed_at', '>', $change->changed_at)
-                ->orWhere(static fn ($same) => $same
-                    ->where('changed_at', $change->changed_at)
-                    ->where('id', '>', $change->id)))
-            ->exists();
+        return $change !== null && $this->delivery->aLaterChangeWasSettled($change);
     }
 }

@@ -9,6 +9,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
@@ -332,12 +333,21 @@ final class TheHostingPackageBehindAPlanIsChosenNotStumbledOnTest extends TestCa
     }
 
     // -----------------------------------------------------------------
-    // A plan change, and which of its refusals are said out loud
+    // A plan change onto a plan with no single package on sale
     // -----------------------------------------------------------------
 
     #[Test]
-    public function an_upgrade_onto_a_plan_with_two_packages_on_sale_leaves_the_quota_and_says_so(): void
+    public function an_upgrade_onto_a_plan_with_two_packages_on_sale_is_refused_before_the_money_moves(): void
     {
+        /*
+         * This used to settle the upgrade and then assert that the quota had
+         * not moved and a warning said so: the customer paid, the
+         * subscription moved and was billed at the new price, and nothing was
+         * delivered (F-07, the re-audit after round five - a test asserting
+         * the defect). The F-32 point stands - the heap does not pick one of
+         * two packages on sale - and the change is now refused, like checkout
+         * refuses the same plan, before any invoice is issued.
+         */
         $starter = $this->sharedHostingPlanUnder('starter', 10_240, 1_500);
         $account = $this->accountFor($this->buySharedHosting($this->customer, $starter));
         $starterPackage = (string) $account->hosting_package_id;
@@ -346,20 +356,48 @@ final class TheHostingPackageBehindAPlanIsChosenNotStumbledOnTest extends TestCa
         $this->packageFor($business, 'lyn_business', 51_200, onSale: true);
         $this->packageFor($business, 'lyn_business_too', 20_480, onSale: true);
 
-        $this->upgradeAndSettle($business, 'f32-upgrade-ambiguous');
+        $subscription = Subscription::query()->where('customer_id', $this->customer->getKey())->sole();
 
+        $this->actingAs($this->user)
+            ->withHeader('Idempotency-Key', 'f32-upgrade-ambiguous')
+            ->postJson('/api/v1/subscriptions/'.$subscription->getKey().'/plan', [
+                'plan_id' => (string) $business->getKey(),
+                'price_id' => (string) $business->prices()->firstOrFail()->getKey(),
+            ])
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'subscription.plan_change_refused')
+            ->assertJsonPath('error.details.refusals', 'not_deliverable');
+
+        $this->assertSame(0, Invoice::query()->where('subscription_id', $subscription->getKey())->count(), 'An upgrade nothing can deliver was invoiced.');
+        $this->assertSame((string) $starter->getKey(), (string) $subscription->fresh()?->plan_id);
         $this->assertSame(0, $this->packageChangesQueued(), 'A package change was queued onto one of two packages, chosen by the heap.');
         $this->assertSame($starterPackage, (string) $account->refresh()->hosting_package_id);
+    }
+
+    #[Test]
+    public function a_package_change_reached_for_a_plan_with_two_packages_on_sale_queues_nothing_and_says_so(): void
+    {
+        // What the settlement meets if the second package went on sale after
+        // the change was paid for: nothing queued onto the heap's pick, and
+        // the reason said out loud.
+        $account = $this->accountFor($this->buySharedHosting($this->customer, $this->sharedHostingPlanUnder('starter', 10_240, 1_500)));
+
+        $business = $this->planUnder('business', 51_200, 4_000);
+        $this->packageFor($business, 'lyn_business', 51_200, onSale: true);
+        $this->packageFor($business, 'lyn_business_too', 20_480, onSale: true);
+
+        $this->assertNull($this->queuePlanChange($account, $business));
+        $this->assertSame(0, $this->packageChangesQueued(), 'A package change was queued onto one of two packages, chosen by the heap.');
 
         $warning = $this->warningsAbout((string) $business->getKey());
 
-        $this->assertCount(1, $warning, 'The customer paid, the quota did not move, and nothing said so.');
+        $this->assertCount(1, $warning, 'The quota did not move, and nothing said so.');
         $this->assertStringContainsString('more than one hosting package on sale', (string) $warning[0]['context']['reason']);
         $this->assertArrayHasKey('subscription_id', $warning[0]['context']);
     }
 
     #[Test]
-    public function a_plan_change_onto_a_plan_never_mapped_stays_silent(): void
+    public function a_package_change_reached_for_a_plan_never_mapped_queues_nothing_and_says_so(): void
     {
         $account = $this->accountFor($this->buySharedHosting($this->customer, $this->sharedHostingPlanUnder('starter', 10_240, 1_500)));
         $target = $this->planUnder('agency', 204_800, 9_000);
@@ -373,11 +411,11 @@ final class TheHostingPackageBehindAPlanIsChosenNotStumbledOnTest extends TestCa
         );
 
         $this->assertNull($this->queuePlanChange($account, $target));
-        $this->assertSame([], $this->warningsAbout((string) $target->getKey()));
+        $this->assertSaid(HostingPackageForPlan::NAMES_NONE, $target);
     }
 
     #[Test]
-    public function a_plan_change_onto_a_plan_whose_packages_were_all_withdrawn_stays_silent(): void
+    public function a_package_change_reached_for_a_plan_whose_packages_were_all_withdrawn_queues_nothing_and_says_so(): void
     {
         $account = $this->accountFor($this->buySharedHosting($this->customer, $this->sharedHostingPlanUnder('starter', 10_240, 1_500)));
         $target = $this->planUnder('agency', 204_800, 9_000);
@@ -392,7 +430,27 @@ final class TheHostingPackageBehindAPlanIsChosenNotStumbledOnTest extends TestCa
             $this->queuePlanChange($account, $target),
             'A plan change was queued onto a package the operator withdrew.',
         );
-        $this->assertSame([], $this->warningsAbout((string) $target->getKey()));
+        $this->assertSaid(HostingPackageForPlan::ALL_WITHDRAWN, $target);
+    }
+
+    /**
+     * Reaching the package change with nothing on sale for the plan is a
+     * change the customer has paid for and the panel will not see: the
+     * quote refuses such a plan and the payment asks again (F-07), so what
+     * gets here is a plan an operator changed in between - and it is said,
+     * with the resolver's own reason, for the operator. (It used to stay
+     * silent, pinned as "a decision F-32 did not take".)
+     */
+    private function assertSaid(string $refusal, Plan $target): void
+    {
+        $warning = $this->warningsAbout((string) $target->getKey());
+
+        $this->assertCount(1, $warning, 'A paid plan change reached the panel with nothing to queue, and nothing said so.');
+        $this->assertSame(
+            app(HostingPackageForPlan::class)->resolve((string) $target->getKey())->reason,
+            $warning[0]['context']['reason'],
+        );
+        $this->assertSame($refusal, app(HostingPackageForPlan::class)->resolve((string) $target->getKey())->refusal);
     }
 
     // -----------------------------------------------------------------
@@ -533,6 +591,7 @@ final class TheHostingPackageBehindAPlanIsChosenNotStumbledOnTest extends TestCa
             $subscription,
             (string) $to->getKey(),
             PlanResources::fromArray($to->resources),
+            'change:'.Str::ulid(),
         );
     }
 

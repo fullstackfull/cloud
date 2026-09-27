@@ -20,6 +20,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\DTOs\PlanChangeQuote;
 use Lynomia\Modules\Subscriptions\Application\Queries\MoneyCollectedForThePeriod;
+use Lynomia\Modules\Subscriptions\Application\Queries\PlanChangeDelivery;
 use Lynomia\Modules\Subscriptions\Application\Queries\UnpaidUpgrade;
 use Lynomia\Modules\Subscriptions\Domain\Enums\PlanChangeRefusal;
 use Lynomia\Modules\Subscriptions\Domain\ValueObjects\PlanResources;
@@ -64,6 +65,7 @@ final readonly class QuotePlanChange
         private PlanCapacity $capacity,
         private MoneyCollectedForThePeriod $collected,
         private UnpaidUpgrade $unpaid,
+        private PlanChangeDelivery $delivery,
     ) {}
 
     /**
@@ -304,6 +306,29 @@ final readonly class QuotePlanChange
              * 162.000 KWD. Pay, or have it voided, and the change is available.
              */
             $refusals[] = PlanChangeRefusal::InvoiceOutstanding;
+        }
+
+        if ($this->delivery->aPaidChangeAwaitsDelivery($subscription)) {
+            /*
+             * The last upgrade is paid and its settlement not yet heard. A
+             * change made now was accepted, and if the subscription then
+             * ended the paid upgrade was kept as though the unpaid one had
+             * superseded it (X1). Wait for the settlement; it is minutes.
+             */
+            $refusals[] = PlanChangeRefusal::PreviousChangePending;
+        }
+
+        if ($plan->getKey() !== $subscription->plan_id && $this->delivery->refusal($subscription, $plan, $current) !== null) {
+            /*
+             * A plan the change cannot be delivered onto: a hosting plan with
+             * no single package on sale, or a change of shape nothing can
+             * make (PlanChangeDelivery says exactly what is asked). Checkout
+             * refuses the same plan; this path did not, and the upgrade was
+             * accepted, paid and billed for ever with nothing queued at the
+             * panel (F-07). Refused before any money moves, and asked again
+             * when the proration invoice is paid.
+             */
+            $refusals[] = PlanChangeRefusal::NotDeliverable;
         }
 
         if ($plan->getKey() !== $subscription->plan_id) {

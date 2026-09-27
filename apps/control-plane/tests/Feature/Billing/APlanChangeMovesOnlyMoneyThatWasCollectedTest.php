@@ -361,12 +361,15 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
          * Settled, but its InvoicePaid is still on the payments queue - the
          * listener runs later, on a worker. In that window nothing is open, so
          * the customer may change plan again, and does: onto the dearest one.
+         * (Refused now while the settlement is unheard - previous_change_pending,
+         * X1 - so the change is made as it could be before that refusal, and as
+         * rows made then still record it.)
          */
         Event::fake([InvoicePaid::class]);
         $this->settle($cheap, $customer);
         Event::assertDispatched(InvoicePaid::class);
 
-        $this->changePlan($user, $subscription, $this->large, 'cheap-up-2')->assertOk();
+        $this->changeMadeInTheWindow($cheap, fn () => $this->changePlan($user, $subscription, $this->large, 'cheap-up-2')->assertOk());
         $dear = Invoice::query()->where('subscription_id', $subscription->getKey())
             ->where('status', InvoiceStatus::Open->value)->sole();
 
@@ -479,6 +482,17 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
             ->postJson("/api/v1/invoices/{$upgrade->id}/wallet-credit", [])
             ->assertOk();
         $this->assertSame(InvoiceStatus::Paid, $upgrade->fresh()?->status);
+
+        // The second upgrade's settlement is heard before the next change,
+        // which waits for it (previous_change_pending, X1).
+        app(ResizeOnPlanChangeSettlement::class)->handle(new InvoicePaid(
+            invoiceId: (string) $upgrade->getKey(),
+            customerId: (string) $customer->getKey(),
+            orderId: null,
+            subscriptionId: (string) $subscription->getKey(),
+            paidAt: CarbonImmutable::now(),
+        ));
+        $this->finishEveryProvisioningJob();
 
         $this->travelTo(CarbonImmutable::parse('2026-04-21 00:10:00.900', 'UTC'));
         $second = $this->changePlan($user, $subscription, $basic, 'second-down-2')->assertOk();
@@ -801,8 +815,10 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         $this->settle($upgrade, $customer);
 
         // Before the worker gets to it, the customer steps down to mid - which
-        // owes nothing, so its own resize is queued at once.
-        $this->changePlan($user, $subscription, $this->mid, 'late-down-1')->assertOk();
+        // owes nothing, so its own resize is queued at once. (Refused now while
+        // the settlement is unheard - previous_change_pending, X1 - so made as
+        // it could be before that refusal, and as rows made then record it.)
+        $this->changeMadeInTheWindow($upgrade, fn () => $this->changePlan($user, $subscription, $this->mid, 'late-down-1')->assertOk());
 
         app(ResizeOnPlanChangeSettlement::class)->handle(new InvoicePaid(
             invoiceId: (string) $upgrade->getKey(),
@@ -890,6 +906,72 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
             ->assertStatus(409)
             ->assertJsonPath('error.code', 'subscription.plan_change_refused')
             ->assertJsonPath('error.details.refusals', 'unit_count_unknown');
+    }
+
+    #[Test]
+    public function a_key_reused_on_a_later_downgrade_still_resizes_the_machine(): void
+    {
+        /*
+         * U-1: the resize was keyed on the customer's raw Idempotency-Key, and
+         * the engine answers a key it has seen with the job already there. A
+         * downgrade, a paid upgrade, then a downgrade reusing the first key:
+         * the second downgrade was handed the first one's completed job and
+         * queued nothing - the machine stayed at 8 vCPU, billed as the 2 vCPU
+         * plan, with the downgrade's credit posted.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $small = $this->plan('pa', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 80], 4_500);
+        $big = $this->plan('pb', ['vcpu' => 8, 'memory_mib' => 16384, 'disk_gib' => 80], 30_000);
+        $subscription = $this->paidSubscriptionOn($customer, $big);
+        $this->serviceWithMachine($customer, $subscription);
+
+        $this->changePlan($user, $subscription, $small, 'my-downgrade-key')->assertOk();
+        $this->finishEveryProvisioningJob();
+
+        $this->changePlan($user, $subscription->fresh(), $big, 'my-upgrade-key-1')->assertOk();
+        $this->settle($this->openProrationInvoice($subscription), $customer);
+        $this->finishEveryProvisioningJob();
+
+        $this->changePlan($user, $subscription->fresh(), $small, 'my-downgrade-key')->assertOk();
+
+        $resizes = ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->orderBy('created_at')->orderBy('id')->get();
+
+        $this->assertCount(3, $resizes, 'The second downgrade was handed the first one\'s job, and nothing was queued.');
+        $last = $resizes->first(static fn (ProvisioningJob $job): bool => $job->status === ProvisioningJobStatus::Queued);
+        $this->assertNotNull($last, 'No resize is waiting for the downgrade the customer is now billed for.');
+        $this->assertSame((string) $small->getKey(), $last->payload['plan_id']);
+        $this->assertSame(2, $last->payload['vcpu']);
+        $this->assertStringNotContainsString('my-downgrade-key', $last->idempotency_key, 'A customer\'s key named a provisioning job.');
+    }
+
+    #[Test]
+    public function a_key_spelled_like_the_settlements_queues_the_change_it_came_with(): void
+    {
+        // The customer's key `invoice:<id of a paid upgrade>` matched the
+        // settlement's scheme: the downgrade was handed that upgrade's job.
+        [$customer, $user] = $this->accountWithOwner();
+        $small = $this->plan('pa', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 80], 4_500);
+        $mid = $this->plan('pm', ['vcpu' => 4, 'memory_mib' => 8192, 'disk_gib' => 80], 9_000);
+        $big = $this->plan('pb', ['vcpu' => 8, 'memory_mib' => 16384, 'disk_gib' => 80], 30_000);
+        $subscription = $this->paidSubscriptionOn($customer, $small);
+        $this->serviceWithMachine($customer, $subscription);
+
+        $this->changePlan($user, $subscription, $mid, 'up-to-mid-1')->assertOk();
+        $toMid = $this->openProrationInvoice($subscription);
+        $this->settle($toMid, $customer);
+        $this->finishEveryProvisioningJob();
+
+        $this->changePlan($user, $subscription->fresh(), $big, 'up-to-big-1')->assertOk();
+        $this->settle($this->openProrationInvoice($subscription), $customer);
+        $this->finishEveryProvisioningJob();
+
+        $this->changePlan($user, $subscription->fresh(), $mid, 'invoice:'.$toMid->getKey())->assertOk();
+
+        $queued = ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->where('status', ProvisioningJobStatus::Queued->value)->get();
+
+        $this->assertCount(1, $queued, 'The downgrade to mid queued nothing: it was handed the earlier upgrade\'s job.');
+        $this->assertSame((string) $mid->getKey(), $queued->sole()->payload['plan_id']);
+        $this->assertSame(4, $queued->sole()->payload['vcpu']);
     }
 
     // ---- helpers ------------------------------------------------------------
@@ -1048,6 +1130,18 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
      * The resize a settlement queued has finished, so the service is no
      * longer busy - as it would be minutes later on a real worker.
      */
+    /**
+     * A change made while an earlier paid upgrade's settlement had not been
+     * heard - which the platform accepted before it refused one
+     * (previous_change_pending), and which rows made then still record.
+     */
+    private function changeMadeInTheWindow(Invoice $paidUpgrade, callable $change): void
+    {
+        PlanChange::query()->where('proration_invoice_id', $paidUpgrade->getKey())->update(['delivered_at' => now()]);
+        $change();
+        PlanChange::query()->where('proration_invoice_id', $paidUpgrade->getKey())->update(['delivered_at' => null]);
+    }
+
     private function finishEveryProvisioningJob(): void
     {
         ProvisioningJob::query()->update(['status' => ProvisioningJobStatus::Succeeded->value]);

@@ -113,6 +113,9 @@ final readonly class ApplyPlanChange
     ) {}
 
     /**
+     * @param  string|null  $idempotencyKey  the key the route requires of the client. It names
+     *                                       no provisioning job: the change's own record does (U-1)
+     *
      * @throws PlanChangeRefusedException
      */
     public function execute(
@@ -135,7 +138,7 @@ final readonly class ApplyPlanChange
          * made again. The resize job row is written inside it too; the job is
          * only dispatched once the transaction commits.
          */
-        return DB::transaction(function () use ($subscription, $plan, $price, $idempotencyKey, $actor): PlanChangeOutcome {
+        return DB::transaction(function () use ($subscription, $plan, $price, $actor): PlanChangeOutcome {
             /*
              * The subscription row is the mutex for everything below: a second
              * change for the same subscription waits here, and then finds the
@@ -242,8 +245,15 @@ final readonly class ApplyPlanChange
                 'changed_at' => $proration->changeAt,
             ])->save();
 
+            /*
+             * Keyed on this change's record, not on the customer's
+             * Idempotency-Key: a key reused on a later change used to be
+             * handed back the earlier change's completed job, and nothing was
+             * queued (U-1). A retry of this same change never gets here - it
+             * finds the plan moved and is refused (same_plan).
+             */
             $resizeJob = $quote->changesInfrastructure && ! $proration->net()->isPositive()
-                ? $this->queueAtProvider->execute($locked, $quote->planId, $quote->newResources, $idempotencyKey)
+                ? $this->queueAtProvider->execute($locked, $quote->planId, $quote->newResources, 'change:'.$changeId)
                 : null;
 
             $this->audit->execute(

@@ -53,6 +53,7 @@ use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
 use Lynomia\Modules\Payments\Infrastructure\Providers\FakePaymentProvider;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
@@ -1158,7 +1159,7 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
         Event::fake([InvoicePaid::class]);
         app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
 
-        $this->changePlan($user, $subscription->fresh(), $this->mid, 'superseded-down')->assertOk();
+        $this->changeMadeInTheWindow($upgrade, fn () => $this->changePlan($user, $subscription->fresh(), $this->mid, 'superseded-down')->assertOk());
 
         app(CancelSubscription::class)->execute($subscription->fresh(), immediately: true);
 
@@ -1167,6 +1168,125 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
             WalletTransaction::query()->where('invoice_id', $upgrade->getKey())->where('kind', WalletTransactionKind::Topup->value)->count(),
             'A superseded upgrade was returned as if the end had prevented it.',
         );
+    }
+
+    #[Test]
+    public function no_change_is_accepted_while_the_last_paid_upgrade_is_still_being_delivered(): void
+    {
+        /*
+         * The window X1 opened: the upgrade paid, its settlement not yet
+         * heard (queue lag). A second upgrade made then was accepted (200)
+         * and, when the subscription ended, made the paid one look
+         * superseded - it was kept, 27.000 for nothing. Now it waits.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+        $this->changePlan($user, $subscription, $this->large, 'pending-up-1')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        Event::fake([InvoicePaid::class]);
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+
+        $this->changePlan($user, $subscription->fresh(), $this->xl, 'pending-up-2')
+            ->assertStatus(409)
+            ->assertJsonPath('error.details.refusals', 'previous_change_pending');
+        $this->assertSame(1, PlanChange::query()->where('subscription_id', $subscription->getKey())->count());
+
+        // Once the settlement is heard the change is theirs to make again.
+        app(ResizeOnPlanChangeSettlement::class)->handle(new InvoicePaid(
+            invoiceId: (string) $upgrade->getKey(),
+            customerId: (string) $customer->getKey(),
+            orderId: null,
+            subscriptionId: (string) $subscription->getKey(),
+            paidAt: CarbonImmutable::now(),
+        ));
+        $this->finishTheResize();
+
+        $this->changePlan($user, $subscription->fresh(), $this->xl, 'pending-up-3')->assertOk();
+    }
+
+    #[Test]
+    public function the_x1_sequence_returns_the_paid_upgrade_at_the_end(): void
+    {
+        // The re-audit's probe, over the route: paid, not yet heard, a second
+        // upgrade attempted, cancelled, then the settlement heard.
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+        $this->changePlan($user, $subscription, $this->large, 'x1-route-up-1')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        Event::fake([InvoicePaid::class]);
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+
+        $this->changePlan($user, $subscription->fresh(), $this->xl, 'x1-route-up-2');
+
+        app(CancelSubscription::class)->execute($subscription->fresh(), immediately: true);
+        $this->hearTheSettlement($upgrade, $customer, $subscription);
+
+        $this->assertSame($upgrade->fresh()?->total_minor, $this->walletOf($customer), 'A paid, undelivered upgrade was kept at the end.');
+    }
+
+    #[Test]
+    public function an_upgrade_followed_only_by_an_unpaid_upgrade_is_returned_at_the_end(): void
+    {
+        /*
+         * X1 at the end itself: a later change counts as superseding only
+         * when it was settled. Here the later upgrade was made in the window
+         * (as it could be before the refusal above) and never paid; its
+         * invoice is voided as the subscription ends, it decided nothing, and
+         * the paid upgrade is returned - by the settlement heard after the
+         * end, and by the wind-up when it sees it.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+        $this->changePlan($user, $subscription, $this->large, 'x1-end-up-1')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        Event::fake([InvoicePaid::class]);
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+
+        $this->changeMadeInTheWindow($upgrade, fn () => $this->changePlan($user, $subscription->fresh(), $this->xl, 'x1-end-up-2')->assertOk());
+        $second = $this->openUpgradeInvoice($subscription);
+        $this->assertNotSame((string) $upgrade->getKey(), (string) $second->getKey());
+
+        app(CancelSubscription::class)->execute($subscription->fresh(), immediately: true);
+
+        $this->assertSame(InvoiceStatus::Void, $second->fresh()?->status);
+        $this->assertSame($upgrade->fresh()?->total_minor, $this->walletOf($customer), 'A paid, undelivered upgrade whose only later change was never paid was kept at the end.');
+
+        $this->hearTheSettlement($upgrade, $customer, $subscription);
+        $this->assertSame($upgrade->fresh()?->total_minor, $this->walletOf($customer), 'Returned twice.');
+    }
+
+    /**
+     * A change made while an earlier paid upgrade's settlement had not been
+     * heard - which the platform accepted before it refused one
+     * (previous_change_pending), and which such rows still record.
+     */
+    private function changeMadeInTheWindow(Invoice $paidUpgrade, callable $change): void
+    {
+        PlanChange::query()->where('proration_invoice_id', $paidUpgrade->getKey())->update(['delivered_at' => now()]);
+        $change();
+        PlanChange::query()->where('proration_invoice_id', $paidUpgrade->getKey())->update(['delivered_at' => null]);
+    }
+
+    private function hearTheSettlement(Invoice $upgrade, Customer $customer, Subscription $subscription): void
+    {
+        app(ResizeOnPlanChangeSettlement::class)->handle(new InvoicePaid(
+            invoiceId: (string) $upgrade->getKey(),
+            customerId: (string) $customer->getKey(),
+            orderId: null,
+            subscriptionId: (string) $subscription->getKey(),
+            paidAt: CarbonImmutable::now(),
+        ));
+    }
+
+    private function finishTheResize(): void
+    {
+        ProvisioningJob::query()->update(['status' => ProvisioningJobStatus::Succeeded->value]);
     }
 
     #[Test]
