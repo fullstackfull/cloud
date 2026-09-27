@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Date;
 use Laravel\Sanctum\HasApiTokens;
 use Laravel\Sanctum\PersonalAccessToken;
@@ -21,6 +22,9 @@ use Laravel\Sanctum\TransientToken;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Notifications\QueuedResetPassword;
 use Lynomia\Modules\Identity\Infrastructure\Notifications\QueuedVerifyEmail;
+use Lynomia\Modules\Rbac\Domain\Enums\Role as RoleName;
+use Spatie\Permission\Contracts\Permission;
+use Spatie\Permission\Contracts\Role;
 use Spatie\Permission\Traits\HasRoles;
 
 /**
@@ -64,6 +68,69 @@ class User extends Authenticatable implements MustVerifyEmail
     public const int MAX_FAILED_LOGIN_ATTEMPTS = 5;
 
     public const int LOCKOUT_MINUTES = 15;
+
+    /**
+     * A login's permissions through its roles — except that a login holding a
+     * staff role takes nothing from `customer`.
+     *
+     * An operator invitation adds the staff roles beside `customer` rather
+     * than in its place (ChangeOperatorRoles), so a customer who became an
+     * operator holds both. Spatie's check is the union of every role's
+     * permissions, which would make the customer role's list operator
+     * authority for every such person: with `customer` widened some other
+     * way than the role route (which refuses it) — a seeder, a SQL client —
+     * a promoted NOC read GET /api/admin/customers and /api/admin/operators
+     * (verifier of round seven: 200; the staff gate, EnsureTheCallerIsStaff,
+     * lets the login through because it holds `noc`). So the customer role
+     * counts only for a login with no staff role, which the staff gate keeps
+     * off /api/admin and Horizon whatever the role holds.
+     *
+     * Every permission check goes through here: Spatie's Gate::before hook
+     * (`can()`, the `permission:` middleware, Horizon's gate) calls
+     * hasPermissionTo(), which asks hasPermissionViaRole(); the permissions
+     * the portal is told about come from getPermissionsViaRoles(). What the
+     * customer role carries by default, `catalog.view`, guards no route, and
+     * customer access is decided by memberships, so a promoted customer loses
+     * nothing on /api/v1. Permissions given to the login directly still
+     * count, as they always have: the staff gate refuses them to a login with
+     * no staff role, and giving one is an operator's deliberate act on that
+     * login.
+     */
+    protected function hasPermissionViaRole(Permission $permission): bool
+    {
+        return $this->hasRole($this->authorityRoles($permission->roles));
+    }
+
+    /**
+     * @return Collection<int, Permission>
+     */
+    public function getPermissionsViaRoles(): Collection
+    {
+        $roles = $this->loadMissing('roles', 'roles.permissions')->roles;
+
+        return $this->authorityRoles($roles)
+            ->flatMap(static fn (Role $role) => $role->permissions)
+            ->sort()
+            ->values();
+    }
+
+    /**
+     * The roles, of those given, whose permissions this login holds.
+     *
+     * @param  Collection<int, Role>  $roles
+     * @return Collection<int, Role>
+     */
+    private function authorityRoles(Collection $roles): Collection
+    {
+        $holdsAStaffRole = $this->loadMissing('roles')->roles
+            ->contains(static fn (Role $role): bool => RoleName::tryFrom($role->name)?->isStaffRole() === true);
+
+        if (! $holdsAStaffRole) {
+            return $roles;
+        }
+
+        return $roles->reject(static fn (Role $role): bool => $role->name === RoleName::Customer->value)->values();
+    }
 
     protected $guarded = ['id'];
 

@@ -25,7 +25,8 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * Staff only. A customer login holds the `customer` role and appears nowhere on
  * this surface: the list would otherwise grow to the size of the customer base
- * and turn an operator screen into an account directory.
+ * and turn an operator screen into an account directory. A customer who was
+ * made an operator holds both, and appears here with its staff roles only.
  */
 final class OperatorController
 {
@@ -83,14 +84,22 @@ final class OperatorController
          * distinguish a promoted login from a new one: the flag is null, the
          * name is the one they supplied rather than the one the login holds
          * (a registrant's own choice, for a promoted one), and `created_at`
-         * is null rather than the login's creation date. `has_signed_in` and
-         * `two_factor_enabled` are false either way, because promotion clears
-         * both; `id` differs as any two ids do. This is about this response
-         * only: GET /api/admin/operators lists every operator's stored name
-         * and creation date to the same people, a promoted one included.
+         * is null rather than the login's creation date. `id` is null too: a
+         * login's id is a ULID, whose first ten characters are the time the
+         * login was made, so a promoted login's id dated it where a new one's
+         * is now (re-audit after round six: 400 days against none).
+         * `has_signed_in` and `two_factor_enabled` are false either way,
+         * because promotion clears both, and `roles` lists staff roles only,
+         * so a promoted customer's `customer` does not show. The status is
+         * 201 either way, because the promotion keeps `customer` rather than
+         * removing a role the delegate does not hold. This is about this
+         * response only: GET /api/admin/operators lists every operator's id,
+         * stored name and creation date to the same people, a promoted one
+         * included.
          */
         return response()->json(['data' => [
             ...$described,
+            'id' => null,
             'name' => $request->string('name')->value(),
             'created_at' => null,
             'promoted_existing_account' => null,
@@ -128,7 +137,14 @@ final class OperatorController
             'id' => (string) $user->getKey(),
             'name' => $user->name,
             'email' => $user->email,
-            'roles' => $user->getRoleNames()->values()->all(),
+            // Staff roles only, in the enum's order. A promoted customer
+            // still holds `customer` (ChangeOperatorRoles keeps it), and
+            // that is not operator authority; listing it would also tell a
+            // delegate's invitation response that the login already existed.
+            'roles' => array_values(array_intersect(
+                Role::staffRoleNames(),
+                $user->getRoleNames()->all(),
+            )),
             'is_privileged' => $user->hasRole(Role::SuperAdmin->value),
             // Whether the person has ever taken the account over. An invited
             // operator who never followed their link is the commonest reason

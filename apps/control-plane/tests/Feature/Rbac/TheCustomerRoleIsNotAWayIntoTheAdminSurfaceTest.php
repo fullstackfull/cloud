@@ -8,6 +8,7 @@ use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Lynomia\Http\Middleware\EnsureTheCallerIsStaff;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
@@ -33,14 +34,19 @@ use Tests\TestCase;
  * to hand out `customer` for exactly this reason; the permissions route was
  * the other door into the same room.
  *
- * Two layers, each tested on its own:
+ * Three layers, each tested on its own:
  *
  *  1. The customer role's permission list is fixed by the platform. Nobody —
  *     delegate or super admin — edits it through the operator surface, and
  *     the role catalogue no longer advertises it as editable.
  *  2. The /api/admin surface refuses a login that holds no staff role, before
  *     any permission is consulted, so a customer role that somehow held an
- *     operator permission (a seeder edit, a SQL client) still opens nothing.
+ *     operator permission (a seeder edit, a SQL client) still opens nothing
+ *     to a login holding only `customer`.
+ *  3. A login holding a staff role — a customer who was made an operator
+ *     keeps `customer` beside it — takes no permission from `customer`
+ *     (User::hasPermissionViaRole()), so layer 2 letting it through does not
+ *     let the customer role's list through with it.
  */
 final class TheCustomerRoleIsNotAWayIntoTheAdminSurfaceTest extends TestCase
 {
@@ -142,6 +148,93 @@ final class TheCustomerRoleIsNotAWayIntoTheAdminSurfaceTest extends TestCase
                 ->assertForbidden()
                 ->assertJsonPath('error.code', 'auth.forbidden');
         }
+
+        // A login holding a staff role beside `customer` passes the staff
+        // gate, and takes nothing from `customer`: judged on the network
+        // engineer role alone, none of these opens.
+        $both = User::factory()->create(['email_verified_at' => now()]);
+        $both->syncRoles([Role::Customer->value, Role::NetworkEngineer->value]);
+        $this->assertFalse($both->can(Permission::CustomerViewAny->value));
+
+        foreach (['/api/admin/customers', '/api/admin/operators', '/api/admin/roles', '/api/admin/support/tickets'] as $uri) {
+            $this->actingAs($both)
+                ->getJson($uri)
+                ->assertForbidden()
+                ->assertJsonPath('error.code', 'auth.forbidden');
+        }
+
+        // Positive control: its own role's permission still opens its route.
+        $this->actingAs($both)->getJson('/api/admin/infrastructure/ip-pools')->assertOk();
+    }
+
+    /**
+     * The same, for a customer who was really made an operator (verifier of
+     * round seven). An invitation now adds the staff role beside `customer`
+     * instead of replacing it, and Spatie's check is the union of every
+     * role's permissions: with `customer` widened outside the role route — a
+     * seeder, a SQL client — the promoted NOC read GET /api/admin/customers
+     * and GET /api/admin/operators (200) and the queue dashboard opened to
+     * it. A login holding a staff role takes nothing from `customer`, on
+     * every surface that asks for a permission, and is told so on /me.
+     */
+    #[Test]
+    public function a_promoted_customer_takes_no_operator_permission_from_the_customer_role(): void
+    {
+        SpatieRole::query()->where('name', Role::Customer->value)->firstOrFail()
+            ->givePermissionTo(
+                Permission::CustomerViewAny->value,
+                Permission::RoleManage->value,
+                Permission::TicketViewAny->value,
+                Permission::ProvisioningView->value,
+            );
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        Notification::fake();
+
+        $this->postJson('/api/v1/register', [
+            'name' => 'Registrant', 'email' => 'promoted@lynomia.test', 'password' => 'Registrant-Password-77',
+            'password_confirmation' => 'Registrant-Password-77', 'country' => 'KW', 'currency' => 'KWD',
+            'accepts_terms' => true, 'account_type' => 'individual',
+        ])->assertAccepted();
+        $this->app['auth']->forgetGuards();
+        $this->flushSession();
+
+        $admin = User::factory()->create(['email_verified_at' => now()]);
+        $admin->syncRoles([Role::SuperAdmin->value]);
+        $this->actingAs($admin)
+            ->postJson('/api/admin/operators', ['email' => 'promoted@lynomia.test', 'name' => 'N', 'roles' => [Role::NetworkEngineer->value]])
+            ->assertCreated();
+
+        $promoted = User::query()->where('email', 'promoted@lynomia.test')->sole();
+        $promoted->forceFill(['email_verified_at' => now()])->save();
+        $this->assertEqualsCanonicalizing([Role::Customer->value, Role::NetworkEngineer->value], $promoted->getRoleNames()->all());
+
+        foreach (['/api/admin/customers', '/api/admin/operators', '/api/admin/roles', '/api/admin/support/tickets'] as $uri) {
+            $this->app['auth']->forgetGuards();
+            $this->flushSession();
+            $this->actingAs($promoted->fresh())
+                ->getJson($uri)
+                ->assertForbidden()
+                ->assertJsonPath('error.code', 'auth.forbidden');
+        }
+
+        $this->app['auth']->forgetGuards();
+        $this->flushSession();
+        $this->actingAs($promoted->fresh())->get('/horizon')->assertForbidden();
+
+        // What the portal is told matches: none of the customer role's list.
+        $this->app['auth']->forgetGuards();
+        $this->flushSession();
+        $reported = (array) $this->actingAs($promoted->fresh())->getJson('/api/v1/me')->assertOk()->json('data.permissions');
+        $this->assertNotContains(Permission::CustomerViewAny->value, $reported);
+        $this->assertNotContains(Permission::CatalogView->value, $reported);
+        $this->assertContains(Permission::IpamView->value, $reported);
+
+        // Positive controls: its staff role's permission opens its route, and
+        // a login holding only `customer` still holds the customer role's list.
+        $this->app['auth']->forgetGuards();
+        $this->flushSession();
+        $this->actingAs($promoted->fresh())->getJson('/api/admin/infrastructure/ip-pools')->assertOk();
+        $this->assertTrue($this->customerLogin()->can(Permission::CatalogView->value));
     }
 
     /**
