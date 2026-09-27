@@ -109,7 +109,9 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * not. And the platform's own path to an operator — `InviteOperator` —
      * promotes an existing login and sets `email_verified_at` only for a new
      * one, so a self-registered customer who never verified keeps it null
-     * after being made NOC or Support. Without this clause that account would
+     * after being made NOC or Support, until the reset link the invitation
+     * mails is completed (which proves the mailbox, and verifies it). Without
+     * this clause that account would
      * be refused `/api/admin/provisioning/jobs` and handed every job payload
      * here. The clause lives inside this callback, not in the `Gate::before`
      * above, which would make verification a precondition for every

@@ -310,7 +310,7 @@ final class TheQueueDashboardIsGatedByCapabilityTest extends TestCase
             'promoted@example.com',
             'Promoted Operator',
             [Role::Noc->value, Role::Support->value],
-        );
+        )->operator;
 
         $this->assertTrue($operator->is($customer));
         $this->assertNull($operator->email_verified_at);

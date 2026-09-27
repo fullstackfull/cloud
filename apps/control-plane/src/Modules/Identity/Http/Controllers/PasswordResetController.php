@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Identity\Http\Controllers;
 
 use Illuminate\Auth\Events\PasswordReset;
+use Illuminate\Auth\Events\Verified;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -66,6 +67,17 @@ final class PasswordResetController
                     'failed_login_attempts' => 0,
                     'locked_until' => null,
                 ])->save();
+
+                // The reset token reached nobody but the mailbox, so redeeming
+                // it proves the address exactly as the verification link does.
+                // This is how an operator invited under an address somebody
+                // else registered first (InviteOperator) gets past `verified`:
+                // the invitation leaves the address unverified and takes every
+                // credential away, and this reset is the only way back in.
+                if (! $user->hasVerifiedEmail()) {
+                    $user->markEmailAsVerified();
+                    event(new Verified($user));
+                }
 
                 // Everything else is invalidated: a reset is most often a
                 // response to suspected compromise.

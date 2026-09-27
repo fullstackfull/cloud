@@ -8029,7 +8029,7 @@ paths:
         - "Operator"
       summary: "Add an operator"
       description: |-
-        No password is chosen: the person takes the account over through the one-time reset link the platform already issues, so there is never a moment when a credential somebody else picked opens an operator account. An address that already holds a staff role is refused rather than silently re-roled. The roles go on through the same path a role change uses, so an invitation cannot hand out authority a direct change would have refused.
+        No password is chosen: the person takes the account over through the one-time reset link the platform already issues, so there is never a moment when a credential somebody else picked opens an operator account. An address with an existing login that holds no staff role — a customer account, which anybody may have registered without proving the mailbox — is promoted, and every credential that login held is taken away before the roles land: password, sessions, remember-me token, personal access tokens and second factor. Its address stays as verified as it was; completing the reset proves the mailbox and verifies it. An address that already holds a staff role is refused rather than silently re-roled. The roles go on through the same path a role change uses, so an invitation cannot hand out authority a direct change would have refused.
 
         Requires the `role.manage` permission.
       parameters:
@@ -8057,7 +8057,7 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/AdminOperatorResponse"
+                "$ref": "#/components/schemas/AdminInvitedOperatorResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -8103,7 +8103,7 @@ paths:
         - "Operator"
       summary: "Change what an operator may do"
       description: |-
-        Three refusals, each an escalation if it were allowed: your own account is never yours to re-role (grant, use, revoke is the shortest escalation there is), a role you do not hold is not yours to grant, and the last principal who can administer the platform cannot be stripped of it — the console bootstrap refuses once one exists, so a deployment that loses its last administrator has no supported way back.
+        Refusals, each an escalation if it were allowed: your own account is never yours to re-role (grant, use, revoke is the shortest escalation there is), a role you do not hold is not yours to grant or to take away, the last principal who can administer the platform cannot be stripped of it — the console bootstrap refuses once one exists, so a deployment that loses its last administrator has no supported way back — and a login that holds no staff role is not given one here (`rbac.not_an_operator`): its credentials may be somebody else's, so it becomes an operator only through an invitation, which takes them away first.
 
         Requires the `role.manage` permission.
       parameters:
@@ -20846,6 +20846,43 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminHostingPasswordReset"
+    AdminInvitedOperator:
+      type: "object"
+      additionalProperties: false
+      description: "The operator an invitation created or promoted, as AdminOperator describes one, plus — for a super admin only — whether the address already had a login; any other caller gets a response that does not distinguish the two (see promoted_existing_account). An existing login — a customer account, perhaps one somebody else registered, since registration asks for no proof of the mailbox — is promoted with every credential it held taken away: its password is replaced by one nobody knows, its sessions, remember-me token and personal access tokens are revoked and its second factor is cleared, and the reset link the invitation mails is the only way in. Its customer memberships stay with the login, which from then on belongs to whoever proves the mailbox."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        name:
+          type: "string"
+          description: "The login's stored name for a super admin; for any other caller, the name supplied in the request."
+        email:
+          type: "string"
+        roles:
+          type: "array"
+          items:
+            type: "string"
+        is_privileged:
+          type: "boolean"
+        has_signed_in:
+          type: "boolean"
+          description: "False for an invited operator who has not followed their one-time link yet — a promoted login included, whatever sign-ins it had before."
+        two_factor_enabled:
+          type: "boolean"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+        promoted_existing_account:
+          type:
+            - "boolean"
+            - "null"
+          description: "True when the address already had a login that was promoted, false when a new one was created. Null unless the caller is a super admin. For any other caller the whole response is the same for a promoted login as for a new one: `name` is the name supplied in the request, `created_at` is null, and `has_signed_in` and `two_factor_enabled` are false (promotion clears both). The operator list still shows every operator's stored name and creation date to the same callers, a promoted one included."
+    AdminInvitedOperatorResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminInvitedOperator"
     AdminInvoice:
       type: "object"
       additionalProperties: false

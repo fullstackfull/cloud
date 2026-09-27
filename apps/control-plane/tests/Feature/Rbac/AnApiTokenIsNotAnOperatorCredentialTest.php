@@ -32,8 +32,10 @@ use Tests\TestCase;
  *    POST /api/admin/operators, and the same token then read
  *    GET /api/admin/customers: 200.
  *
- * Each case is paired with its positive controls: the same person's session
- * still opens /api/admin, and the same token still works on the customer API.
+ * Each case is paired with its positive control: the same person's session
+ * still opens /api/admin. In the first the same token still works on the
+ * customer API; in the second, since B1 (re-audit after round five), the
+ * invitation has deleted it, so it opens nothing anywhere.
  */
 final class AnApiTokenIsNotAnOperatorCredentialTest extends TestCase
 {
@@ -90,9 +92,13 @@ final class AnApiTokenIsNotAnOperatorCredentialTest extends TestCase
             ->assertSuccessful();
         $this->assertTrue($user->fresh()?->hasRole(Role::InfrastructureAdmin->value), 'Precondition: promoted.');
 
-        $this->withBearer($token)->getJson('/api/admin/customers')
-            ->assertForbidden()
-            ->assertJsonPath('error.code', 'auth.forbidden');
+        // Since B1 (re-audit after round five) the invitation deletes every
+        // personal access token the promoted login held, so the token is not
+        // refused by the staff gate any more: it authenticates nothing at all,
+        // here or on the customer surface. The staff gate's refusal of a
+        // token held by a staff member is the test above.
+        $this->withBearer($token)->getJson('/api/admin/customers')->assertUnauthorized();
+        $this->withBearer($token)->getJson('/api/v1/me')->assertUnauthorized();
 
         // Positive control: the promoted person's session opens it.
         $this->forgetTheCaller();
