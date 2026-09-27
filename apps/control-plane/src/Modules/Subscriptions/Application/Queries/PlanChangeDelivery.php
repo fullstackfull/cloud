@@ -349,11 +349,14 @@ final readonly class PlanChangeDelivery
      * The period before, because a renewal can come between a capture and
      * its settlement. At least a week, because on an hourly (or daily)
      * period "the period before" is an hour (or a day) and the settlement
-     * can be later than that: its listener retries for about six and a half
-     * minutes (ResizeOnPlanChangeSettlement::backoff(), five tries), and a
-     * payments queue held up behind a worker that is down waits as long as
-     * the outage. A week covers an outage of up to a week; a settlement heard
-     * later than that is not read, and the next change is accepted. What it
+     * can be later than that: its listener retries for about six minutes
+     * and twenty seconds (ResizeOnPlanChangeSettlement::backoff(), five
+     * tries), and a payments queue held up behind a worker that is down waits
+     * as long as the outage. A week covers an outage of up to a week; a
+     * settlement heard later than that is not read, the next change is
+     * accepted, and if that change settles first the late one builds nothing:
+     * a paid proration of at most one hour's or one day's price goes
+     * undelivered. What it
      * costs: a legacy row with no delivered_at holds a short-period
      * subscription's plan changes for that week.
      */

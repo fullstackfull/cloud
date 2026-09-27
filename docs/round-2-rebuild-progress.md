@@ -202,7 +202,7 @@ there.
 
 | Band | Scope | Status | Commit |
 |---|---|---|---|
-| A | F-07 VPS half and the stale service shape; the undeliverable-change lockout; a shrink refused; stock on return; a change settled after the renewal; wording | verifying | `79910e1` |
+| A | F-07 VPS half and the stale service shape; the undeliverable-change lockout (a customer route to withdraw); a shrink refused; stock on return; a change settled after the renewal; wording | upheld after one closing pass; merged `2ebb829`; the look-back sentence now states what a settlement later than a week costs (at integration) | `26329f7` |
 | B | a delegate's invitation revealing a login exists; soft-deleted address; `roles: []` | rejected once (keeping `customer` beside a staff role let the customer role's permissions reach /api/admin), repaired; upheld with reservations (the operator list still shows a promoted login's id, name and age); merged `dcf1d54`; the User docblock's reach narrowed at integration | `0addd08` |
 | C | cPanel unreadable listings; one node's failure stopping the sweep; runbook; overlapping sweeps in two processes | upheld with reservations after one closing pass (a listing-step failure failing the command is unpinned; nothing alerts on the scheduled-command failure gauge — being added); merged `d425d4b` | `ac4f051` |
 | D | destroy overlapping a resize; a retried resize growing the disk twice; adopted VPS without a machine row; adoption's provider call inside a transaction; clock gate limits | fixing | — |
