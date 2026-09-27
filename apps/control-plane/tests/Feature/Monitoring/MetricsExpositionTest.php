@@ -175,6 +175,10 @@ final class MetricsExpositionTest extends TestCase
     #[Test]
     public function provisioning_durations_are_bucketed_cumulatively(): void
     {
+        // Each duration is two clock reads (started_at, finished_at), so the
+        // clock is held still: a second turning over between them made a
+        // 20s job 21s and the sum 1268.
+        $this->freezeSecond();
         $service = Service::factory()->create();
 
         // 20s, 45s and 1200s. The buckets are cumulative, so each boundary must

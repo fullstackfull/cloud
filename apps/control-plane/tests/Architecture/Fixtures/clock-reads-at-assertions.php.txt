@@ -1,0 +1,2882 @@
+<?php
+
+// Read by NoAssertionComparesAClockReadOnAnUnpinnedClockTest as its controls.
+// Not loaded; the .txt suffix keeps it out of every PHP scanner.
+//
+// Every test named found_* must be a finding and every test named clean_*
+// must not; the gate checks both lists against what the scanner reports.
+
+declare(strict_types=1);
+
+namespace Fixture\Clock;
+
+use Carbon\Carbon;
+use Carbon\CarbonImmutable;
+use Illuminate\Foundation\Testing\Attributes\SetUp;
+use Illuminate\Foundation\Testing\Wormhole;
+use Illuminate\Support\Facades\Date;
+use PHPUnit\Framework\Attributes\After;
+use PHPUnit\Framework\Attributes\AfterClass;
+use PHPUnit\Framework\Attributes\Before;
+use PHPUnit\Framework\Attributes\BeforeClass;
+use PHPUnit\Framework\Attributes\PostCondition;
+use PHPUnit\Framework\Attributes\PreCondition;
+use PHPUnit\Framework\Attributes\Test;
+use Tests\TestCase;
+
+final class UnpinnedTest extends TestCase
+{
+    // The shape at 031f6c9 (HostingReconciliationTest).
+    #[Test]
+    public function found_the_reconciliation_stamp(): void
+    {
+        app(ReconcileHostingNodes::class)->execute();
+        $this->assertSame(now()->getTimestamp(), $this->node->fresh()?->reconciled_at?->getTimestamp());
+    }
+
+    // The shape at e0aa0ab (HeldQuarantineClockTest).
+    #[Test]
+    public function found_the_quarantine_date(): void
+    {
+        $this->allocator->startHeldQuarantines($mine);
+        $this->assertSame(
+            now()->addDays(7)->toDateString(),
+            IpAddress::query()->findOrFail($a->ip_address_id)->quarantined_until?->toDateString(),
+        );
+    }
+
+    #[Test]
+    public function found_today(): void
+    {
+        $this->assertEquals(today(), $row->due_on);
+    }
+
+    #[Test]
+    public function found_carbon_now(): void
+    {
+        $this->assertSame(Carbon::now()->format('Y-m-d'), $row->day);
+    }
+
+    #[Test]
+    public function found_carbon_immutable_today(): void
+    {
+        $this->assertNotSame(CarbonImmutable::today()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function found_date_facade(): void
+    {
+        $this->assertSame(Date::now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function found_new_carbon(): void
+    {
+        $this->assertEquals((new Carbon)->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function found_new_carbon_immutable_now(): void
+    {
+        $this->assertEquals(new CarbonImmutable('now'), $row->at);
+    }
+
+    #[Test]
+    public function found_carbon_parse_now(): void
+    {
+        $this->assertEquals(Carbon::parse('today'), $row->at);
+    }
+
+    #[Test]
+    public function found_an_equality_in_assert_true(): void
+    {
+        $this->assertTrue($row->at->toDateString() === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_a_carbon_equality_in_assert_false(): void
+    {
+        $this->assertFalse(! $row->at->eq(now()));
+    }
+
+    #[Test]
+    public function found_is_today(): void
+    {
+        $this->assertTrue($row->created_at->isToday());
+    }
+
+    // isSameDay() with no argument throws (Carbon 3): not a clock read.
+    #[Test]
+    public function clean_is_same_day_with_nothing(): void
+    {
+        $this->assertTrue($row->created_at->isSameDay());
+    }
+
+    // Carbon::create() with nothing is year 0, not now; make() with nothing is null.
+    #[Test]
+    public function clean_create_and_make_with_nothing(): void
+    {
+        $this->assertEquals(Carbon::create(), $row->at);
+        $this->assertEquals(Carbon::make($row->given), $row->at);
+    }
+
+    // An empty literal is read as now by Carbon::parse() and the constructors.
+    #[Test]
+    public function found_an_empty_literal(): void
+    {
+        $this->assertEquals(Carbon::parse(''), $row->at);
+    }
+
+    // A literal strtotime() cannot read is not relative (Carbon throws on it).
+    #[Test]
+    public function clean_an_unreadable_literal(): void
+    {
+        $this->assertEquals(Carbon::parse('not a date'), $row->at);
+    }
+
+    // A PHP clock function given a timestamp does not read the clock.
+    #[Test]
+    public function clean_a_native_function_given_a_timestamp(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(date('Y-m-d', 1790505192), $row->day);
+        $this->assertSame(getdate(1790505192), $row->parts);
+    }
+
+    // A clock read flows through a plain function's arguments ...
+    #[Test]
+    public function found_through_a_function_argument(): void
+    {
+        $this->assertSame(json_encode([now()]), $row->json);
+    }
+
+    // ... and a clock class's static call's arguments, and no other static call's.
+    #[Test]
+    public function found_through_a_clock_static_argument(): void
+    {
+        $this->assertEquals(Carbon::instance(now()), $row->at);
+    }
+
+    #[Test]
+    public function clean_through_another_static_argument(): void
+    {
+        $this->assertEquals(Row::stampOf(now()), $row->stamp);
+        $this->assertEquals($row->at->format(now()->format('Y')), $row->stamp);
+    }
+
+    #[Test]
+    public function found_a_database_row(): void
+    {
+        $this->assertDatabaseHas('rows', ['day' => today()->toDateString()]);
+    }
+
+    #[Test]
+    public function found_a_json_path(): void
+    {
+        $this->getJson('/x')->assertOk()->assertJsonPath('data.at', now()->toIso8601String());
+    }
+
+    #[Test]
+    public function found_a_json_body(): void
+    {
+        $this->getJson('/x')->assertJson(['data' => ['on' => now()->toDateString()]]);
+    }
+
+    #[Test]
+    public function found_a_diff_with_nothing(): void
+    {
+        $this->assertSame(7, $row->ends_at->diffInDays());
+    }
+
+    #[Test]
+    public function found_a_diff_with_now(): void
+    {
+        $this->assertSame(7.0, now()->diffInDays($row->ends_at));
+    }
+
+    #[Test]
+    public function found_a_property_of_now(): void
+    {
+        $this->assertSame(now()->timestamp, $row->at->timestamp);
+    }
+
+    #[Test]
+    public function found_in_an_array(): void
+    {
+        $this->assertSame(['on' => today()->toDateString()], $body);
+    }
+
+    #[Test]
+    public function found_in_a_concatenation(): void
+    {
+        $this->assertStringContainsString("due {$this->x} ".now()->toDateString(), $mail);
+    }
+
+    #[Test]
+    public function found_in_an_interpolated_string(): void
+    {
+        $this->assertSame("due {$row->at->diffForHumans()}", $mail);
+    }
+
+    #[Test]
+    public function found_a_diff_against_now(): void
+    {
+        $this->assertSame(7, $row->until->diffInDays(now()));
+    }
+
+    #[Test]
+    public function found_a_relative_phrase(): void
+    {
+        $this->assertEquals(Carbon::parse('+7 days')->toDateString(), $row->until->toDateString());
+    }
+
+    #[Test]
+    public function found_a_relative_phrase_in_a_constructor(): void
+    {
+        $this->assertEquals(new CarbonImmutable('tomorrow noon'), $row->at);
+    }
+
+    #[Test]
+    public function found_through_a_function(): void
+    {
+        $this->assertSame(sprintf('on %s', today()->toDateString()), $line);
+    }
+
+    #[Test]
+    public function found_with_named_arguments(): void
+    {
+        $this->assertSame(actual: $row->day, expected: now()->toDateString());
+    }
+
+    #[Test]
+    public function found_as_a_static_assertion(): void
+    {
+        self::assertSame(now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function found_after_the_clock_is_let_go(): void
+    {
+        $this->freezeTime();
+        $this->travelBack();
+        $this->assertSame(now()->getTimestamp(), $row->at->getTimestamp());
+    }
+
+    #[Test]
+    public function found_after_a_frozen_callback_returns(): void
+    {
+        $this->freezeTime(function (): void {
+            $this->run();
+        });
+        $this->assertSame(now()->getTimestamp(), $row->at->getTimestamp());
+    }
+
+    #[Test]
+    public function found_after_set_test_now_is_cleared(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-01-01'));
+        Carbon::setTestNow(null);
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function found_after_the_wormhole_goes_back(): void
+    {
+        $this->travel(3)->days();
+        Wormhole::back();
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function found_before_the_pin(): void
+    {
+        $this->assertSame(now()->toDateString(), $row->day);
+        $this->freezeSecond();
+    }
+
+    // Freezing does not reach PHP's own clock.
+    #[Test]
+    public function found_the_native_clock_even_frozen(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(time(), $row->at->getTimestamp());
+    }
+
+    #[Test]
+    public function found_a_native_date_even_frozen(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(date('Y-m-d'), $row->day);
+    }
+
+    #[Test]
+    public function found_a_native_date_time_even_frozen(): void
+    {
+        $this->freezeSecond();
+        $this->assertEquals(new \DateTimeImmutable, $row->at);
+    }
+
+    #[Test]
+    public function found_a_native_relative_date_time_even_frozen(): void
+    {
+        $this->freezeSecond();
+        $this->assertEquals(new \DateTime('+1 day'), $row->until);
+    }
+
+    // A closure's pin stays in the closure: it may never be called.
+    #[Test]
+    public function found_after_a_closure_that_freezes(): void
+    {
+        collect([1])->each(function (): void {
+            $this->freezeTime();
+        });
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    // withTestNow restores the clock it found, which was free.
+    #[Test]
+    public function found_after_with_test_now_returns(): void
+    {
+        Carbon::withTestNow('2026-01-01', fn () => null);
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function found_in_an_assertion_helper(): void
+    {
+        $this->assertStampedNow($row);
+    }
+
+    #[Test]
+    public function found_in_a_helper_of_a_helper(): void
+    {
+        $this->check($row);
+    }
+
+    #[Test]
+    public function clean_frozen_first(): void
+    {
+        $this->freezeSecond();
+        $this->run();
+        $this->assertSame(now()->getTimestamp(), $row->at->getTimestamp());
+    }
+
+    #[Test]
+    public function clean_travelled_to(): void
+    {
+        $this->travelTo(Carbon::parse('2026-01-01 00:00:00'));
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function clean_travelled_by_a_unit(): void
+    {
+        $this->travel(2)->days();
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function clean_set_test_now(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-01-01'));
+        $this->assertSame(today()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function clean_inside_a_frozen_callback(): void
+    {
+        $this->freezeTime(function (): void {
+            $this->run();
+            $this->assertSame(now()->getTimestamp(), $this->row->at->getTimestamp());
+        });
+        $this->travelTo(now(), fn () => $this->assertSame(now()->toDateString(), $this->row->day));
+        $this->travel(1)->hours(fn () => $this->assertTrue($this->row->at->isToday()));
+    }
+
+    #[Test]
+    public function clean_with_test_now(): void
+    {
+        Carbon::withTestNow('2026-01-01', fn () => $this->assertSame(now()->toDateString(), $this->row->day));
+    }
+
+    #[Test]
+    public function clean_bound_comparisons(): void
+    {
+        $this->assertLessThanOrEqual(now()->getTimestamp(), $row->at->getTimestamp());
+        $this->assertGreaterThan(now()->subMinute()->getTimestamp(), $row->at->getTimestamp());
+        $this->assertEqualsWithDelta(now()->getTimestamp(), $row->at->getTimestamp(), 2);
+        $this->assertTrue($row->at->lessThan(now()->addSecond()));
+        $this->assertTrue($row->at->isPast());
+        $this->assertFalse($row->at->isAfter(now()));
+        $this->assertNotNull($row->at ?? now());
+    }
+
+    #[Test]
+    public function clean_a_clock_read_only_in_the_message(): void
+    {
+        $this->assertSame(1, $count, 'Counted at '.now()->toDateTimeString());
+    }
+
+    #[Test]
+    public function clean_a_clock_read_as_a_query_bound(): void
+    {
+        $this->assertSame(1, Row::query()->where('at', '<', now())->count());
+        $this->assertTrue(Row::query()->where('at', '<', now())->exists());
+    }
+
+    // A variable is not followed (see the scanner's docblock): this is the
+    // test's own read handed to the code as input, or, unpinned and read
+    // after the code ran, the shape the scanner cannot see.
+    #[Test]
+    public function clean_read_once_in_a_variable(): void
+    {
+        $now = now()->toImmutable();
+        $this->assertSame($now->addDays(7)->getTimestamp(), $row->until->getTimestamp());
+    }
+
+    #[Test]
+    public function clean_not_a_clock_read(): void
+    {
+        $this->assertSame(Carbon::parse('2026-01-01')->toDateString(), $row->day);
+        $this->assertSame(Carbon::create(2026, 1, 1)->toDateString(), $row->day);
+        $this->assertTrue($row->at->eq(Carbon::parse('2026-01-01')));
+        $this->assertEquals(new \DateTimeImmutable('2026-01-01 00:00:00'), $row->at);
+        $this->assertEquals(new CarbonImmutable('@1790505192'), $row->at);
+        $this->assertEquals(Carbon::parse($row->given), $row->at);
+    }
+
+    #[Test]
+    public function clean_a_helper_that_freezes(): void
+    {
+        $this->holdTheClock();
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    #[Test]
+    public function clean_an_assertion_helper_called_frozen(): void
+    {
+        $this->freezeSecond();
+        $this->assertStampedNow($row);
+    }
+
+    private function assertStampedNow(object $row): void
+    {
+        $this->assertSame(now()->getTimestamp(), $row->at->getTimestamp());
+    }
+
+    private function check(object $row): void
+    {
+        $this->assertStampedNow($row);
+    }
+
+    private function holdTheClock(): void
+    {
+        $this->freezeSecond();
+    }
+}
+
+final class PinnedBySetUpTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function clean_pinned_by_set_up(): void
+    {
+        $this->assertSame(now()->getTimestamp(), $row->at->getTimestamp());
+    }
+
+    #[Test]
+    public function found_let_go_after_set_up(): void
+    {
+        $this->travelBack();
+        $this->assertSame(now()->getTimestamp(), $row->at->getTimestamp());
+    }
+}
+
+abstract class FreezingParent extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Carbon::setTestNow('2026-01-01 00:00:00');
+    }
+
+    // Abstract: its tests are read through the class that runs them.
+    #[Test]
+    public function clean_inherited_and_pinned(): void
+    {
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+}
+
+final class PinnedByAParentTest extends FreezingParent
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+    }
+
+    #[Test]
+    public function clean_pinned_by_a_parent(): void
+    {
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+}
+
+// `self::` is not virtual: it calls the parent's pinning helper even from
+// the child that overrides it with one that does not pin.
+abstract class PinsThroughSelf extends TestCase
+{
+    protected function pinIt(): void
+    {
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function clean_pinned_through_self(): void
+    {
+        self::pinIt();
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+}
+
+final class OverridesThePinTest extends PinsThroughSelf
+{
+    protected function pinIt(): void
+    {
+    }
+}
+
+trait FreezesTheClock
+{
+    protected function setUpFreezesTheClock(): void
+    {
+        $this->freezeTime();
+    }
+}
+
+final class PinnedByATraitTest extends TestCase
+{
+    use FreezesTheClock;
+
+    #[Test]
+    public function clean_pinned_by_a_trait(): void
+    {
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+}
+
+final class PinnedBeforeTest extends TestCase
+{
+    #[Before]
+    public function holdIt(): void
+    {
+        $this->freezeSecond();
+    }
+
+    public function test_clean_pinned_by_a_before_method(): void
+    {
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+
+    /** @test */
+    public function ignored_a_doc_tagged_method(): void
+    {
+        $this->travelBack();
+        $this->assertSame(now()->toDateString(), $row->day);
+    }
+}
+
+// Structural controls for behaviours no constant carries: how tests are found,
+// how helpers resolve, how set-up is gathered, what the walk visits.
+trait CarriesATest
+{
+    #[Test]
+    public function found_in_a_trait_test(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+final class UsesATestTraitTest extends TestCase
+{
+    use CarriesATest;
+}
+
+// $this-> and static:: are virtual: the running class's override pins.
+abstract class HoldsVirtually extends TestCase
+{
+    protected function hold(): void
+    {
+    }
+
+    #[Test]
+    public function clean_this_resolves_from_the_running_class(): void
+    {
+        $this->hold();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_static_resolves_from_the_running_class(): void
+    {
+        static::hold();
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+final class FreezesVirtuallyTest extends HoldsVirtually
+{
+    protected function hold(): void
+    {
+        $this->freezeSecond();
+    }
+}
+
+// A method resolves from the class, then its traits, then its parent.
+abstract class HoldsNothing extends TestCase
+{
+    protected function hold(): void
+    {
+    }
+}
+
+trait HoldsFrozen
+{
+    protected function hold(): void
+    {
+        $this->freezeSecond();
+    }
+}
+
+final class TraitBeforeParentTest extends HoldsNothing
+{
+    use HoldsFrozen;
+
+    #[Test]
+    public function clean_a_trait_method_before_the_parents(): void
+    {
+        $this->hold();
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+final class OwnBeforeTraitTest extends TestCase
+{
+    use HoldsFrozen;
+
+    protected function hold(): void
+    {
+    }
+
+    #[Test]
+    public function found_the_classs_own_method_before_its_traits(): void
+    {
+        $this->hold();
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// Set-up is gathered from parents' traits, traits' traits and parents' #[Before].
+trait FreezesInSetUp
+{
+    protected function setUpFreezesInSetUp(): void
+    {
+        $this->freezeSecond();
+    }
+}
+
+abstract class ParentWithAFreezingTrait extends TestCase
+{
+    use FreezesInSetUp;
+}
+
+final class InheritsAFreezingTraitTest extends ParentWithAFreezingTrait
+{
+    #[Test]
+    public function clean_pinned_by_a_parents_trait(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+trait FreezesDeep
+{
+    protected function setUpFreezesDeep(): void
+    {
+        $this->freezeSecond();
+    }
+}
+
+trait UsesFreezesDeep
+{
+    use FreezesDeep;
+}
+
+final class PinnedByANestedTraitTest extends TestCase
+{
+    use UsesFreezesDeep;
+
+    #[Test]
+    public function clean_pinned_by_a_trait_a_trait_uses(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+abstract class HoldsBefore extends TestCase
+{
+    #[Before]
+    public function holdFirst(): void
+    {
+        $this->freezeSecond();
+    }
+}
+
+final class PinnedByAParentsBeforeTest extends HoldsBefore
+{
+    #[Test]
+    public function clean_pinned_by_a_parents_before(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A public static method is a test (PHPUnit 12 does not check static); a non-public one is not.
+final class NotTestsTest extends TestCase
+{
+    #[Test]
+    public static function found_a_static_test(): void
+    {
+        self::assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    protected function ignored_a_protected_method(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+}
+
+final class WalkTest extends TestCase
+{
+    // Any closure is walked where it is written.
+    #[Test]
+    public function found_in_another_closure(): void
+    {
+        collect([1])->each(fn () => $this->assertEquals(now(), $this->row->at));
+    }
+
+    // An arrow function's pin does not leak out either.
+    #[Test]
+    public function found_after_an_arrow_function_that_freezes(): void
+    {
+        collect([1])->each(fn () => $this->freezeTime());
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // A call's receiver is walked ...
+    #[Test]
+    public function clean_a_pin_in_a_receiver(): void
+    {
+        $this->freezeSecond()->toDateString();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // ... and its arguments ...
+    #[Test]
+    public function clean_a_pin_in_an_argument(): void
+    {
+        $this->run($this->freezeSecond());
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // ... before an assertion is judged.
+    #[Test]
+    public function clean_an_assertion_whose_arguments_pin(): void
+    {
+        $this->assertEquals($this->freezeSecond(), now());
+    }
+
+    // A test-now scope's callback is its second argument.
+    #[Test]
+    public function found_native_inside_a_test_now_scope(): void
+    {
+        Carbon::withTestNow('2026-01-01 00:00:00', fn () => $this->assertSame(time(), $this->row->stamp));
+    }
+
+    // freezeTime(null) has no callback: it pins.
+    #[Test]
+    public function clean_freeze_given_a_null_callback(): void
+    {
+        $this->freezeTime(null);
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // A nullsafe call on $this pins.
+    #[Test]
+    public function clean_a_nullsafe_pin(): void
+    {
+        $this?->freezeSecond();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // A nullsafe predicate method is an equality.
+    #[Test]
+    public function found_a_nullsafe_predicate_method(): void
+    {
+        $this->assertTrue($row->at?->eq(now()));
+    }
+
+    // Implicit methods read the clock only when given nothing.
+    #[Test]
+    public function clean_a_diff_between_two_stored_dates(): void
+    {
+        $this->assertSame(7, $row->ends_at->diffInDays($row->starts_at));
+    }
+
+    // Freezing reaches `age`.
+    #[Test]
+    public function clean_age_on_a_frozen_clock(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(30, $row->born->age);
+    }
+
+    // Only the first argument is read as a literal.
+    #[Test]
+    public function clean_a_relative_word_that_is_not_the_first_argument(): void
+    {
+        $this->assertEquals(Carbon::parse('2026-01-01', 'today'), $row->at);
+        $this->assertEquals(new Carbon('2026-01-01', 'today'), $row->at);
+    }
+
+    // A named argument of an assertion that compares nothing is not compared.
+    #[Test]
+    public function clean_a_named_argument_of_a_non_equality_assertion(): void
+    {
+        $this->assertNotNull(actual: now());
+    }
+
+    // A predicate's second argument is its message.
+    #[Test]
+    public function clean_a_predicate_message(): void
+    {
+        $this->assertTrue($ok, $row->day === now()->toDateString());
+    }
+
+    // Carbon::make('') is null; a constructor given '' is now.
+    #[Test]
+    public function clean_make_of_a_blank_literal(): void
+    {
+        $this->assertEquals(Carbon::make(''), $row->at);
+    }
+
+    #[Test]
+    public function found_a_constructor_of_a_blank_literal(): void
+    {
+        $this->assertEquals(new CarbonImmutable(''), $row->at);
+    }
+
+    // PHPUnit's function-style assertions are assertions.
+    #[Test]
+    public function found_a_function_style_assertion(): void
+    {
+        \PHPUnit\Framework\assertSame(now()->toDateString(), $row->day);
+    }
+
+    // PHP's function names are case-insensitive.
+    #[Test]
+    public function found_a_clock_function_in_capitals(): void
+    {
+        $this->assertEquals(NOW(), $row->at);
+    }
+
+    // An unpacked argument is not read (a blind spot the docblock names).
+    #[Test]
+    public function clean_an_unpacked_argument(): void
+    {
+        $this->assertSame(...[now(), $row->at]);
+    }
+
+    // A class declared inside a test is not walked.
+    #[Test]
+    public function clean_a_class_declared_inside_a_test(): void
+    {
+        $check = new class
+        {
+            public function check(object $row): void
+            {
+                \PHPUnit\Framework\Assert::assertEquals(now(), $row->at);
+            }
+        };
+        $this->assertNotNull($check);
+    }
+
+    // A pin given a callable that is not a closure leaves the clock free after it.
+    #[Test]
+    public function found_after_a_pin_given_a_callable(): void
+    {
+        $this->freezeTime($callback);
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // The arguments of a pin, a Wormhole and a test-now setter are walked.
+    #[Test]
+    public function found_an_assertion_inside_a_pin_argument(): void
+    {
+        $this->travelTo($this->assertSame(time(), $row->stamp) ?? '2026-01-01');
+    }
+
+    #[Test]
+    public function found_an_assertion_inside_a_travel_argument(): void
+    {
+        $this->travel($this->assertSame(time(), $row->stamp) ?? 1)->days();
+    }
+
+    #[Test]
+    public function found_an_assertion_inside_a_setter_argument(): void
+    {
+        Carbon::setTestNow($this->assertSame(time(), $row->stamp) ?? '2026-01-01');
+    }
+
+    // A nullsafe call's receiver is walked.
+    #[Test]
+    public function clean_a_pin_in_a_nullsafe_receiver(): void
+    {
+        $this->freezeSecond()?->toDateString();
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// One control per element of every constant the scanner recognises by
+// (UnpinnedClockAssertions::VOCABULARY, and EQUALITY per compared position).
+// Named <found|clean>_<prefix>__<element>; NoAssertionComparesAClockReadOnAnUnpinnedClockTest
+// requires one for every element and refuses any that names an element no longer listed.
+abstract class ElementParent extends TestCase
+{
+    protected function assertStampedByParent(object $row): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+final class ByElementTest extends ElementParent
+{
+    // PREDICATE
+    #[Test]
+    public function found_predicate_assertion__assertTrue(): void
+    {
+        $this->assertTrue($row->day === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_assertion__assertFalse(): void
+    {
+        $this->assertFalse($row->day === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_assertion__assertNotTrue(): void
+    {
+        $this->assertNotTrue($row->day === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_assertion__assertNotFalse(): void
+    {
+        $this->assertNotFalse($row->day === now()->toDateString());
+    }
+
+    // PREDICATE_OPERATORS
+    #[Test]
+    public function found_predicate_operator__Identical(): void
+    {
+        $this->assertTrue($row->day === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_operator__NotIdentical(): void
+    {
+        $this->assertTrue($row->day !== now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_operator__Equal(): void
+    {
+        $this->assertTrue($row->day == now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_operator__NotEqual(): void
+    {
+        $this->assertTrue($row->day != now()->toDateString());
+    }
+
+    // PREDICATE_CONNECTIVES
+    #[Test]
+    public function found_predicate_connective__BooleanAnd(): void
+    {
+        $this->assertTrue($ready && $row->day === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_connective__BooleanOr(): void
+    {
+        $this->assertTrue($ready || $row->day === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_connective__LogicalAnd(): void
+    {
+        $this->assertTrue($ready and $row->day === now()->toDateString());
+    }
+
+    #[Test]
+    public function found_predicate_connective__LogicalOr(): void
+    {
+        $this->assertTrue($ready or $row->day === now()->toDateString());
+    }
+
+    // PREDICATE_NEGATIONS
+    #[Test]
+    public function found_predicate_negation__BooleanNot(): void
+    {
+        $this->assertTrue(! ($row->day === now()->toDateString()));
+    }
+
+    // PREDICATE_METHODS
+    #[Test]
+    public function found_predicate_method__eq(): void
+    {
+        $this->assertTrue($row->at->eq(now()));
+    }
+
+    #[Test]
+    public function found_predicate_method__equalTo(): void
+    {
+        $this->assertTrue($row->at->equalTo(now()));
+    }
+
+    #[Test]
+    public function found_predicate_method__ne(): void
+    {
+        $this->assertTrue($row->at->ne(now()));
+    }
+
+    #[Test]
+    public function found_predicate_method__notEqualTo(): void
+    {
+        $this->assertTrue($row->at->notEqualTo(now()));
+    }
+
+    #[Test]
+    public function found_predicate_method__isToday(): void
+    {
+        $this->assertTrue($row->at->isToday());
+    }
+
+    #[Test]
+    public function found_predicate_method__isYesterday(): void
+    {
+        $this->assertTrue($row->at->isYesterday());
+    }
+
+    #[Test]
+    public function found_predicate_method__isTomorrow(): void
+    {
+        $this->assertTrue($row->at->isTomorrow());
+    }
+
+    #[Test]
+    public function found_predicate_method__isBirthday(): void
+    {
+        $this->assertTrue($row->at->isBirthday());
+    }
+
+    #[Test]
+    public function found_predicate_method__isNextWeek(): void
+    {
+        $this->assertTrue($row->at->isNextWeek());
+    }
+
+    #[Test]
+    public function found_predicate_method__isNextMonth(): void
+    {
+        $this->assertTrue($row->at->isNextMonth());
+    }
+
+    #[Test]
+    public function found_predicate_method__isNextQuarter(): void
+    {
+        $this->assertTrue($row->at->isNextQuarter());
+    }
+
+    #[Test]
+    public function found_predicate_method__isNextYear(): void
+    {
+        $this->assertTrue($row->at->isNextYear());
+    }
+
+    #[Test]
+    public function found_predicate_method__isNextDecade(): void
+    {
+        $this->assertTrue($row->at->isNextDecade());
+    }
+
+    #[Test]
+    public function found_predicate_method__isNextCentury(): void
+    {
+        $this->assertTrue($row->at->isNextCentury());
+    }
+
+    #[Test]
+    public function found_predicate_method__isNextMillennium(): void
+    {
+        $this->assertTrue($row->at->isNextMillennium());
+    }
+
+    #[Test]
+    public function found_predicate_method__isLastWeek(): void
+    {
+        $this->assertTrue($row->at->isLastWeek());
+    }
+
+    #[Test]
+    public function found_predicate_method__isLastMonth(): void
+    {
+        $this->assertTrue($row->at->isLastMonth());
+    }
+
+    #[Test]
+    public function found_predicate_method__isLastQuarter(): void
+    {
+        $this->assertTrue($row->at->isLastQuarter());
+    }
+
+    #[Test]
+    public function found_predicate_method__isLastYear(): void
+    {
+        $this->assertTrue($row->at->isLastYear());
+    }
+
+    #[Test]
+    public function found_predicate_method__isLastDecade(): void
+    {
+        $this->assertTrue($row->at->isLastDecade());
+    }
+
+    #[Test]
+    public function found_predicate_method__isLastCentury(): void
+    {
+        $this->assertTrue($row->at->isLastCentury());
+    }
+
+    #[Test]
+    public function found_predicate_method__isLastMillennium(): void
+    {
+        $this->assertTrue($row->at->isLastMillennium());
+    }
+
+    // PREDICATE_PREFIXES
+    #[Test]
+    public function found_predicate_prefix__isSame(): void
+    {
+        $this->assertTrue($row->at->isSameDay(now()));
+    }
+
+    #[Test]
+    public function found_predicate_prefix__isCurrent(): void
+    {
+        $this->assertTrue($row->at->isCurrentDay());
+    }
+
+    // CLOCK_FUNCTIONS
+    #[Test]
+    public function found_clock_function__now(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function found_clock_function__today(): void
+    {
+        $this->assertEquals(today(), $row->at);
+    }
+
+    // CLOCK_CLASSES
+    #[Test]
+    public function found_clock_class__Carbon(): void
+    {
+        $this->assertEquals(Carbon::now(), $row->at);
+    }
+
+    #[Test]
+    public function found_clock_class__CarbonImmutable(): void
+    {
+        $this->assertEquals(CarbonImmutable::now(), $row->at);
+    }
+
+    #[Test]
+    public function found_clock_class__Date(): void
+    {
+        $this->assertEquals(Date::now(), $row->at);
+    }
+
+    // CLOCK_STATICS
+    #[Test]
+    public function found_clock_static__now(): void
+    {
+        $this->assertEquals(Carbon::now(), $row->at);
+    }
+
+    #[Test]
+    public function found_clock_static__today(): void
+    {
+        $this->assertEquals(Carbon::today(), $row->at);
+    }
+
+    #[Test]
+    public function found_clock_static__yesterday(): void
+    {
+        $this->assertEquals(Carbon::yesterday(), $row->at);
+    }
+
+    #[Test]
+    public function found_clock_static__tomorrow(): void
+    {
+        $this->assertEquals(Carbon::tomorrow(), $row->at);
+    }
+
+    // STATIC_PARSERS
+    #[Test]
+    public function found_static_parser__parse(): void
+    {
+        $this->assertEquals(Carbon::parse('+7 days'), $row->at);
+    }
+
+    #[Test]
+    public function found_static_parser__make(): void
+    {
+        $this->assertEquals(Carbon::make('+7 days'), $row->at);
+    }
+
+    // CLOCK_CONSTRUCTORS
+    #[Test]
+    public function found_clock_constructor__Carbon(): void
+    {
+        $this->assertEquals(new Carbon, $row->at);
+    }
+
+    #[Test]
+    public function found_clock_constructor__CarbonImmutable(): void
+    {
+        $this->assertEquals(new CarbonImmutable, $row->at);
+    }
+
+    // IMPLICIT_METHODS
+    #[Test]
+    public function found_implicit_method__isToday(): void
+    {
+        $this->assertSame($expected, $row->at->isToday());
+    }
+
+    #[Test]
+    public function found_implicit_method__isYesterday(): void
+    {
+        $this->assertSame($expected, $row->at->isYesterday());
+    }
+
+    #[Test]
+    public function found_implicit_method__isTomorrow(): void
+    {
+        $this->assertSame($expected, $row->at->isTomorrow());
+    }
+
+    #[Test]
+    public function found_implicit_method__isBirthday(): void
+    {
+        $this->assertSame($expected, $row->at->isBirthday());
+    }
+
+    #[Test]
+    public function found_implicit_method__diffForHumans(): void
+    {
+        $this->assertSame($expected, $row->at->diffForHumans());
+    }
+
+    #[Test]
+    public function found_implicit_method__isNextWeek(): void
+    {
+        $this->assertSame($expected, $row->at->isNextWeek());
+    }
+
+    #[Test]
+    public function found_implicit_method__isNextMonth(): void
+    {
+        $this->assertSame($expected, $row->at->isNextMonth());
+    }
+
+    #[Test]
+    public function found_implicit_method__isNextQuarter(): void
+    {
+        $this->assertSame($expected, $row->at->isNextQuarter());
+    }
+
+    #[Test]
+    public function found_implicit_method__isNextYear(): void
+    {
+        $this->assertSame($expected, $row->at->isNextYear());
+    }
+
+    #[Test]
+    public function found_implicit_method__isNextDecade(): void
+    {
+        $this->assertSame($expected, $row->at->isNextDecade());
+    }
+
+    #[Test]
+    public function found_implicit_method__isNextCentury(): void
+    {
+        $this->assertSame($expected, $row->at->isNextCentury());
+    }
+
+    #[Test]
+    public function found_implicit_method__isNextMillennium(): void
+    {
+        $this->assertSame($expected, $row->at->isNextMillennium());
+    }
+
+    #[Test]
+    public function found_implicit_method__isLastWeek(): void
+    {
+        $this->assertSame($expected, $row->at->isLastWeek());
+    }
+
+    #[Test]
+    public function found_implicit_method__isLastMonth(): void
+    {
+        $this->assertSame($expected, $row->at->isLastMonth());
+    }
+
+    #[Test]
+    public function found_implicit_method__isLastQuarter(): void
+    {
+        $this->assertSame($expected, $row->at->isLastQuarter());
+    }
+
+    #[Test]
+    public function found_implicit_method__isLastYear(): void
+    {
+        $this->assertSame($expected, $row->at->isLastYear());
+    }
+
+    #[Test]
+    public function found_implicit_method__isLastDecade(): void
+    {
+        $this->assertSame($expected, $row->at->isLastDecade());
+    }
+
+    #[Test]
+    public function found_implicit_method__isLastCentury(): void
+    {
+        $this->assertSame($expected, $row->at->isLastCentury());
+    }
+
+    #[Test]
+    public function found_implicit_method__isLastMillennium(): void
+    {
+        $this->assertSame($expected, $row->at->isLastMillennium());
+    }
+
+    // IMPLICIT_PREFIXES
+    #[Test]
+    public function found_implicit_prefix__isCurrent(): void
+    {
+        $this->assertSame($expected, $row->at->isCurrentDay());
+    }
+
+    #[Test]
+    public function found_implicit_prefix__diffIn(): void
+    {
+        $this->assertSame($expected, $row->at->diffInDays());
+    }
+
+    #[Test]
+    public function found_implicit_prefix__floatDiffIn(): void
+    {
+        $this->assertSame($expected, $row->at->floatDiffInDays());
+    }
+
+    // IMPLICIT_PROPERTIES
+    #[Test]
+    public function found_implicit_property__age(): void
+    {
+        $this->assertSame(30, $row->born->age);
+    }
+
+    // COMBINE_METHODS
+    #[Test]
+    public function found_combine_method__eq(): void
+    {
+        $this->assertSame($expected, $row->at->eq(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__equalTo(): void
+    {
+        $this->assertSame($expected, $row->at->equalTo(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__ne(): void
+    {
+        $this->assertSame($expected, $row->at->ne(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__notEqualTo(): void
+    {
+        $this->assertSame($expected, $row->at->notEqualTo(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__isBirthday(): void
+    {
+        $this->assertSame($expected, $row->at->isBirthday(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__diffForHumans(): void
+    {
+        $this->assertSame($expected, $row->at->diffForHumans(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__average(): void
+    {
+        $this->assertSame($expected, $row->at->average(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__max(): void
+    {
+        $this->assertSame($expected, $row->at->max(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__min(): void
+    {
+        $this->assertSame($expected, $row->at->min(now()));
+    }
+
+    #[Test]
+    public function found_combine_method__closest(): void
+    {
+        $this->assertSame($expected, $row->at->closest(now(), $other));
+    }
+
+    #[Test]
+    public function found_combine_method__farthest(): void
+    {
+        $this->assertSame($expected, $row->at->farthest(now(), $other));
+    }
+
+    // COMBINE_PREFIXES
+    #[Test]
+    public function found_combine_prefix__isSame(): void
+    {
+        $this->assertSame($expected, $row->at->isSameDay(now()));
+    }
+
+    #[Test]
+    public function found_combine_prefix__diffIn(): void
+    {
+        $this->assertSame($expected, $row->at->diffInDays(now()));
+    }
+
+    #[Test]
+    public function found_combine_prefix__floatDiffIn(): void
+    {
+        $this->assertSame($expected, $row->at->floatDiffInDays(now()));
+    }
+
+    // NATIVE_FUNCTIONS
+    #[Test]
+    public function found_native_function__time(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(time(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_native_function__microtime(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(microtime(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_native_function__date(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(date('Y'), $row->stamp);
+    }
+
+    #[Test]
+    public function found_native_function__gmdate(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(gmdate('Y'), $row->stamp);
+    }
+
+    #[Test]
+    public function found_native_function__idate(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(idate('Y'), $row->stamp);
+    }
+
+    #[Test]
+    public function found_native_function__getdate(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(getdate(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_native_function__localtime(): void
+    {
+        $this->freezeSecond();
+        $this->assertSame(localtime(), $row->stamp);
+    }
+
+    // NATIVE_CONSTRUCTORS
+    #[Test]
+    public function found_native_constructor__DateTime(): void
+    {
+        $this->freezeSecond();
+        $this->assertEquals(new \DateTime, $row->at);
+    }
+
+    #[Test]
+    public function found_native_constructor__DateTimeImmutable(): void
+    {
+        $this->freezeSecond();
+        $this->assertEquals(new \DateTimeImmutable, $row->at);
+    }
+
+    // RECEIVER_FLOWS
+    #[Test]
+    public function found_receiver_flow__MethodCall(): void
+    {
+        $this->assertSame(now()->toDateString(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_receiver_flow__NullsafeMethodCall(): void
+    {
+        $this->assertSame(now()?->toDateString(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_receiver_flow__PropertyFetch(): void
+    {
+        $this->assertSame(now()->timestamp, $row->stamp);
+    }
+
+    #[Test]
+    public function found_receiver_flow__NullsafePropertyFetch(): void
+    {
+        $this->assertSame(now()?->timestamp, $row->stamp);
+    }
+
+    // FLOW_NODES
+    #[Test]
+    public function found_flow_node__Array_(): void
+    {
+        $this->assertEquals([now()], $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__ArrayItem(): void
+    {
+        $this->assertEquals(['at' => now()], $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__ArrayDimFetch(): void
+    {
+        $this->assertEquals([now()][0], $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__BinaryOp(): void
+    {
+        $this->assertEquals('on '.now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__Cast(): void
+    {
+        $this->assertEquals((string) now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__Ternary(): void
+    {
+        $this->assertEquals($ready ? now() : null, $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__Match_(): void
+    {
+        $this->assertEquals(match ($ready) { default => now() }, $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__MatchArm(): void
+    {
+        $this->assertEquals(match ($ready) { true => now(), default => null }, $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__InterpolatedString(): void
+    {
+        $this->assertEquals("due {$row->at->diffForHumans()}", $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__UnaryMinus(): void
+    {
+        $this->assertEquals(-now()->timestamp, $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__UnaryPlus(): void
+    {
+        $this->assertEquals(+now()->timestamp, $row->stamp);
+    }
+
+    #[Test]
+    public function found_flow_node__Clone_(): void
+    {
+        $this->assertEquals(clone now(), $row->stamp);
+    }
+
+    // PIN_METHODS
+    #[Test]
+    public function clean_pin_method__freezeTime(): void
+    {
+        $this->freezeTime();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_pin_method__freezeSecond(): void
+    {
+        $this->freezeSecond();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_pin_method__travelTo(): void
+    {
+        $this->travelTo(Carbon::parse('2026-01-01 00:00:00'));
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // WORMHOLE_UNITS
+    #[Test]
+    public function clean_wormhole_unit__microsecond(): void
+    {
+        $this->travel(1)->microsecond();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__microseconds(): void
+    {
+        $this->travel(1)->microseconds();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__millisecond(): void
+    {
+        $this->travel(1)->millisecond();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__milliseconds(): void
+    {
+        $this->travel(1)->milliseconds();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__second(): void
+    {
+        $this->travel(1)->second();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__seconds(): void
+    {
+        $this->travel(1)->seconds();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__minute(): void
+    {
+        $this->travel(1)->minute();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__minutes(): void
+    {
+        $this->travel(1)->minutes();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__hour(): void
+    {
+        $this->travel(1)->hour();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__hours(): void
+    {
+        $this->travel(1)->hours();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__day(): void
+    {
+        $this->travel(1)->day();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__days(): void
+    {
+        $this->travel(1)->days();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__week(): void
+    {
+        $this->travel(1)->week();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__weeks(): void
+    {
+        $this->travel(1)->weeks();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__month(): void
+    {
+        $this->travel(1)->month();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__months(): void
+    {
+        $this->travel(1)->months();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__year(): void
+    {
+        $this->travel(1)->year();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_wormhole_unit__years(): void
+    {
+        $this->travel(1)->years();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // UNPIN_METHODS
+    #[Test]
+    public function found_unpin_method__travelBack(): void
+    {
+        $this->freezeSecond();
+        $this->travelBack();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // UNPIN_STATICS
+    #[Test]
+    public function found_unpin_static__Wormhole(): void
+    {
+        $this->freezeSecond();
+        Wormhole::back();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // TEST_NOW_CLASSES
+    #[Test]
+    public function clean_test_now_class__Carbon(): void
+    {
+        Carbon::setTestNow('2026-01-01 00:00:00');
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_test_now_class__CarbonImmutable(): void
+    {
+        CarbonImmutable::setTestNow('2026-01-01 00:00:00');
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_test_now_class__Date(): void
+    {
+        Date::setTestNow('2026-01-01 00:00:00');
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // TEST_NOW_SETTERS
+    #[Test]
+    public function clean_test_now_setter__setTestNow(): void
+    {
+        Carbon::setTestNow('2026-01-01 00:00:00');
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_test_now_setter__setTestNowAndTimezone(): void
+    {
+        Carbon::setTestNowAndTimezone('2026-01-01 00:00:00', 'UTC');
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // TEST_NOW_SCOPES
+    #[Test]
+    public function clean_test_now_scope__withTestNow(): void
+    {
+        Carbon::withTestNow('2026-01-01 00:00:00', fn () => $this->assertEquals(now(), $this->row->at));
+    }
+
+    // HELPER_SCOPES
+    #[Test]
+    public function found_helper_scope__this(): void
+    {
+        $this->assertStampedHere($row);
+    }
+
+    #[Test]
+    public function found_helper_scope__self(): void
+    {
+        self::assertStampedHere($row);
+    }
+
+    #[Test]
+    public function found_helper_scope__static(): void
+    {
+        static::assertStampedHere($row);
+    }
+
+    #[Test]
+    public function found_helper_scope__parent(): void
+    {
+        parent::assertStampedByParent($row);
+    }
+
+    // THIS_VARIABLES
+    #[Test]
+    public function clean_this_variable__this(): void
+    {
+        $this->freezeSecond();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // TRAVEL_METHODS
+    #[Test]
+    public function clean_travel_method__travel(): void
+    {
+        $this->travel(1)->days();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // NULL_CONSTANTS
+    #[Test]
+    public function found_null_constant__null(): void
+    {
+        $this->freezeSecond();
+        Carbon::setTestNow(null);
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // ASSERTION_PREFIXES
+    #[Test]
+    public function found_assertion_prefix__assert(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // MESSAGE_PARAMETERS
+    #[Test]
+    public function clean_message_parameter__message(): void
+    {
+        $this->assertSame(1, $count, message: 'at '.now()->toDateTimeString());
+    }
+
+    // TEST_PREFIXES
+    public function test_found_test_prefix__test(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // TEST_ATTRIBUTES
+    #[Test]
+    public function found_test_attribute__Test(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // METHOD_CALLS
+    #[Test]
+    public function found_method_call__MethodCall(): void
+    {
+        $this->assertSame($expected, $row->at->isToday());
+    }
+
+    #[Test]
+    public function found_method_call__NullsafeMethodCall(): void
+    {
+        $this->assertSame($expected, $row->at?->isToday());
+    }
+
+    // PROPERTY_FETCHES
+    #[Test]
+    public function found_property_fetch__PropertyFetch(): void
+    {
+        $this->assertSame(30, $row->born->age);
+    }
+
+    #[Test]
+    public function found_property_fetch__NullsafePropertyFetch(): void
+    {
+        $this->assertSame(30, $row->born?->age);
+    }
+
+    // BLANK_LITERAL_PARSERS
+    #[Test]
+    public function found_blank_literal_parser__parse(): void
+    {
+        $this->assertEquals(Carbon::parse(''), $row->at);
+    }
+
+    // EQUALITY: one control per compared position
+    #[Test]
+    public function found_equality__assertSame__0(): void
+    {
+        $this->assertSame(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertSame__1(): void
+    {
+        $this->assertSame($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertNotSame__0(): void
+    {
+        $this->assertNotSame(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertNotSame__1(): void
+    {
+        $this->assertNotSame($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertEquals__0(): void
+    {
+        $this->assertEquals(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertEquals__1(): void
+    {
+        $this->assertEquals($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertNotEquals__0(): void
+    {
+        $this->assertNotEquals(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertNotEquals__1(): void
+    {
+        $this->assertNotEquals($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertEqualsCanonicalizing__0(): void
+    {
+        $this->assertEqualsCanonicalizing(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertEqualsCanonicalizing__1(): void
+    {
+        $this->assertEqualsCanonicalizing($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertEqualsIgnoringCase__0(): void
+    {
+        $this->assertEqualsIgnoringCase(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertEqualsIgnoringCase__1(): void
+    {
+        $this->assertEqualsIgnoringCase($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertStringContainsString__0(): void
+    {
+        $this->assertStringContainsString(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertStringContainsString__1(): void
+    {
+        $this->assertStringContainsString($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertStringNotContainsString__0(): void
+    {
+        $this->assertStringNotContainsString(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertStringNotContainsString__1(): void
+    {
+        $this->assertStringNotContainsString($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertStringStartsWith__0(): void
+    {
+        $this->assertStringStartsWith(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertStringStartsWith__1(): void
+    {
+        $this->assertStringStartsWith($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertStringEndsWith__0(): void
+    {
+        $this->assertStringEndsWith(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertStringEndsWith__1(): void
+    {
+        $this->assertStringEndsWith($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertContains__0(): void
+    {
+        $this->assertContains(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertContains__1(): void
+    {
+        $this->assertContains($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertNotContains__0(): void
+    {
+        $this->assertNotContains(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertNotContains__1(): void
+    {
+        $this->assertNotContains($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertContainsEquals__0(): void
+    {
+        $this->assertContainsEquals(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertContainsEquals__1(): void
+    {
+        $this->assertContainsEquals($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertArrayHasKey__0(): void
+    {
+        $this->assertArrayHasKey(now());
+    }
+
+    #[Test]
+    public function found_equality__assertMatchesRegularExpression__0(): void
+    {
+        $this->assertMatchesRegularExpression(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertMatchesRegularExpression__1(): void
+    {
+        $this->assertMatchesRegularExpression($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertJsonStringEqualsJsonString__0(): void
+    {
+        $this->assertJsonStringEqualsJsonString(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertJsonStringEqualsJsonString__1(): void
+    {
+        $this->assertJsonStringEqualsJsonString($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertDatabaseHas__1(): void
+    {
+        $this->assertDatabaseHas($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertDatabaseMissing__1(): void
+    {
+        $this->assertDatabaseMissing($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertJsonPath__1(): void
+    {
+        $this->assertJsonPath($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertJson__0(): void
+    {
+        $this->assertJson(now());
+    }
+
+    #[Test]
+    public function found_equality__assertExactJson__0(): void
+    {
+        $this->assertExactJson(now());
+    }
+
+    #[Test]
+    public function found_equality__assertJsonFragment__0(): void
+    {
+        $this->assertJsonFragment(now());
+    }
+
+    #[Test]
+    public function found_equality__assertJsonMissing__0(): void
+    {
+        $this->assertJsonMissing(now());
+    }
+
+    #[Test]
+    public function found_equality__assertJsonMissingExact__0(): void
+    {
+        $this->assertJsonMissingExact(now());
+    }
+
+    #[Test]
+    public function found_equality__assertSee__0(): void
+    {
+        $this->assertSee(now());
+    }
+
+    #[Test]
+    public function found_equality__assertSeeText__0(): void
+    {
+        $this->assertSeeText(now());
+    }
+
+    #[Test]
+    public function found_equality__assertDontSee__0(): void
+    {
+        $this->assertDontSee(now());
+    }
+
+    #[Test]
+    public function found_equality__assertSessionHas__1(): void
+    {
+        $this->assertSessionHas($row->stamp, now());
+    }
+
+    private function assertStampedHere(object $row): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+final class BeforeAttributeBeforeTest extends TestCase
+{
+    #[Before]
+    public function holdIt(): void
+    {
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function clean_before_attribute__Before(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+final class SetUpMethodSetupTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function clean_set_up_method__setUp(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+trait HoldsItsClock
+{
+    protected function setUpHoldsItsClock(): void
+    {
+        $this->freezeSecond();
+    }
+}
+
+final class TraitSetUpPrefixSetupTest extends TestCase
+{
+    use HoldsItsClock;
+
+    #[Test]
+    public function clean_trait_set_up_prefix__setUp(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+trait HoldsItsClockByAttribute
+{
+    #[SetUp]
+    protected function holdByAttribute(): void
+    {
+        $this->freezeSecond();
+    }
+}
+
+final class TraitSetUpAttributeSetUpTest extends TestCase
+{
+    use HoldsItsClockByAttribute;
+
+    #[Test]
+    public function clean_trait_set_up_attribute__SetUp(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// Set-up in the runtime's order (UnpinnedClockAssertions::setUpState() cites the lines).
+// A trait's #[Before] method is a #[Before] method of the class.
+trait HoldsTheClockBefore
+{
+    #[Before]
+    public function holdTheClock(): void
+    {
+        $this->freezeSecond();
+    }
+}
+
+final class BeforeInATraitTest extends TestCase
+{
+    use HoldsTheClockBefore;
+
+    #[Test]
+    public function clean_before_from_a_trait(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A trait's set-up runs inside parent::setUp(): what the class's setUp() does after it wins ...
+final class LetGoAfterTraitsTest extends TestCase
+{
+    use FreezesTheClock;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->travelBack();
+    }
+
+    #[Test]
+    public function found_let_go_after_the_traits_set_up(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+trait LetsTheClockGo
+{
+    protected function setUpLetsTheClockGo(): void
+    {
+        $this->travelBack();
+    }
+}
+
+// ... and what it does before parent::setUp() is undone by a trait that lets go ...
+final class PinnedBeforeTheTraitsTest extends TestCase
+{
+    use LetsTheClockGo;
+
+    protected function setUp(): void
+    {
+        $this->freezeSecond();
+        parent::setUp();
+    }
+
+    #[Test]
+    public function found_pinned_before_a_trait_lets_go(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// ... but not what it does after.
+final class PinnedAfterTheTraitsTest extends TestCase
+{
+    use LetsTheClockGo;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function clean_pinned_after_a_trait_lets_go(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A setUp() that never calls parent::setUp() never reaches the traits' set-up.
+final class NoParentSetUpTest extends TestCase
+{
+    use FreezesTheClock;
+
+    protected function setUp(): void
+    {
+    }
+
+    #[Test]
+    public function found_traits_not_set_up_without_parent_set_up(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// #[Before] methods run before setUp().
+final class BeforeRunsFirstTest extends TestCase
+{
+    #[Before]
+    public function holdIt(): void
+    {
+        $this->freezeSecond();
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->travelBack();
+    }
+
+    #[Test]
+    public function found_set_up_runs_after_before(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// PHPUnit lists #[Before] methods from the test class up and prepends each,
+// so a parent's run before the child's.
+abstract class LetsGoBefore extends TestCase
+{
+    #[Before]
+    public function letGo(): void
+    {
+        $this->travelBack();
+    }
+}
+
+final class HoldsAfterItsParentTest extends LetsGoBefore
+{
+    #[Before]
+    public function holdIt(): void
+    {
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function clean_a_childs_before_runs_after_its_parents(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A doc tag is not read: PHPUnit 12 reads attributes only.
+final class DocTaggedBeforeTest extends TestCase
+{
+    /** @before */
+    public function holdIt(): void
+    {
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function found_a_doc_tagged_before_does_not_pin(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+final class NullsafeWormholeTest extends TestCase
+{
+    // A Wormhole reached through a nullsafe call pins.
+    #[Test]
+    public function clean_a_nullsafe_wormhole(): void
+    {
+        $this->travel(1)?->days();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_a_wormhole_on_a_nullsafe_travel(): void
+    {
+        $this?->travel(1)->days();
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// class_uses_recursive() lists the topmost parent's traits first, so a
+// child's trait set-up runs after its parent's.
+abstract class ParentLetsGoInATrait extends TestCase
+{
+    use LetsTheClockGo;
+}
+
+final class ChildHoldsInATraitTest extends ParentLetsGoInATrait
+{
+    use FreezesTheClock;
+
+    #[Test]
+    public function clean_a_childs_trait_set_up_runs_after_its_parents(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A static #[Before] method runs too.
+final class StaticBeforeTest extends TestCase
+{
+    #[Before]
+    public static function holdStatically(): void
+    {
+        Carbon::setTestNow('2026-01-01 00:00:00');
+    }
+
+    #[Test]
+    public function clean_a_static_before(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// Hooks are ordered by priority, highest first: a negative #[Before] runs after setUp().
+final class LateBeforeTest extends TestCase
+{
+    #[Before(priority: -1)]
+    public function holdLate(): void
+    {
+        $this->freezeSecond();
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->travelBack();
+    }
+
+    #[Test]
+    public function clean_a_negative_priority_before_runs_after_set_up(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+final class EarlyBeforeTest extends TestCase
+{
+    #[Before(5)]
+    public function holdEarly(): void
+    {
+        $this->freezeSecond();
+    }
+
+    #[Before]
+    public function letGo(): void
+    {
+        $this->travelBack();
+    }
+
+    #[Test]
+    public function found_a_higher_priority_before_runs_first(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// Tests are found in traits a trait uses, and in traits a parent uses.
+trait CarriesANestedTest
+{
+    #[Test]
+    public function found_in_a_nested_trait_test(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+trait UsesATestCarrier
+{
+    use CarriesANestedTest;
+}
+
+final class UsesANestedTestTraitTest extends TestCase
+{
+    use UsesATestCarrier;
+}
+
+trait CarriesAParentsTest
+{
+    #[Test]
+    public function found_in_a_parents_trait_test(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+abstract class ParentWithATestTrait extends TestCase
+{
+    use CarriesAParentsTest;
+}
+
+final class InheritsATraitTestTest extends ParentWithATestTrait
+{
+}
+
+// A method that is both a test and a hook is skipped as a test (TestSuite::fromClassReflector()).
+final class HooksAreNotTestsTest extends TestCase
+{
+    #[Test]
+    public static function setUpBeforeClass(): void
+    {
+        self::assertEquals(now(), self::$at);
+    }
+
+    #[Test]
+    public function assertPreConditions(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+
+    #[Test]
+    public function assertPostConditions(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+
+    #[Test]
+    public function tearDown(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+
+    #[Test]
+    public static function tearDownAfterClass(): void
+    {
+        self::assertEquals(now(), self::$at);
+    }
+
+    #[Test]
+    #[BeforeClass]
+    public static function ignored_hook_attribute__BeforeClass(): void
+    {
+        self::assertEquals(now(), self::$at);
+    }
+
+    #[Test]
+    #[PreCondition]
+    public function ignored_hook_attribute__PreCondition(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+
+    #[Test]
+    #[PostCondition]
+    public function ignored_hook_attribute__PostCondition(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+
+    #[Test]
+    #[After]
+    public function ignored_hook_attribute__After(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+
+    #[Test]
+    #[AfterClass]
+    public static function ignored_hook_attribute__AfterClass(): void
+    {
+        self::assertEquals(now(), self::$at);
+    }
+}
+
+// An override of setUpTraits() is walked; the traits' set-up runs at its parent:: call.
+final class TraitSetUpRunnerTest extends TestCase
+{
+    use LetsTheClockGo;
+
+    protected function setUpTraits()
+    {
+        $uses = parent::setUpTraits();
+        $this->freezeSecond();
+
+        return $uses;
+    }
+
+    #[Test]
+    public function clean_trait_set_up_runner__setUpTraits(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// The traits' set-up runs each time parent::setUp() leaves the set.
+final class SetsUpTwiceTest extends TestCase
+{
+    use FreezesTheClock;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->travelBack();
+        parent::setUp();
+    }
+
+    #[Test]
+    public function clean_trait_set_up_runs_again_at_a_second_parent_set_up(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A trait's #[SetUp] methods include those of the traits it uses.
+trait UsesTheAttributeHolder
+{
+    use HoldsItsClockByAttribute;
+}
+
+final class NestedSetUpAttributeTest extends TestCase
+{
+    use HoldsItsClockByAttribute;
+    use LetsTheClockGo;
+    use UsesTheAttributeHolder;
+
+    #[Test]
+    public function clean_a_nested_traits_set_up_attribute_runs_with_its_user(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A parent in the set whose setUp() never calls parent::setUp() never reaches the traits.
+abstract class StopsSetUp extends TestCase
+{
+    protected function setUp(): void
+    {
+    }
+}
+
+final class ChildOfAStoppedSetUpTest extends StopsSetUp
+{
+    use FreezesTheClock;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+    }
+
+    #[Test]
+    public function found_traits_not_set_up_when_the_parents_set_up_stops(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// PHP method names are case-insensitive: a #[Before] overriding its parent's
+// in another case runs once, after the child's other #[Before].
+abstract class ChecksInABefore extends TestCase
+{
+    #[Before]
+    public function check(): void
+    {
+    }
+}
+
+final class OverridesTheCheckTest extends ChecksInABefore
+{
+    #[Before]
+    public function CHECK(): void
+    {
+        $this->assertEquals(now(), $this->row->at);
+    }
+
+    #[Before]
+    public function holdIt(): void
+    {
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function clean_a_before_overridden_in_another_case_runs_once(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A #[Before] method overridden without the attribute is no longer a hook.
+abstract class HoldsInABefore extends TestCase
+{
+    #[Before]
+    public function hold(): void
+    {
+        $this->freezeSecond();
+    }
+}
+
+final class OverridesTheHoldTest extends HoldsInABefore
+{
+    public function hold(): void
+    {
+    }
+
+    #[Test]
+    public function found_a_before_overridden_without_the_attribute(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// setUp<Trait>() is called on the class, so the class's override of it runs.
+final class OverridesTheTraitSetUpTest extends TestCase
+{
+    use FreezesTheClock;
+
+    protected function setUpFreezesTheClock(): void
+    {
+    }
+
+    #[Test]
+    public function found_a_trait_set_up_the_class_overrides(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// PHPUnit ignores #[Before] on setUp() itself.
+final class BeforeOnSetUpTest extends TestCase
+{
+    #[Before(priority: -5)]
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->travelBack();
+    }
+
+    #[Before(priority: -1)]
+    public function holdLate(): void
+    {
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function clean_before_on_set_up_is_ignored(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// The traits' set-up an overridden runner reaches through parent::setUpTraits() runs.
+final class RunnerReachesTheTraitsTest extends TestCase
+{
+    use FreezesTheClock;
+
+    protected function setUpTraits()
+    {
+        return parent::setUpTraits();
+    }
+
+    #[Test]
+    public function clean_the_traits_set_up_through_an_overridden_runner(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
