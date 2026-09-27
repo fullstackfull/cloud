@@ -7,6 +7,9 @@ namespace Tests\Feature\Vps;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Compute\Application\Actions\ReserveNodeCapacity;
+use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
+use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
 use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
@@ -101,6 +104,65 @@ final class ADestroyThatOverlapsAResizeLeavesNothingCommittedTest extends TestCa
         $this->assertSame(0, VirtualMachine::query()->count());
         $this->assertNothingCommitted();
         $this->assertSame('vps.unknown_machine', $resize->refresh()->result['error']['code'] ?? null);
+    }
+
+    #[Test]
+    public function a_destroy_while_the_hypervisor_resizes_ends_the_resize_unknown_machine_whatever_it_answers(): void
+    {
+        /*
+         * The destroy runs whole while the hypervisor is resizing: the
+         * resize is then refused (the settle after a refusal) or its
+         * machine cannot be read back (the settle of an unverified
+         * resize). Each settle finds the row gone and writes nothing; the
+         * resize used to report the refusal, or vps.resize_unverified, as
+         * if the machine were still there.
+         */
+        foreach (['refused' => ComputeProviderException::requestFailed('fake', 'resize_vm', ['provider_message' => 'refused']), 'unverified' => null] as $answer => $refusal) {
+            $machine = $this->aBuiltMachine();
+            $destroy = $this->destroyJob($machine);
+            $this->hypervisor->afterAResize = function () use ($destroy, $refusal): void {
+                $this->assertTrue(app(DestroyVpsHandler::class)->execute($destroy->fresh())->successful);
+
+                if ($refusal !== null) {
+                    throw $refusal;
+                }
+            };
+
+            $resize = $this->resizeJob($machine, vcpu: 4, memoryMib: 8192, diskGib: 80);
+            $this->runWorker($resize);
+
+            $this->assertSame(0, VirtualMachine::query()->count(), $answer);
+            $this->assertNothingCommitted();
+            $this->assertSame(FailureClass::Permanent, $resize->refresh()->failure_class, $answer);
+            $this->assertSame('vps.unknown_machine', $resize->result['error']['code'] ?? null, $answer);
+        }
+    }
+
+    #[Test]
+    public function a_destroy_locks_every_reservation_of_the_service_then_the_nodes_then_the_pools(): void
+    {
+        // Two live reservations of one service, on two nodes.
+        $machine = $this->aBuiltMachine();
+        $other = $this->addNode('pve-02');
+        $pool = ComputeStorage::query()->where('node_id', $other->id)->sole();
+        app(ReserveNodeCapacity::class)->execute($other, new VmResources(1, 1024, 10), customerId: $this->customer->id, storageId: $pool->id, reservationKey: 'second:'.$machine->service_id, serviceId: $machine->service_id);
+
+        $locks = [];
+        DB::listen(static function ($query) use (&$locks): void {
+            if (preg_match('/^select \* from "(node_capacity_reservations|compute_nodes|compute_storages)" .*for update$/', $query->sql, $table) === 1) {
+                $locks[] = $table[1];
+            }
+        });
+        $this->runWorker($this->destroyJob($machine));
+
+        $this->assertNothingCommitted();
+        $this->assertSame(0, (int) $other->refresh()->vm_count);
+        // The first locks, in order: the reservations, then both nodes, then both pools.
+        $this->assertSame(
+            ['node_capacity_reservations', 'compute_nodes', 'compute_nodes', 'compute_storages', 'compute_storages'],
+            array_slice($locks, 0, 5),
+            json_encode($locks),
+        );
     }
 
     private function aBuiltMachine(): VirtualMachine

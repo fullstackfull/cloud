@@ -229,6 +229,41 @@ final class AnAdoptedVpsIsManagedLikeAnyOtherTest extends TestCase
         $this->assertStringContainsString('no longer recorded', (string) ($job->refresh()->result['adoption']['capacity']['machine_reason'] ?? ''));
     }
 
+    #[Test]
+    public function a_service_that_already_has_a_machine_row_is_not_given_a_second(): void
+    {
+        $this->hypervisor->loseTheAnswerToCreates = true;
+        $job = $this->createJob();
+        $this->runWorker($job);
+        $reference = $this->hypervisor->everyMachine()[0]->providerId;
+        $service = Service::query()->findOrFail($job->service_id);
+        $existing = VirtualMachine::factory()->onNode($this->node)->forService($service)->resources(2, 4096, 40)->create(['provider_id' => '7777']);
+
+        $this->adoptAsOperator($job, $reference)->assertOk();
+
+        $this->assertSame([$existing->id], VirtualMachine::query()->where('service_id', $service->id)->pluck('id')->all());
+        $capacity = $job->refresh()->result['adoption']['capacity'] ?? [];
+        $this->assertFalse($capacity['machine_recorded'] ?? null);
+        $this->assertSame($existing->id, $capacity['virtual_machine_id'] ?? null);
+        $this->assertStringContainsString('already has a machine row', (string) ($capacity['machine_reason'] ?? ''));
+    }
+
+    #[Test]
+    public function a_reference_another_row_holds_is_not_recorded_twice(): void
+    {
+        $this->hypervisor->loseTheAnswerToCreates = true;
+        $job = $this->createJob();
+        $this->runWorker($job);
+        $reference = $this->hypervisor->everyMachine()[0]->providerId;
+        $someoneElse = Service::factory()->active()->create(['customer_id' => $this->customer->id, 'kind' => 'vps']);
+        VirtualMachine::factory()->onNode($this->node)->forService($someoneElse)->resources(2, 4096, 40)->create(['provider_id' => $reference]);
+
+        $this->adoptAsOperator($job, $reference)->assertOk();
+
+        $this->assertSame(0, VirtualMachine::query()->where('service_id', $job->service_id)->count());
+        $this->assertStringContainsString('another machine row', (string) ($job->refresh()->result['adoption']['capacity']['machine_reason'] ?? ''));
+    }
+
     /**
      * A create whose answer was lost, adopted by the operator.
      *

@@ -54,6 +54,36 @@ final class ADestroyAndAResizeInTwoWorkersLeaveNothingCommittedTest extends Test
     #[Test]
     public function a_settle_that_meets_a_destroy_waits_for_it_and_commits_nothing(): void
     {
+        // Held just before the destroy deletes the row, its capacity given back.
+        $this->raceASettleAgainstADestroy(static fn (string $query, bool $before): bool => $before
+            && preg_match('/^delete from "virtual_machines"/', $query) === 1);
+    }
+
+    #[Test]
+    public function a_settle_that_meets_a_destroy_just_after_its_release_waits_and_commits_nothing(): void
+    {
+        /*
+         * Held just after the destroy has given the capacity back, before
+         * anything else. A destroy that gives it back before taking the
+         * machine's lock (the order it had before round seven) has committed
+         * that release: the settle finds the row still there and nothing
+         * live, and commits the machine again - the verifier's
+         * destroy_after_release_then_resize race. Under the lock the settle
+         * waits, and finds the row gone.
+         */
+        $this->raceASettleAgainstADestroy(static fn (string $query, bool $before): bool => ! $before
+            && preg_match('/^update "node_capacity_reservations"/', $query) === 1);
+    }
+
+    /**
+     * Runs a destroy here and, the first time $holdAt says so, a resize's
+     * settle in another process until it is seen waiting on a lock or has
+     * finished; then lets the destroy go on.
+     *
+     * @param  callable(string, bool): bool  $holdAt  the statement, and whether it is about to run (true) or has run
+     */
+    private function raceASettleAgainstADestroy(callable $holdAt): void
+    {
         $this->assertSame(0, DB::transactionLevel(), 'These rows must be committed for another process to see them.');
 
         $cluster = ComputeCluster::factory()->create(['driver' => 'fake']);
@@ -82,19 +112,24 @@ final class ADestroyAndAResizeInTwoWorkersLeaveNothingCommittedTest extends Test
 
         $settle = null;
         $blocked = null;
-        DB::connection()->beforeExecuting(function (string $query) use (&$settle, &$blocked, $machine): void {
-            // The destroy's delete of the machine row (matched, not run).
-            if ($settle !== null || preg_match('/^delete from "virtual_machines"/', $query) !== 1) {
+        $hold = function (string $query, bool $before) use (&$settle, &$blocked, $machine, $holdAt): void {
+            if ($settle !== null || ! $holdAt($query, $before)) {
                 return;
             }
 
             $settle = $this->settleInAnotherProcess((string) $machine->id);
             $blocked = $this->untilBlockedOrFinished($settle);
+        };
+        DB::connection()->beforeExecuting(static function (string $query) use ($hold): void {
+            $hold($query, true);
+        });
+        DB::listen(static function ($query) use ($hold): void {
+            $hold($query->sql, false);
         });
 
         $this->assertTrue(app(DestroyVpsHandler::class)->execute($destroy)->successful);
 
-        $this->assertInstanceOf(Process::class, $settle, 'The destroy never reached the delete.');
+        $this->assertInstanceOf(Process::class, $settle, 'The destroy never reached the statement it is held at.');
         $settle->wait();
         $line = trim($settle->getOutput());
         $this->assertNotSame('', $line, 'The settle produced no verdict: '.$settle->getErrorOutput());

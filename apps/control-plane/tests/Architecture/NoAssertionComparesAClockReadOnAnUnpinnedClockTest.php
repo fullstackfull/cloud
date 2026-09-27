@@ -257,12 +257,17 @@ final class NoAssertionComparesAClockReadOnAnUnpinnedClockTest extends TestCase
         'found_a_clock_read_handed_to_a_helper' => 'a clock read handed to a helper binds the parameter it is given as',
         'found_a_clock_read_handed_to_an_assert_named_helper' => 'a helper named assert* that is not an equality is followed with its bindings',
         'found_a_clock_read_handed_to_a_helper_by_name' => 'a named argument binds the parameter of that name',
-        'clean_a_clock_read_handed_to_a_helper_called_frozen' => 'a bound parameter is judged in the caller\'s state',
+        'clean_a_clock_read_handed_to_a_helper_called_frozen' => 'a clock read on a pinned clock at the call is not bound',
         'clean_a_stored_value_handed_to_a_helper' => 'a parameter handed no clock read is not bound',
         'clean_a_bound_parameter_does_not_leak_out_of_the_helper' => 'a binding lasts for the helper\'s walk only',
         'found_a_clock_read_handed_through_two_helpers' => 'a bound parameter handed on binds the next helper\'s parameter',
         'clean_a_clock_read_handed_to_a_variadic_parameter' => 'a variadic parameter is not bound',
         'found_a_native_clock_read_handed_to_a_helper_even_frozen' => 'a bound parameter carries PHP\'s own clock as such',
+        'found_a_clock_read_handed_to_a_helper_that_pins_first' => 'a bound parameter is judged by the pin at the call, not at the comparison',
+        'clean_a_pinned_clock_read_handed_to_a_helper_that_lets_go' => 'a read made on a pinned clock is not bound',
+        'found_a_test_now_closure_from_callable' => 'Closure::fromCallable() given to a test-now setter does not pin',
+        'clean_a_test_now_closure_returned_by_a_method_pins' => 'a closure returned by a call is not seen (disclosed): it pins',
+        'clean_a_test_now_closure_whose_nested_closure_returns_anything' => 'the returns of a closure nested in a test-now closure are not its returns',
     ];
 
     private static ?UnpinnedClockAssertions $suite = null;

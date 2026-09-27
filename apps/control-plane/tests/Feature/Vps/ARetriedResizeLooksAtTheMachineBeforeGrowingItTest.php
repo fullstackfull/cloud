@@ -104,6 +104,58 @@ final class ARetriedResizeLooksAtTheMachineBeforeGrowingItTest extends TestCase
         $this->assertSame(40, $this->hypervisor->fleet->getVm('pve-01', (string) $machine->provider_id)?->diskGib);
     }
 
+    #[Test]
+    public function a_disk_already_past_the_target_is_not_grown_again_and_the_row_follows_it(): void
+    {
+        $machine = $this->aBuiltMachine();
+
+        // Grown by hand past what the plan sells: 150 on the machine, 40 on the row.
+        $this->hypervisor->fleet->resizeVm('pve-01', (string) $machine->provider_id, new ResizeVmRequest(diskGib: 110));
+
+        $resize = $this->resizeJob($machine, vcpu: 2, memoryMib: 4096, diskGib: 120);
+        $this->runWorker($resize);
+
+        $this->assertSame(ProvisioningJobStatus::Succeeded, $resize->refresh()->status, (string) $resize->last_error);
+        $this->assertSame(150, $this->hypervisor->fleet->getVm('pve-01', (string) $machine->provider_id)?->diskGib);
+        $this->assertSame(150, $machine->refresh()->disk_gib);
+        $this->assertSame(150, NodeCapacityReservation::query()->whereNull('released_at')->sole()->disk_gib);
+    }
+
+    #[Test]
+    public function vcpu_and_memory_the_machine_already_has_are_not_asked_for_again(): void
+    {
+        $machine = $this->aBuiltMachine();
+
+        // The machine already has 4 / 8192; the row says 2 / 4096.
+        $this->hypervisor->fleet->resizeVm('pve-01', (string) $machine->provider_id, new ResizeVmRequest(vcpu: 4, memoryMib: 8192));
+        $this->hypervisor->failResizesWith = ComputeProviderException::requestFailed('fake', 'resize_vm', ['provider_message' => 'nothing should have been asked']);
+
+        $resize = $this->resizeJob($machine, vcpu: 4, memoryMib: 8192, diskGib: 40);
+        $this->runWorker($resize);
+
+        $this->assertSame(ProvisioningJobStatus::Succeeded, $resize->refresh()->status, (string) $resize->last_error);
+        $this->assertTrue($resize->result['response']['already_correct'] ?? false, json_encode($resize->result));
+        $this->assertSame([4, 8192], [$machine->refresh()->vcpu, $machine->memory_mib]);
+    }
+
+    #[Test]
+    public function a_look_that_fails_changes_nothing(): void
+    {
+        $machine = $this->aBuiltMachine();
+        $this->hypervisor->failReadsWith = ComputeProviderException::requestFailed('fake', 'get_vm', ['provider_message' => 'node unreachable']);
+
+        $resize = $this->resizeJob($machine, vcpu: 4, memoryMib: 8192, diskGib: 80);
+        $this->runWorker($resize);
+        $this->hypervisor->failReadsWith = null;
+
+        $this->assertSame(FailureClass::Transient, $resize->refresh()->failure_class);
+        $this->assertNotSame('provisioning.unclassified', $resize->result['error']['code'] ?? null);
+        $this->assertSame([2, 4096, 40], [$machine->refresh()->vcpu, $machine->memory_mib, $machine->disk_gib]);
+        $live = NodeCapacityReservation::query()->whereNull('released_at')->sole();
+        $this->assertSame([2, 4096, 40], [$live->vcpu, $live->memory_mib, $live->disk_gib]);
+        $this->assertSame(40, $this->hypervisor->fleet->getVm('pve-01', (string) $machine->provider_id)?->diskGib);
+    }
+
     private function aBuiltMachine(): VirtualMachine
     {
         $job = $this->createJob();

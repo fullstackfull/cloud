@@ -107,7 +107,9 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  * every restatement by the machine row's lock (MachineCommitment::restate()):
  * a restatement that finds the row gone writes nothing, and the resize ends
  * `vps.unknown_machine`, rather than committing a machine that no longer
- * exists (D7-1, round seven).
+ * exists (D7-1, round seven) - at each of its four restatements: the
+ * ceiling, the settle after a refusal, the settle of an unverified resize
+ * and the settle of a confirmed one (and the already-correct settle).
  *
  * The reservation row carries the machine's shape throughout, so the destroy
  * (which gives back what the row records) gives back what is held.
@@ -298,8 +300,9 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
              * nothing, so the commitment goes back to the machine as
              * recorded.
              */
-            if (! $e->isIndeterminate()) {
-                $this->commitment->restate($machine, $node, $this->commitment->asRecorded($machine), refuse: false);
+            if (! $e->isIndeterminate()
+                && ! $this->commitment->restate($machine, $node, $this->commitment->asRecorded($machine), refuse: false)) {
+                return $this->goneWhileResizing($machineId);
             }
 
             return ProvisioningResult::failed(
@@ -332,7 +335,9 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
                 diskGib: $currentDisk + ($diskGrowth ?? 0),
             );
 
-            $settled = $this->commitment->restate($machine, $node, $known, refuse: false);
+            if (! $this->commitment->restate($machine, $node, $known, refuse: false)) {
+                return $this->goneWhileResizing($machineId);
+            }
 
             return ProvisioningResult::failed(
                 FailureClass::Permanent,
@@ -341,9 +346,9 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
                 metadata: [
                     'virtual_machine_id' => $machineId,
                     'reason' => (string) $unread,
-                    'committed_vcpu' => $settled ? $known->vcpu : null,
-                    'committed_memory_mib' => $settled ? $known->memoryMib : null,
-                    'committed_disk_gib' => $settled ? $known->diskGib : null,
+                    'committed_vcpu' => $known->vcpu,
+                    'committed_memory_mib' => $known->memoryMib,
+                    'committed_disk_gib' => $known->diskGib,
                 ],
             );
         }

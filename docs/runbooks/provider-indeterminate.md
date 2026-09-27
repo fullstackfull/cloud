@@ -155,8 +155,14 @@ hypervisor reports where it finds the machine — node, shape, power state — s
 the platform can resize, power, console, reinstall, destroy, terminate and
 watch it for drift like any other, and the customer sees it. The adoption's
 record (`result.adoption.capacity`) says `machine_recorded` and the row's id,
-or, when no row was written, `machine_reason`: the machine was not found at
-the hypervisor, the hypervisor could not be asked, or a row already exists.
+or, when no row was written, `machine_reason`, which is one of: the machine
+was not found on any node of the cluster; the hypervisor could not be asked
+(the reason follows); the hypervisor was not asked (the build named no
+cluster when the adoption looked); the service already has a machine row; another machine
+row already holds the reference on the cluster; the build's cluster changed
+while the hypervisor was asked; or the node the machine was found on is no
+longer recorded in the build's cluster. The last two are the adoption
+re-checking, under its lock, an answer it asked for before taking it.
 With no row written, the platform cannot manage the machine, and nothing on
 the platform writes the row later: an adoption is settled once. Escalate it;
 this runbook has no route for it.

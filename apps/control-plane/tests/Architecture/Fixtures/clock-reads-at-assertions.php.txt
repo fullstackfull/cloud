@@ -11,6 +11,7 @@ declare(strict_types=1);
 namespace Fixture\Clock;
 
 use Carbon\Carbon;
+use Closure;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\Attributes\SetUp;
 use Illuminate\Foundation\Testing\Wormhole;
@@ -3015,7 +3016,8 @@ final class RoundSevenReadsTest extends TestCase
     #[Test]
     public function found_a_clock_read_handed_to_a_helper_by_name(): void
     {
-        $this->expectBoth(stored: $row->day, expected: now()->toDateString());
+        // Named for its second parameter: bound by position, it would bind the first.
+        $this->expectLater(expected: now()->toDateString());
     }
 
     #[Test]
@@ -3051,6 +3053,47 @@ final class RoundSevenReadsTest extends TestCase
     }
 
     #[Test]
+    public function found_a_clock_read_handed_to_a_helper_that_pins_first(): void
+    {
+        $this->checkAfterPinning(now());
+    }
+
+    #[Test]
+    public function clean_a_pinned_clock_read_handed_to_a_helper_that_lets_go(): void
+    {
+        $this->freezeSecond();
+        $this->checkAfterLettingGo(now());
+    }
+
+    #[Test]
+    public function found_a_test_now_closure_from_callable(): void
+    {
+        Carbon::setTestNow(Closure::fromCallable([$this, 'clock']));
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // Disclosed: a closure returned by a call is read as a value, and pins.
+    #[Test]
+    public function clean_a_test_now_closure_returned_by_a_method_pins(): void
+    {
+        Carbon::setTestNow($this->steppingClock());
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_a_test_now_closure_whose_nested_closure_returns_anything(): void
+    {
+        Carbon::setTestNow(function () {
+            $later = static function () {
+                return Carbon::parse('+1 minute');
+            };
+
+            return Carbon::parse('2026-01-01 00:00:00');
+        });
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
     public function found_a_native_clock_read_handed_to_a_helper_even_frozen(): void
     {
         $this->freezeSecond();
@@ -3072,9 +3115,26 @@ final class RoundSevenReadsTest extends TestCase
         $this->assertSame($day, $row->day);
     }
 
-    private function expectBoth($expected = null, $stored = null): void
+    private function expectLater($unused = null, $expected = null): void
     {
-        $this->assertSame($expected, $stored);
+        $this->assertSame($expected, $this->row->day);
+    }
+
+    private function checkAfterPinning($at): void
+    {
+        $this->freezeSecond();
+        $this->assertSame($at, $this->row->at);
+    }
+
+    private function checkAfterLettingGo($at): void
+    {
+        Carbon::setTestNow();
+        $this->assertSame($at, $this->row->at);
+    }
+
+    private function steppingClock(): Closure
+    {
+        return static fn () => CarbonImmutable::now();
     }
 
     private function forgetsTheStamp($at): void
@@ -3112,6 +3172,12 @@ final class SteppingClockInSetUpTest extends TestCase
 // CONSTRAINT_METHODS, FAIL_METHODS, and assertThat's compared positions.
 final class RoundSevenElementsTest extends TestCase
 {
+    #[Test]
+    public function found_constraint_method__equalTo(): void
+    {
+        $this->assertThat($row->at, self::equalTo(now()));
+    }
+
     #[Test]
     public function found_constraint_method__identicalTo(): void
     {
