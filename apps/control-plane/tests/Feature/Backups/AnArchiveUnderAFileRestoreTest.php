@@ -14,6 +14,7 @@ use Lynomia\Modules\Backups\Domain\Exceptions\BackupFileRefusedException;
 use Lynomia\Modules\Backups\Domain\ValueObjects\BackupPath;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
+use Lynomia\Modules\Backups\Infrastructure\Models\BackupFileDownload;
 use Lynomia\Modules\Backups\Infrastructure\Models\BackupFileRestore;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
@@ -72,6 +73,64 @@ final class AnArchiveUnderAFileRestoreTest extends VpsApiTestCase
             ->assertJsonPath('data.is_restorable', false);
 
         $this->assertFalse(app(FileLevelSupport::class)->describe($backup)['supported']);
+    }
+
+    /*
+     * The three read routes, each on its own. Every one of them reaches the
+     * archive through FileLevelSupport::provider(), and the unreadable
+     * verdict used to be pinned there only through the file restore and the
+     * row's description — which each check it again — so a provider() that
+     * stopped asking went unnoticed on the routes that hand a customer the
+     * archive's contents.
+     */
+
+    #[Test]
+    public function an_archive_found_unreadable_is_not_browsed(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $machine = $this->machineFor($customer);
+        $backup = $this->archiveFor($customer, $machine, ['verified' => false, 'verified_at' => null]);
+
+        $this->actingAs($user)
+            ->getJson($this->files($machine, $backup).'?path=/etc')
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'backup.files_unavailable');
+    }
+
+    #[Test]
+    public function an_archive_found_unreadable_does_not_issue_a_download(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $machine = $this->machineFor($customer);
+        $backup = $this->archiveFor($customer, $machine, ['verified' => false, 'verified_at' => null]);
+
+        $this->actingAs($user)
+            ->postJson($this->files($machine, $backup).'/downloads', ['path' => '/etc/hostname'])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'backup.files_unavailable');
+
+        $this->assertSame(0, BackupFileDownload::query()->count());
+    }
+
+    #[Test]
+    public function a_download_issued_before_the_archive_was_found_unreadable_is_not_served(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $machine = $this->machineFor($customer);
+        $backup = $this->archiveFor($customer, $machine, ['verified' => null]);
+
+        $url = $this->actingAs($user)
+            ->postJson($this->files($machine, $backup).'/downloads', ['path' => '/etc/hostname'])
+            ->assertCreated()
+            ->json('data.url');
+
+        // The verdict lands between the link and its use.
+        Backup::query()->whereKey($backup->id)->update(['verified' => false]);
+
+        $this->actingAs($user)
+            ->get($url)
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'backup.files_unavailable');
     }
 
     #[Test]
