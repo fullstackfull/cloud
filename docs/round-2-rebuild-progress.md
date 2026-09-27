@@ -135,5 +135,5 @@ Skeptics and the five-product matrix follow.
 | A | F-07 (c); cancelled/ended subscription invoices; downgrade credit vs card refund; lapse vs refund in flight; refund/settle deadlock; discounted credit; pending refunds never settle | verifying | `1ae7a47` |
 | B | customer role editable into operator permissions; bootstrap race; cached configuration | upheld with reservations; merged; Horizon staff gate added `841f05b` | `12b1a03` |
 | C | F-09 stale restore handle; file restore of unreadable archives and deletion under it; F-26 production guard | upheld with reservations; merged `8afa8c6`; runbook `6837954` | `ad9af6a` |
-| D | operator retry after released capacity; stranger elsewhere in the cluster; network-less customer subnets | verifying | `24acf42` |
+| D | operator retry after released capacity; stranger elsewhere in the cluster; network-less customer subnets | rejected (a same-named stranger elsewhere is claimed as this build), repairing | `24acf42` |
 | E | F-23 enum gate self-references and by-value excuses; F-38 Ansible credential variables | upheld with reservations; merged `427c9be`; reservations `03e3919` | `06ff527` |
