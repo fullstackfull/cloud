@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Subscriptions\Application\Actions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Billing\Application\Actions\ReturnWhatAnInvoiceStillHolds;
+use Lynomia\Modules\Billing\Application\Queries\LockAnInvoiceWhileOpen;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Subscriptions\Application\Listeners\EndTheSubscriptionWithItsService;
@@ -89,10 +90,17 @@ final readonly class WindUpAnEndedSubscription
             $invoices = [];
 
             foreach ($ids as $id) {
-                /** @var Invoice|null $locked */
-                $locked = Invoice::query()->lockForUpdate()->find($id);
+                /*
+                 * Locked only while still open (LockAnInvoiceWhileOpen): a row
+                 * paid since the read above is left unlocked. Locking it by id
+                 * alone held a paid invoice while $end waited for the
+                 * subscription, which ApplyPlanChange holds while it waits for
+                 * the paid invoices a credit draws on: a deadlock
+                 * (WhatAnInvoiceStillHolds, the lock order).
+                 */
+                $locked = LockAnInvoiceWhileOpen::take((string) $id);
 
-                if ($locked !== null && $locked->status === InvoiceStatus::Open) {
+                if ($locked !== null) {
                     $invoices[] = $locked;
                 }
             }

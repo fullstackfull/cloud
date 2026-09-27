@@ -63,11 +63,11 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  * Written down once, here, because every action that reads this figure takes
  * the invoice's lock, and most of them take another row beside it. Two
  * actions taking the same two rows in opposite orders deadlock under load,
- * and PostgreSQL resolves it by killing one of them - a settlement, or the
- * recording of a refund the provider has already made (N-2: IssueRefund took
+ * and PostgreSQL resolves it by killing one of them (N-2: IssueRefund took
  * the invoice before the capture, SettleInvoice the capture before the
  * invoice, and a capture attached to its invoice before settlement put the
- * two in a real cycle).
+ * two in a real cycle; the settlement was the one killed, and its queued
+ * retries converged - no money lost, a money path failed for nothing).
  *
  *   1. the payment-side row that already exists - the capture
  *      (`transactions`), or the refund (`refunds`);
@@ -86,9 +86,18 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  * the subscription, the wallet); ApplyPlanChange (the subscription, its
  * orders, then the paid invoices a credit draws on, then the wallet - the one
  * invoice lock taken after a subscription, and safe because nothing holding a
- * paid invoice's lock waits for a subscription or an order). Pinned by
- * MoneyPathsTakeTheirLocksInOneOrderTest
- * and raced across two processes by ARefundAndASettlementDoNotDeadlockTest.
+ * paid invoice's lock waits for a subscription or an order).
+ *
+ * That last claim holds because the renewal and the wind-up, which find an
+ * open invoice by an unlocked read and lock it before the subscription, lock
+ * it only while it is still open (LockAnInvoiceWhileOpen): locked by id, an
+ * invoice paid in between was held paid while they waited for the
+ * subscription, and a downgrade holding the subscription waited for it (a
+ * deadlock the round-four verifier measured). VoidInvoice locks an invoice
+ * and waits for the subscription only on a void, which a paid invoice
+ * refuses first. Pinned by MoneyPathsTakeTheirLocksInOneOrderTest, and raced
+ * across two processes by ARefundAndASettlementDoNotDeadlockTest and
+ * ARenewalAndAPlanChangeDoNotDeadlockTest.
  *
  * What it does not do: claw back. A wallet credit the customer has already
  * spent on another invoice stays spent; what this prevents is the same money

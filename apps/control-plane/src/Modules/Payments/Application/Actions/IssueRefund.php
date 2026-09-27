@@ -41,8 +41,10 @@ use Throwable;
  * credited to the wallet against it is not refundable again). This used to
  * take the invoice first, and a refund of a capture RecordPaymentCapture had
  * already attached to its invoice deadlocked against that capture's
- * settlement (N-2, measured across two processes: 40P01, the refund made at
- * the provider and its recording rolled back).
+ * settlement (N-2, measured across two processes: 40P01, with the settlement
+ * killed - its queued retries converged, so no money was lost, but a money
+ * path failed for no reason but lock order). The refund's own lock is taken
+ * before the provider is asked, so a refund killed here has asked nothing.
  *
  * The provider call happens *after* the lock is released, with the refund row
  * already written as pending. That ordering is the reason the balance holds: a

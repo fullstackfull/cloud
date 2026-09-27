@@ -9,6 +9,7 @@ use DateTimeImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Billing\Application\Actions\ReturnWhatAnInvoiceStillHolds;
+use Lynomia\Modules\Billing\Application\Queries\LockAnInvoiceWhileOpen;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
@@ -71,11 +72,19 @@ final readonly class RenewSubscription
              * subscription; the invoice is locked here first, before the
              * subscription, so a renewal and an operator's void of the same
              * invoice take the two rows in the same order.
+             *
+             * Locked only while it is still open (LockAnInvoiceWhileOpen): a
+             * row paid in the meantime is left unlocked. Found open by an unlocked read and then locked by its id,
+             * an invoice paid in between was held here as a paid invoice
+             * while this waited for the subscription - and ApplyPlanChange,
+             * holding the subscription, waits for the paid invoices a
+             * downgrade credit draws on: a deadlock, measured across processes
+             * (the round-four verifier's dl.sh; ARenewalAndAPlanChangeDoNotDeadlockTest).
              */
             $lapsing = $this->unpaid->openInvoiceOf($subscription);
 
             if ($lapsing !== null) {
-                Invoice::query()->lockForUpdate()->find($lapsing->getKey());
+                LockAnInvoiceWhileOpen::take((string) $lapsing->getKey());
             }
 
             /** @var Subscription $locked */
