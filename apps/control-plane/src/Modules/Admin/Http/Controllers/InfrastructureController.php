@@ -154,7 +154,7 @@ final class InfrastructureController
             'last_synced_at' => $node->last_synced_at?->toIso8601String(),
             // Whether the node's accounts are being compared with the panel's
             // at all: when they last were, when the sweep last asked, and why
-            // that attempt could not be read, if it could not.
+            // that attempt concluded nothing, if it did not.
             'reconciled_at' => $node->reconciled_at?->toIso8601String(),
             'reconcile_attempted_at' => $node->reconcile_attempted_at?->toIso8601String(),
             'reconcile_error' => $node->reconcile_error,

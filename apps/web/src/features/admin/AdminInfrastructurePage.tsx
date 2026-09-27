@@ -148,10 +148,12 @@ export function AdminInfrastructurePage() {
           <StatusBadge status={node.status} />
           {node.reconcile_error === null ? null : (
             /*
-              A node whose account listing could not be read is not compared
-              with the platform's records at all: nothing on it is reported
-              missing, and nothing is reported as fine either. The reason is
-              the adapter's, in its words.
+              A node whose last reconciliation concluded nothing — its account
+              listing could not be read, or comparing it failed — is not
+              compared with the platform's records at all: nothing on it is
+              reported missing, and nothing is reported as fine either. The
+              reason is the adapter's refusal in its words, or the sweep's
+              sentence naming the failure.
             */
             <span title={node.reconcile_error}>
               <Badge tone="warning">{t('admin.infrastructure.notReconciled')}</Badge>

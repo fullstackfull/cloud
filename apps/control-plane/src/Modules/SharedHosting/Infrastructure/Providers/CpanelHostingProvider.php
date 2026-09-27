@@ -245,22 +245,47 @@ final class CpanelHostingProvider implements HostingProvider
     {
         $data = $this->call($node, 'listaccts', [], 'list_accounts');
 
-        // Typed as what the panel can actually send rather than as what it
-        // should: the per-row check below is the only thing that makes each
-        // element an array.
-        $rows = $this->asArray($this->asArray($data)['acct'] ?? []);
+        /*
+         * A listing is `data.acct` holding a list of rows, each one account
+         * whose `user` is one name ({@see ListedAccountName}, the rule the
+         * DirectAdmin adapter reads by too). An empty list is a node with no
+         * accounts, and is read as one.
+         *
+         * Anything else is refused whole, as the DirectAdmin listing is. This
+         * used to read through `?? []` and skip what it could not use: a
+         * body with no `data`, a `data` with no `acct`, `acct` as one object,
+         * rows keyed by something other than `user`, rows that were bare
+         * strings — each came back as a node with no accounts, and a row
+         * whose `user` held two names joined came back as one account nobody
+         * has. ReconcileHostingNodes then recorded every live account on the
+         * node as Critical missing_at_provider drift and alerted, from a body
+         * that listed nobody the adapter could read. A refused listing
+         * concludes nothing, and the sweep says so on the node.
+         */
+        $body = $this->asArray($data);
+        $rows = $body['acct'] ?? null;
+
+        if (! is_array($rows) || ! array_is_list($rows)) {
+            throw HostingProviderException::unexpectedResponse(
+                self::NAME,
+                'list_accounts',
+                'the response carries no list of accounts under data.acct, so it cannot be read as the accounts on the node',
+                ['node' => $node->hostname, 'function' => 'listaccts'],
+            );
+        }
 
         $accounts = [];
 
         foreach ($rows as $row) {
-            if (! is_array($row)) {
-                continue;
-            }
+            $username = is_array($row) ? ListedAccountName::from($row['user'] ?? null) : null;
 
-            $username = $this->stringOrNull($row['user'] ?? null);
-
-            if ($username === null) {
-                continue;
+            if (! is_array($row) || $username === null) {
+                throw HostingProviderException::unexpectedResponse(
+                    self::NAME,
+                    'list_accounts',
+                    'a row of the account listing does not name one account in its user field, so the listing cannot be read as the accounts on the node',
+                    ['node' => $node->hostname, 'function' => 'listaccts'],
+                );
             }
 
             $accounts[] = new RemoteAccount(

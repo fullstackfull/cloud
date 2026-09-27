@@ -361,8 +361,9 @@ final class DirectAdminHostingProvider implements HostingProvider
          * element instead is the silent under-reading this exists to stop.
          *
          * What is refused is the ambiguous, not the unusual
-         * ({@see self::isOneName()}). A single token — `Admin`, `web_1`,
-         * `a.b`, a name longer than the platform would make — is read as that
+         * ({@see ListedAccountName}, the rule both adapters read by). A
+         * single token — `Admin`, `web_1`, `a.b`, a name longer than the
+         * platform would make, or than any column once held — is read as that
          * account; if the platform does not know it, reconciliation reports
          * it as drift, which an operator sees. Refused, it would instead make
          * the node's whole listing unreadable over one odd name. A refusal
@@ -384,13 +385,13 @@ final class DirectAdminHostingProvider implements HostingProvider
         $names = [];
 
         foreach (is_array($list) ? $list : [] as $element) {
-            $name = is_string($element) ? trim($element) : null;
-
-            if ($name === '') {
+            if (is_string($element) && trim($element) === '') {
                 continue;
             }
 
-            if ($name === null || ! self::isOneName($name)) {
+            $name = ListedAccountName::from($element);
+
+            if ($name === null) {
                 throw HostingProviderException::unexpectedResponse(
                     self::NAME,
                     'list_accounts',
@@ -409,27 +410,6 @@ final class DirectAdminHostingProvider implements HostingProvider
             ),
             $names,
         );
-    }
-
-    /**
-     * Whether a trimmed, non-empty listed element is one name rather than
-     * several run together: it holds no whitespace, no control character, and
-     * none of the separators a list could be joined with (`,` `;` `|`), and
-     * it is valid UTF-8 — bytes that cannot be read as text cannot be shown
-     * to hold none of those either.
-     *
-     * Deliberately not a rule about what a DirectAdmin account name may be.
-     * Nobody here has established that, and the names the platform itself
-     * makes are not a bound on what a panel holds: an operator makes accounts
-     * by hand, and a requested username is passed through to the panel as
-     * asked. Case, length, digits and punctuation other than those separators
-     * are all read as a name, and the comparison decides whether it is one
-     * the platform knows.
-     */
-    private static function isOneName(string $name): bool
-    {
-        return preg_match('/[\s\p{Cc},;|]/u', $name) !== 1
-            && preg_match('//u', $name) === 1;
     }
 
     public function nodeHealth(HostingNode $node): NodeHealth

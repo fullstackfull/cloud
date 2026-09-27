@@ -104,8 +104,12 @@ final readonly class RecordDrift
             ]);
 
             // Only the first sighting is announced; the row's occurrence count
-            // carries the rest.
-            event(new DriftRecorded(
+            // carries the rest. Announced once the row is committed, by this
+            // transaction or by the caller's: a caller that rolls back what it
+            // recorded — the hosting sweep does, for a node whose comparison
+            // failed part-way — must not leave an alert about a drift row
+            // that does not exist.
+            $recorded = new DriftRecorded(
                 driftId: (string) $drift->getKey(),
                 provider: $provider,
                 resourceType: $resourceType,
@@ -113,7 +117,11 @@ final readonly class RecordDrift
                 severity: $severity,
                 serviceId: $serviceId,
                 providerReference: $providerReference,
-            ));
+            );
+
+            DB::afterCommit(static function () use ($recorded): void {
+                event($recorded);
+            });
 
             return $drift;
         });
