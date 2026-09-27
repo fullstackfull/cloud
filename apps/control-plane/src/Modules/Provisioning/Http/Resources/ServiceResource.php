@@ -125,7 +125,9 @@ final class ServiceResource extends JsonResource
      * What the customer bought, without what an operator writes beside it.
      *
      * The service's `resources` column carries the entitlement snapshotted at
-     * purchase, and ProvisionOrderedService adds `placement_blocked_reason` to
+     * purchase - no plan change or resize rewrites it; what a VPS runs now is
+     * its machine's row, published by the machine's own resource and read by
+     * the plan-change quote - and ProvisionOrderedService adds `placement_blocked_reason` to
      * the same column when it cannot decide where the service goes. The row
      * itself is not hidden — a blocked service still appears here, still with
      * its honest state — but the reason is for the operator surface, which

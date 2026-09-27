@@ -44,10 +44,13 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  * order is asked again when it is paid, and by the settlement of that
  * payment ({@see refusalForTheChange()}), which returns a change it refuses.
  * What it asks, per product, is the following - part of what
- * {@see QueuePlanChangeAtProvider} needs to queue the change (a hosting
- * service with no account, on which it also queues nothing, is not asked
- * about), and for a VPS the capacity question the resize itself asks after
- * it is queued:
+ * {@see QueuePlanChangeAtProvider} needs to queue the change, and for a VPS
+ * the capacity question the resize itself asks after it is queued. A hosting
+ * service with no account yet is asked all the same, although nothing is
+ * queued on it: the plan it moves onto is the plan its account will be built
+ * on. (This used to say such a service was not asked; it always was - the
+ * re-audit after round six.) A change of shape is measured from what the
+ * service runs now (whatTheServiceRuns()), the shape the resize reads:
  *
  *  - Shared Hosting: the target plan resolves to exactly one package on sale
  *    ({@see HostingPackageForPlan}) - the answer checkout's placement is given
@@ -58,7 +61,8 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  *  - VPS, when the shape changes: the service has a machine to resize, and
  *    its node and pool can hold its growth - the refusal the resize itself
  *    makes before it grows the machine, asked as a dry run
- *    (growthTheNodeCannotHold()). The target plan's
+ *    (growthTheNodeCannotHold()); a target no larger than the machine in any
+ *    dimension is not asked, as the resize does not ask it. The target plan's
  *    placement (cluster, address pool, image, a node in
  *    service), which checkout asks before building a new machine, is not
  *    asked: a resize is applied to the machine where it already runs and
@@ -198,23 +202,61 @@ final readonly class PlanChangeDelivery
     }
 
     /**
-     * What the service ran before this change: its own recorded allocation
-     * where it has one (QuotePlanChange's rule), otherwise the plan the change
-     * left - not the subscription's plan, which is already the target.
+     * What the service ran before this change - it is not delivered yet, so
+     * what it runs now (whatTheServiceRuns()) - falling back to the plan the
+     * change left, not the subscription's plan, which is already the target.
      */
     private function runningBefore(Subscription $subscription, PlanChange $change): PlanResources
     {
         $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
+
+        /** @var Plan|null $from */
+        $from = $change->from_plan_id === null ? null : Plan::query()->find($change->from_plan_id);
+
+        return $this->whatTheServiceRuns($service, $from);
+    }
+
+    /**
+     * What the service runs now: the one answer the quote
+     * ({@see QuotePlanChange}) and the delivery (refusalForTheChange())
+     * measure a change of shape from.
+     *
+     *  - A VPS with a machine: the machine's row (virtual_machines) - the
+     *    shape the hypervisor confirmed, written by every resize that
+     *    completes (ResizeVpsHandler), and the shape the resize itself reads
+     *    to decide what grows and whether the disk would shrink.
+     *  - Otherwise the service's own recorded allocation where it has one,
+     *    and else the plan given (the subscription's, or the one the change
+     *    left).
+     *
+     * `services.resources` is what was bought, snapshotted when the service
+     * was: no resize writes it. Read as what the machine is now it went wrong
+     * after the first resize (F-07, the re-audit after round six): an upgrade
+     * back to the bought shape read as no change of shape and was sold on a
+     * node that could not hold it; a downgrade after a delivered upgrade read
+     * as no change, was credited and queued no resize, and the machine stayed
+     * large at the small plan's price; a downgrade onto a disk smaller than
+     * the machine had grown to got past the disk-shrink refusal and was
+     * credited before the resize refused it.
+     */
+    public function whatTheServiceRuns(?Service $service, ?Plan $otherwise): PlanResources
+    {
+        if ($service !== null && $service->kind === ProductKind::Vps->value) {
+            /** @var VirtualMachine|null $machine */
+            $machine = VirtualMachine::query()->where('service_id', $service->getKey())->first();
+
+            if ($machine !== null) {
+                return new PlanResources(vcpu: $machine->vcpu, memoryMib: $machine->memory_mib, diskGib: $machine->disk_gib);
+            }
+        }
+
         $fromService = $service === null ? new PlanResources : PlanResources::fromArray($service->resources ?? []);
 
         if ($fromService->vcpu !== null || $fromService->memoryMib !== null || $fromService->diskGib !== null) {
             return $fromService;
         }
 
-        /** @var Plan|null $from */
-        $from = $change->from_plan_id === null ? null : Plan::query()->find($change->from_plan_id);
-
-        return $from === null ? new PlanResources : PlanResources::fromArray($from->resources ?? []);
+        return $otherwise === null ? new PlanResources : PlanResources::fromArray($otherwise->resources ?? []);
     }
 
     /**

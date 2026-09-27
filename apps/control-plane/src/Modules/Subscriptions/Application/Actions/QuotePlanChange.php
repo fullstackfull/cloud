@@ -386,25 +386,17 @@ final readonly class QuotePlanChange
 
     /**
      * What the customer is actually running, which is not always what their
-     * plan says.
-     *
-     * The service's own recorded allocation wins where it has one: a machine
-     * that was resized by an operator, or built before the plan was edited, is
-     * the thing a disk-shrink check has to compare against. Falling back to
-     * the plan would let a downgrade past that truncates a disk the plan does
-     * not know about.
+     * plan says: PlanChangeDelivery::whatTheServiceRuns(), the answer the
+     * delivery of the change measures from too. For a VPS that is its machine
+     * as the hypervisor confirmed it - a machine resized by a plan change or
+     * an operator, or built before the plan was edited, is the thing a
+     * disk-shrink check and a capacity question have to measure from. Falling
+     * back to the plan, or to the shape the service was bought at, let a
+     * downgrade past that truncates a disk neither knows about.
      */
     private function currentResources(Subscription $subscription, ?Service $service): PlanResources
     {
-        $fromService = $service === null ? new PlanResources : PlanResources::fromArray($service->resources);
-
-        if ($fromService->vcpu !== null || $fromService->memoryMib !== null || $fromService->diskGib !== null) {
-            return $fromService;
-        }
-
-        return $subscription->plan === null
-            ? new PlanResources
-            : PlanResources::fromArray($subscription->plan->resources);
+        return $this->delivery->whatTheServiceRuns($service, $subscription->plan);
     }
 
     private function serviceFor(Subscription $subscription): ?Service

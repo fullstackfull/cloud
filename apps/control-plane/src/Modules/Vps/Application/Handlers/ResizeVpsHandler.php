@@ -63,7 +63,10 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  *    node and pool. A growth the node or pool cannot hold is refused there -
  *    FailureClass Capacity, code `compute.node_capacity_exceeded` - and
  *    nothing is grown or committed. Only what grows is asked about: a shrink
- *    is never refused (NodeCapacityPolicy::assessGrowth());
+ *    is never refused (NodeCapacityPolicy::assessGrowth()), and a target no
+ *    larger than the machine in any dimension is recorded without asking
+ *    (MachineCommitment::grows()) - a machine with no live commitment is
+ *    committed whole, which read a pure shrink of it as growth (N3);
  *  - once the hypervisor has confirmed and the machine row holds the shape
  *    read back, the commitment is set to the machine row as read under its
  *    locks, which is where a shrink gives its difference back;
@@ -195,7 +198,13 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
          * asks about too).
          */
         try {
-            $this->commitment->restate($machine, $node, $this->commitment->ceiling($machine, $targetVcpu, $targetMemory, $targetDisk), refuse: true);
+            $this->commitment->restate(
+                $machine,
+                $node,
+                $this->commitment->ceiling($machine, $targetVcpu, $targetMemory, $targetDisk),
+                // A shrink is recorded, never refused (MachineCommitment::grows()).
+                refuse: $this->commitment->grows($machine, $targetVcpu, $targetMemory, $targetDisk),
+            );
         } catch (NodeCapacityExceededException $e) {
             // See the class docblock for what this comes to for a paid upgrade.
             return ProvisioningResult::failed(
