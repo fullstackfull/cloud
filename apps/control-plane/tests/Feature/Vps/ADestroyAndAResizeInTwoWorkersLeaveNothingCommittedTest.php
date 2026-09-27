@@ -83,7 +83,8 @@ final class ADestroyAndAResizeInTwoWorkersLeaveNothingCommittedTest extends Test
         $settle = null;
         $blocked = null;
         DB::connection()->beforeExecuting(function (string $query) use (&$settle, &$blocked, $machine): void {
-            if ($settle !== null || ! str_starts_with($query, 'delete from "virtual_machines"')) {
+            // The destroy's delete of the machine row (matched, not run).
+            if ($settle !== null || preg_match('/^delete from "virtual_machines"/', $query) !== 1) {
                 return;
             }
 
