@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Subscriptions\Application\Listeners;
 
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
@@ -16,6 +17,7 @@ use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\QueuePlanChangeAtProvider;
+use Lynomia\Modules\Subscriptions\Application\Actions\ReturnAnUpgradeTheEndPrevented;
 use Lynomia\Modules\Subscriptions\Domain\ValueObjects\PlanResources;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
@@ -107,6 +109,7 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
 
     public function __construct(
         private readonly QueuePlanChangeAtProvider $queueAtProvider,
+        private readonly ReturnAnUpgradeTheEndPrevented $returnAnUpgrade,
     ) {}
 
     public function handle(InvoicePaid $event): void
@@ -134,31 +137,57 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
             return;
         }
 
-        $subscription = Subscription::query()->find($change->subscription_id);
+        /*
+         * Decided under the subscription's lock, the lock the ending takes
+         * (WindUpAnEndedSubscription, through `$end`), so the two serialise:
+         * either this runs while the subscription is live and records the
+         * change delivered - and the wind-up keeps the money - or it runs
+         * after the end and returns it (hasEnded()). Read without the lock,
+         * a settlement and an ending could each see the other not yet done.
+         * The subscription, then (on the return) the paid invoice and the
+         * wallet: the order WhatAnInvoiceStillHolds declares for a paid
+         * invoice taken after a subscription.
+         */
+        DB::transaction(function () use ($change, $event): void {
+            /** @var Subscription|null $subscription */
+            $subscription = Subscription::query()->lockForUpdate()->find($change->subscription_id);
 
-        if ($subscription === null || $change->to_plan_id === null) {
-            Log::warning('A paid proration invoice names a subscription or a plan that no longer exists.', [
-                'invoice_id' => $event->invoiceId,
-                'subscription_id' => $change->subscription_id,
-            ]);
+            if ($subscription === null || $change->to_plan_id === null) {
+                Log::warning('A paid proration invoice names a subscription or a plan that no longer exists.', [
+                    'invoice_id' => $event->invoiceId,
+                    'subscription_id' => $change->subscription_id,
+                ]);
 
-            return;
-        }
+                return;
+            }
 
-        if ($this->hasEnded($subscription, $event)) {
-            return;
-        }
+            if ($this->hasEnded($subscription, $event)) {
+                return;
+            }
 
-        if ($this->aLaterChangeHasBeenSettled($change)) {
-            return;
-        }
+            /*
+             * Delivered: the settlement was heard while the subscription was
+             * live, whatever it queues below - a resize, nothing because a
+             * later change already decided the machine, or nothing because
+             * there was nothing to resize. What the end does not return
+             * (ReturnAnUpgradeTheEndPrevented).
+             */
+            PlanChange::query()
+                ->whereKey($change->getKey())
+                ->whereNull('delivered_at')
+                ->update(['delivered_at' => now()]);
 
-        $this->queueAtProvider->execute(
-            subscription: $subscription,
-            planId: $change->to_plan_id,
-            resources: PlanResources::fromArray($change->resources),
-            idempotencyKey: 'invoice:'.$event->invoiceId,
-        );
+            if ($this->aLaterChangeHasBeenSettled($change)) {
+                return;
+            }
+
+            $this->queueAtProvider->execute(
+                subscription: $subscription,
+                planId: (string) $change->to_plan_id,
+                resources: PlanResources::fromArray($change->resources),
+                idempotencyKey: 'invoice:'.$event->invoiceId,
+            );
+        });
     }
 
     /**
@@ -168,9 +197,13 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
      * so this is reached by an upgrade paid in the moment before the end,
      * whose settlement is heard after it. The machine it would have grown is
      * being switched off or is already gone; resizing it is work at a
-     * provider for a customer who will not have it. What the upgrade was paid
-     * for the rest of the period is treated as the rest of the period is on an
-     * immediate cancellation: kept, and an operator's to refund.
+     * provider for a customer who will not have it. And the upgrade, paid for
+     * and never delivered, is not kept: what its invoice still holds goes back
+     * to the wallet, recorded against the invoice
+     * ({@see ReturnAnUpgradeTheEndPrevented}, OA-3). The ended subscription's
+     * wind-up asks the same for an upgrade it saw paid; between them it is
+     * credited once. (This used to say the money was "kept, and an
+     * operator's to refund", with only this log line to surface it.)
      */
     private function hasEnded(Subscription $subscription, InvoicePaid $event): bool
     {
@@ -178,10 +211,13 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
             return false;
         }
 
+        $returned = $this->returnAnUpgrade->execute($event->invoiceId);
+
         Log::warning('A plan change was paid for a subscription that has since ended; nothing was resized.', [
             'invoice_id' => $event->invoiceId,
             'subscription_id' => (string) $subscription->getKey(),
             'status' => $subscription->status->value,
+            'returned_to_wallet_minor' => $returned,
         ]);
 
         return true;

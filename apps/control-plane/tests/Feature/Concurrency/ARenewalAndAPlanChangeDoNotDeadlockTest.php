@@ -7,10 +7,13 @@ namespace Tests\Feature\Concurrency;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
+use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
+use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
@@ -27,6 +30,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
+use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Component\Process\Process;
 use Tests\Support\LeavesNothingCommitted;
@@ -158,6 +162,216 @@ final class ARenewalAndAPlanChangeDoNotDeadlockTest extends TestCase
             CarbonImmutable::instance(Subscription::query()->findOrFail($fixture['sub'])->current_period_end)->equalTo($fixture['period_end']),
             'The renewal advanced the period in the attempt it should have given up.',
         );
+    }
+
+    #[Test]
+    public function a_lapse_that_credits_the_wallet_and_a_sibling_downgrading_onto_the_plan_it_restores_both_complete(): void
+    {
+        $this->assertALapseAndASiblingDowngradeBothComplete(walletExists: true);
+    }
+
+    #[Test]
+    public function the_same_when_the_lapse_opens_the_customers_first_wallet(): void
+    {
+        // The wallet row does not exist yet: the lapse inserts it, and the
+        // downgrade's own insert of it waits on that - the same cycle, met on
+        // the wallets unique index rather than on the row.
+        $this->assertALapseAndASiblingDowngradeBothComplete(walletExists: false);
+    }
+
+    private function assertALapseAndASiblingDowngradeBothComplete(bool $walletExists): void
+    {
+        /*
+         * OA-1, round four's re-audit (40P01 4/4 in two real processes): the
+         * renewal's lapse of subscription A's part-paid upgrade took the
+         * invoice, A, the wallet (returning what the upgrade held), and then,
+         * voiding it, the plan A goes back to (RestorePlanOnVoidedUpgrade ->
+         * PlanCapacity::lock(small)). The same customer's sibling B,
+         * downgrading onto small, took B, its orders and invoices, the small
+         * plan (claiming the unit), and then the wallet (the downgrade's
+         * credit). Wallet -> plans against plans -> wallet. ApplyPlanChange
+         * now takes the wallet before the plan, the order WhatAnInvoiceStillHolds
+         * declares (the wallet, then plans).
+         *
+         * Deterministic: the renewal is stopped right after it locks the
+         * wallet; the downgrade is let run until it waits on a row lock; the
+         * renewal is then released to void the upgrade and lock the plan.
+         */
+        $fixture = $this->upgradeLeftOpen();
+        $customer = Customer::query()->findOrFail($fixture['customer']);
+
+        // What the lapse returns: a part payment of the upgrade by card.
+        app(SettleInvoice::class)->execute(
+            Invoice::query()->findOrFail($fixture['x']),
+            Transaction::factory()->forCustomer($customer)->amount(Money::ofMinor(1_000, 'KWD'))->create(),
+        );
+
+        if ($walletExists) {
+            app(WalletLedger::class)->walletFor($customer, 'KWD');
+        }
+
+        // The sibling: the same customer, a paid period on a bigger plan.
+        $sibling = $this->paidSubscriptionOn($customer, $this->plan(Product::query()->findOrFail(Plan::query()->findOrFail($fixture['small'])->product_id), 'mid', ['vcpu' => 4, 'memory_mib' => 8192, 'disk_gib' => 160], 30_000));
+
+        DB::select('SELECT pg_advisory_lock(?)', [self::RENEWAL_BARRIER]);
+
+        try {
+            $renew = $this->start(
+                ['renew', $fixture['sub'], $fixture['period_end']->addSecond()->toIso8601String()],
+                ['RACER_PAUSE_AFTER' => '/from "wallets".*for update/i', 'RACER_PAUSE_LOCK' => (string) self::RENEWAL_BARRIER],
+            );
+            $this->waitUntilWaitingOnAdvisory(1);
+
+            $change = $this->start(['change', $sibling, $fixture['small'], $fixture['small_price'], $fixture['user']]);
+            $this->waitUntil(fn (): bool => ! $change->isRunning() || $this->waiting() >= 1, 'The downgrade neither finished nor waited.');
+
+            DB::select('SELECT pg_advisory_unlock(?)', [self::RENEWAL_BARRIER]);
+        } finally {
+            DB::select('SELECT pg_advisory_unlock_all()');
+        }
+
+        $this->assertNoDeadlock([$this->verdict($renew), $this->verdict($change)]);
+
+        // Both did what they were for: the upgrade lapsed and A is back on
+        // small; B moved onto small.
+        $this->assertSame(InvoiceStatus::Void, Invoice::query()->findOrFail($fixture['x'])->status);
+        $this->assertSame($fixture['small'], Subscription::query()->findOrFail($fixture['sub'])->plan_id);
+        $this->assertSame($fixture['small'], Subscription::query()->findOrFail($sibling)->plan_id);
+    }
+
+    #[Test]
+    public function a_cancellation_returning_a_paid_upgrade_and_a_second_capture_on_it_both_complete(): void
+    {
+        /*
+         * The round-five verifier's race: the wind-up of an immediate
+         * cancellation withdrew the subscription's open invoice (crediting
+         * the wallet) and only then returned the paid, undelivered upgrade
+         * (locking its invoice) - wallet, then invoice. SettleInvoice of a
+         * second capture on that upgrade locks the capture, the invoice, then
+         * the wallet (the surplus). 40P01, 3/3 - and worse, the deadlock was
+         * raised inside the wind-up's savepoint, caught and logged, and the
+         * aborted transaction then "committed" as a rollback: the
+         * cancellation reported success, the subscription stayed active and
+         * its open invoice stayed open.
+         *
+         * The wind-up now locks every invoice it will touch before the
+         * wallet, and a concurrency error inside its savepoints is rethrown.
+         *
+         * Deterministic: the settlement is stopped right after it locks the
+         * upgrade's invoice; the cancellation is let run until it waits on a
+         * row lock; the settlement is then released to credit the wallet.
+         */
+        $fixture = $this->upgradeLeftOpen();
+        $customer = Customer::query()->findOrFail($fixture['customer']);
+        $upgrade = Invoice::query()->findOrFail($fixture['x']);
+
+        // The upgrade paid, its settlement not heard (no resize queued).
+        Event::fake([InvoicePaid::class]);
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+
+        // An open invoice of the same subscription, part paid: its withdrawal
+        // credits the wallet.
+        $open = Invoice::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'subscription_id' => $fixture['sub'],
+            'currency' => 'KWD',
+            'status' => InvoiceStatus::Open,
+            'subtotal_minor' => 5_000,
+            'total_minor' => 5_000,
+            'amount_paid_minor' => 0,
+        ]);
+        app(SettleInvoice::class)->execute($open, Transaction::factory()->forCustomer($customer)->amount(Money::ofMinor(1_000, 'KWD'))->create());
+        app(WalletLedger::class)->walletFor($customer, 'KWD');
+
+        // A second capture on the paid upgrade, not yet settled.
+        $second = Transaction::factory()->forCustomer($customer)->amount(Money::ofMinor(500, 'KWD'))->create(['invoice_id' => $upgrade->getKey()]);
+
+        DB::select('SELECT pg_advisory_lock(?)', [self::VOID_BARRIER]);
+
+        try {
+            $settle = $this->start(
+                ['settle', (string) $upgrade->getKey(), (string) $second->getKey()],
+                ['RACER_PAUSE_AFTER' => '/from "invoices".*for update/i', 'RACER_PAUSE_LOCK' => (string) self::VOID_BARRIER],
+            );
+            $this->waitUntilWaitingOnAdvisory(1);
+
+            $cancel = $this->start(['cancel', $fixture['sub']]);
+            $this->waitUntil(fn (): bool => ! $cancel->isRunning() || $this->waiting() >= 1, 'The cancellation neither finished nor waited.');
+
+            DB::select('SELECT pg_advisory_unlock(?)', [self::VOID_BARRIER]);
+        } finally {
+            DB::select('SELECT pg_advisory_unlock_all()');
+        }
+
+        $this->assertNoDeadlock([$this->verdict($cancel), $this->verdict($settle)]);
+
+        // And the cancellation did what it said it did.
+        $this->assertSame(SubscriptionStatus::Cancelled, Subscription::query()->findOrFail($fixture['sub'])->status);
+        $this->assertSame(InvoiceStatus::Void, $open->fresh()?->status);
+
+        // Everything the customer handed over for nothing is in the wallet,
+        // once: the open invoice's 1.000, the upgrade and the second capture.
+        $ledger = app(WalletLedger::class);
+        $this->assertSame(
+            1_000 + $upgrade->fresh()->total_minor + 500,
+            $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits(),
+        );
+    }
+
+    /**
+     * A subscription of the customer's, twenty days into a paid period on the
+     * plan given; its id.
+     *
+     * @param  array{Plan, PlanPrice}  $plan
+     */
+    private function paidSubscriptionOn(Customer $customer, array $plan): string
+    {
+        [$onPlan, $price] = $plan;
+
+        $subscription = Subscription::factory()
+            ->startingOn(CarbonImmutable::now('UTC')->startOfSecond()->subDays(20))
+            ->create([
+                'customer_id' => $customer->getKey(),
+                'plan_id' => $onPlan->getKey(),
+                'currency' => 'KWD',
+                'billing_period' => BillingPeriod::Monthly,
+                'recurring_amount_minor' => $price->recurring_amount_minor,
+            ])
+            ->refresh();
+
+        $period = Invoice::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'subscription_id' => $subscription->getKey(),
+            'currency' => 'KWD',
+            'status' => InvoiceStatus::Open,
+            'subtotal_minor' => $price->recurring_amount_minor,
+            'total_minor' => $price->recurring_amount_minor,
+        ]);
+        InvoiceItem::query()->create([
+            'invoice_id' => $period->getKey(),
+            'kind' => InvoiceItemKind::Plan,
+            'description' => 'Renewal',
+            'quantity' => 1,
+            'unit_amount_minor' => $price->recurring_amount_minor,
+            'total_minor' => $price->recurring_amount_minor,
+            'period_start' => $subscription->current_period_start,
+            'period_end' => $subscription->current_period_end,
+            'subscription_id' => $subscription->getKey(),
+        ]);
+        app(SettleInvoice::class)->execute($period, Transaction::factory()->forCustomer($customer)->amount(Money::ofMinor($price->recurring_amount_minor, 'KWD'))->create());
+
+        $service = Service::factory()->active()->create([
+            'customer_id' => $customer->getKey(),
+            'kind' => 'vps',
+            'subscription_id' => $subscription->getKey(),
+            'resources' => $onPlan->resources,
+        ]);
+        VirtualMachine::factory()
+            ->onNode(ComputeNode::factory()->create(['cluster_id' => ComputeCluster::factory()->create()->getKey()]), 900)
+            ->forService($service)
+            ->create(['vcpu' => $onPlan->resources['vcpu'], 'memory_mib' => $onPlan->resources['memory_mib'], 'disk_gib' => $onPlan->resources['disk_gib']]);
+
+        return (string) $subscription->getKey();
     }
 
     private const int RENEWAL_BARRIER = 424301;

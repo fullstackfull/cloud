@@ -24,7 +24,9 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  *    whose invoice will deliver nothing more: CreditWhatACancelledOrderPaid (a
  *    cancelled order), RenewSubscription (an upgrade that lapsed unpaid) and
  *    WindUpAnEndedSubscription (the open invoices of a subscription that has
- *    ended, which it then voids);
+ *    ended, which it then voids) and ReturnAnUpgradeTheEndPrevented (a paid
+ *    upgrade never delivered because its subscription ended, from the
+ *    wind-up or from the settlement heard after the end - OA-3);
  *  - CompensateUncollectableCapture credits a capture that landed on a
  *    withdrawn invoice, no more than the invoice still holds of it;
  *  - ApplyPlanChange credits a downgrade's unused time to the wallet, drawn on
@@ -73,25 +75,51 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  *      (`transactions`), or the refund (`refunds`);
  *   2. the invoice (`invoices`), several in ascending id order;
  *   3. the subscription (`subscriptions`);
- *   4. the wallet (`wallets`, taken inside WalletLedger).
+ *   4. the wallet (`wallets`, taken inside WalletLedger, or early through
+ *      WalletLedger::lockWalletFor() by a path that must hold it before 5);
+ *   5. plans (`plans`, PlanCapacity::lock(), several in ascending id order).
+ *
+ * Plans come last, after the wallet (OA-1, round four's re-audit): a renewal
+ * lapsing a part-paid upgrade holds the wallet (returning what the upgrade
+ * held) when its void restores the plan the subscription goes back to
+ * (RestorePlanOnVoidedUpgrade locks it), and a sibling subscription of the
+ * same customer downgrading onto that plan used to lock the plan (claiming
+ * the unit) and only then the wallet (its credit) - 40P01 4/4. A downgrade
+ * that will credit the wallet now locks the wallet before it claims the unit;
+ * an upgrade posts nothing to the wallet and takes no wallet lock. Checkout
+ * locks plans and never the wallet.
  *
  * Who takes what: SettleInvoice (capture, invoice, wallet for a surplus);
  * IssueRefund (capture, invoice; the wallet only after both are released);
  * RecordInvoiceRefund (refund, invoice); PayInvoiceFromWallet (invoice,
  * wallet, then a charge row it has just created, which nobody else can hold);
  * CreditWhatACancelledOrderPaid and ReturnWhatAnInvoiceStillHolds (invoice,
- * wallet); VoidInvoice (invoice, then the subscription through
- * RestorePlanOnVoidedUpgrade); RenewSubscription (the lapsing invoice, the
- * subscription, the wallet - and it lapses only an invoice it locked before
+ * wallet); VoidInvoice (invoice, then the subscription and the plan it goes
+ * back to through RestorePlanOnVoidedUpgrade); RenewSubscription (the lapsing
+ * invoice, the subscription, the wallet, then the plan the lapse's void
+ * restores - and it lapses only an invoice it locked before
  * the subscription: an upgrade that appeared after its unlocked read ends the
  * attempt unrenewed, for the next sweep, since locking it after the
- * subscription deadlocked with an operator's void of it); an ended subscription's wind-up (its invoices,
- * the subscription, the wallet); ApplyPlanChange (the subscription, its
- * orders, then the paid invoices a credit draws on, then the wallet - the one
- * invoice lock taken after a subscription, and safe because nothing holding a
- * paid invoice's lock waits for a subscription or an order).
+ * subscription deadlocked with an operator's void of it); an ended
+ * subscription's wind-up (its open invoices, the subscription, its paid
+ * upgrades, then the wallet - every invoice it touches before the wallet);
+ * ResizeOnPlanChangeSettlement (the subscription, then - returning an
+ * upgrade the end prevented - the paid invoice and the wallet);
+ * ApplyPlanChange (the subscription, its orders, then the paid invoices a
+ * credit draws on, then - for a downgrade - the wallet, then the plan it
+ * moves onto).
  *
- * That last claim holds because the renewal and the wind-up, which find an
+ * Those three take an invoice lock after a subscription, against the order
+ * above, and only ever a paid one (ApplyPlanChange: every non-open one it
+ * draws on). That is safe because nothing holding a paid invoice's lock
+ * waits for a subscription or an order. The wind-up used to lock its paid
+ * upgrades only as it returned them, after it had already credited the
+ * wallet for an open invoice: wallet, then invoice, which deadlocked with
+ * SettleInvoice of a second capture on that upgrade (capture, invoice,
+ * wallet) - the round-five verifier's race, now raced in
+ * ARenewalAndAPlanChangeDoNotDeadlockTest.
+ *
+ * That claim holds because the renewal and the wind-up, which find an
  * open invoice by an unlocked read and lock it before the subscription, lock
  * it only while it is still open (LockAnInvoiceWhileOpen): locked by id, an
  * invoice paid in between was held paid while they waited for the

@@ -19,8 +19,10 @@ use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
  * One implementation for the actions that give an invoice's money back
  * because what it bought will not be delivered: a cancelled order's invoice
  * (CreditWhatACancelledOrderPaid), an upgrade that lapsed unpaid
- * (RenewSubscription), and the open invoices of a subscription that has ended
- * (CancelSubscription, EndTheSubscriptionWithItsService). Each used to carry
+ * (RenewSubscription), the open invoices of a subscription that has ended
+ * (CancelSubscription, EndTheSubscriptionWithItsService), and a paid upgrade
+ * that ending prevented from being delivered (ReturnAnUpgradeTheEndPrevented).
+ * Each used to carry
  * its own arithmetic, and the one in the renewal read the document's own
  * `amount_paid - amount_refunded` - blind to a card refund still pending at
  * the provider, and to a wallet refund whose row had not yet been booked onto
@@ -50,7 +52,8 @@ final readonly class ReturnWhatAnInvoiceStillHolds
      *
      * @param  string  $purpose  a short slug naming why, which goes into the ledger key
      * @param  array<string, mixed>  $metadata
-     * @return int the minor units credited by this call; zero when nothing is held
+     * @return int the minor units the ledger posted for this call; zero when nothing is held,
+     *             or when the ledger answered with an entry already posted under the key
      */
     public function toTheWallet(Invoice $invoice, string $purpose, string $description, array $metadata = []): int
     {
@@ -71,7 +74,7 @@ final readonly class ReturnWhatAnInvoiceStillHolds
             /** @var Customer $customer */
             $customer = $locked->customer()->firstOrFail();
 
-            $this->wallet->credit(
+            $entry = $this->wallet->credit(
                 wallet: $this->wallet->walletFor($customer, $locked->currency),
                 amount: Money::ofMinor($heldMinor, $locked->currency),
                 // Stored value the customer handed over that no delivery
@@ -90,7 +93,14 @@ final readonly class ReturnWhatAnInvoiceStillHolds
                 invoiceId: (string) $locked->getKey(),
             );
 
-            return $heldMinor;
+            /*
+             * What the ledger posted for this call. A replay - an entry
+             * already under the key - was posted by something else and moved
+             * nothing now; answering with the computed figure reported money
+             * this call never moved (round four's re-audit). The same rule
+             * ApplyPlanChange's credit follows.
+             */
+            return $entry->wasRecentlyCreated ? $entry->amount_minor : 0;
         });
     }
 

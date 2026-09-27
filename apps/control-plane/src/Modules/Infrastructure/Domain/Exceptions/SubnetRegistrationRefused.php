@@ -75,9 +75,10 @@ final class SubnetRegistrationRefused extends DomainException
 
     /**
      * A block a customer may be given an address from, on no segment a
-     * customer machine may be attached to. The build refuses such an address
-     * permanently (`vps.network_not_attachable`), and no route attaches a
-     * network to a block once it is registered.
+     * customer machine may be attached to. The VPS build never reserves from
+     * such a block (IpAllocator `attachableOnly`), so a pool of them fails
+     * every build as capacity (`ipam.pool_exhausted`), and no route attaches
+     * a network to a block once it is registered.
      */
     public static function becauseNoCustomerSegmentIsNamed(string $block, ?string $network): self
     {

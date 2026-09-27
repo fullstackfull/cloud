@@ -30,10 +30,13 @@ use Lynomia\Modules\Billing\Http\Controllers\SubscriptionController;
  * that hands customers a broken file, and nobody would find out until an
  * accountant asked for one.
  *
- * **Nothing writes to an invoice.** No POST, no PATCH, no void, no refund. An
+ * **No customer route edits an invoice.** No PATCH, no void, no refund. An
  * invoice is frozen once issued, and every figure on it is moved by the
- * settlement, void and refund actions on the platform's own side. Paying one
- * is the Payments module's surface.
+ * settlement, void and refund actions on the platform's own side. The one POST
+ * here is POST {invoice}/wallet-credit, which pays the invoice from the
+ * customer's wallet (PayInvoiceFromWallet) - a settlement, through the same
+ * action as any other, never a write to what the invoice says it bought.
+ * Paying by card is the Payments module's surface.
  *
  * **No renewal route.** RenewSubscription is the worker's entry point and
  * refuses anything the due-for-renewal scope excludes.

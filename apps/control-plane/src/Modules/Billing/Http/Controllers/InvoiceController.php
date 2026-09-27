@@ -116,7 +116,9 @@ final class InvoiceController
             ->with([
                 'items',
                 'transactions' => fn ($query) => $query->orderBy('created_at')->orderBy('id'),
-                'walletCredits' => fn ($query) => $query->orderBy('created_at')->orderBy('id'),
+                // An entry's amount is in its wallet's currency, so the
+                // wallet comes with it (WalletTransaction::amount()).
+                'walletCredits' => fn ($query) => $query->with('wallet')->orderBy('created_at')->orderBy('id'),
             ])
             ->whereKey($invoice)
             ->firstOrFail();
@@ -183,7 +185,7 @@ final class InvoiceController
         );
 
         return InvoiceResource::document(
-            $settlement->invoice->fresh(['items', 'transactions', 'walletCredits'])
+            $settlement->invoice->fresh(['items', 'transactions', 'walletCredits.wallet'])
         )->response();
     }
 

@@ -129,6 +129,78 @@ final class PayingAnInvoiceFromCreditTest extends WalletApiTestCase
     }
 
     #[Test]
+    public function an_invoice_paid_from_credit_twice_is_shown_with_both_entries(): void
+    {
+        /*
+         * Each wallet entry's amount is in its wallet's currency
+         * (WalletTransaction::amount()), and the document loaded the entries
+         * without their wallet: with two, the show route answered 500 outside
+         * production (the lazy-loading guard) and N+1 in it.
+         */
+        [$customer, $owner] = $this->accountWithOwner();
+        $invoice = Invoice::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'currency' => 'KWD',
+            'subtotal_minor' => 10_000,
+            'total_minor' => 10_000,
+        ]);
+
+        foreach (['wallet-pay-part-1', 'wallet-pay-part-2'] as $key) {
+            $this->credit($this->walletFor($customer), 2_000);
+            $this->actingAs($owner)
+                ->withHeaders($this->key($key))
+                ->postJson("/api/v1/invoices/{$invoice->getKey()}/wallet-credit")
+                ->assertOk();
+        }
+
+        $this->actingAs($owner)
+            ->getJson("/api/v1/invoices/{$invoice->getKey()}")
+            ->assertOk()
+            ->assertJsonCount(2, 'data.wallet_credits');
+    }
+
+    #[Test]
+    public function a_payment_made_under_the_raw_key_before_it_was_namespaced_still_replays(): void
+    {
+        /*
+         * Customer keys are posted to the ledger namespaced
+         * (wallet-pay:<customer>:<key>, OX-1). A retry of a payment made
+         * before that, whose entry carries the raw key, is still answered as
+         * the replay it is - for the same invoice only - rather than refused
+         * as unpayable.
+         */
+        [$customer, $owner] = $this->accountWithOwner();
+        $this->credit($this->walletFor($customer), 9_000);
+
+        $invoice = Invoice::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'currency' => 'KWD',
+            'subtotal_minor' => 9_000,
+            'total_minor' => 9_000,
+        ]);
+
+        $this->actingAs($owner)
+            ->withHeaders($this->key('legacy-pay-0001'))
+            ->postJson("/api/v1/invoices/{$invoice->getKey()}/wallet-credit")
+            ->assertOk();
+
+        // The entry as it was written before the namespace.
+        $entry = WalletTransaction::query()->where('invoice_id', $invoice->getKey())->where('kind', WalletTransactionKind::Payment->value)->sole();
+        $metadata = (array) $entry->metadata;
+        $metadata[WalletTransaction::IDEMPOTENCY_METADATA_KEY] = 'legacy-pay-0001';
+        // Rewritten beneath the model, which refuses any update of a ledger entry.
+        DB::table('wallet_transactions')->where('id', $entry->getKey())->update(['metadata' => json_encode($metadata)]);
+
+        $this->actingAs($owner)
+            ->withHeaders($this->key('legacy-pay-0001'))
+            ->postJson("/api/v1/invoices/{$invoice->getKey()}/wallet-credit")
+            ->assertOk()
+            ->assertJsonPath('data.status', InvoiceStatus::Paid->value);
+
+        $this->assertSame(1, WalletTransaction::query()->where('invoice_id', $invoice->getKey())->where('kind', WalletTransactionKind::Payment->value)->count());
+    }
+
+    #[Test]
     public function an_empty_wallet_is_refused_rather_than_settling_nothing(): void
     {
         [$customer, $owner] = $this->accountWithOwner();

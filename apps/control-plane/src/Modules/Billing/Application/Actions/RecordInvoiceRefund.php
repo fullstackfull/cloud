@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Billing\Application\Actions;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
@@ -13,6 +14,7 @@ use Lynomia\Modules\Billing\Domain\Events\InvoiceRefunded;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceRefundExceedsPaymentException;
 use Lynomia\Modules\Billing\Domain\Exceptions\UnsettleablePaymentException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
 use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Shared\Domain\Exceptions\CurrencyMismatchException;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
@@ -184,11 +186,28 @@ final readonly class RecordInvoiceRefund
      * the row, so reading it as "already recorded" made the first and only
      * booking of a real refund return early and left amount_refunded_minor at
      * zero.
+     *
+     * Only a refund that stands as succeeded is booked. A refund the provider
+     * reversed (reported failed or cancelled after it had reported it
+     * succeeded - SettleRefundFromProvider, OA-4) before its queued booking
+     * was heard would otherwise be booked afterwards, and the invoice would
+     * say returned money the provider put back. Read under the refund's lock,
+     * which the reversal takes too.
      */
     private function attach(Refund $refund, Invoice $invoice): bool
     {
         /** @var Refund $locked */
         $locked = Refund::query()->lockForUpdate()->findOrFail($refund->getKey());
+
+        if ($locked->status !== RefundStatus::Succeeded) {
+            Log::warning('A refund no longer standing as succeeded was not booked on its invoice.', [
+                'refund_id' => (string) $locked->getKey(),
+                'invoice_id' => (string) $invoice->getKey(),
+                'status' => $locked->status->value,
+            ]);
+
+            return false;
+        }
 
         if ($locked->recorded_on_invoice_at !== null) {
             if ((string) $locked->invoice_id !== (string) $invoice->getKey()) {

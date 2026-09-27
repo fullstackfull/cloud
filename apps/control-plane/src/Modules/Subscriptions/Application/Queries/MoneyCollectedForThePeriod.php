@@ -163,10 +163,26 @@ final readonly class MoneyCollectedForThePeriod
      * from, in ascending id order, so the credit is sized and recorded under
      * the lock every other action that hands an invoice's money back takes
      * (WhatAnInvoiceStillHolds). ApplyPlanChange calls it after the
-     * subscription and its orders: the one place an invoice is locked after
-     * a subscription, and only a paid-for one - nothing that holds a paid
-     * invoice's lock waits for a subscription or an order, so it cannot close
-     * a cycle (the lock order is written down in WhatAnInvoiceStillHolds).
+     * subscription and its orders, so these are invoice locks taken after a
+     * subscription. What it locks is every invoice invoicesItDrawsOn()
+     * returns: every one that is not open - paid, and also void, refunded,
+     * uncollectible or draft - not only a paid-for one, as this used to say.
+     *
+     * Safe because nothing that holds the lock of a non-open invoice waits for
+     * a subscription or an order, so it cannot close a cycle:
+     *  - paid: VoidInvoice refuses a paid invoice before it would wait for the
+     *    subscription (RestorePlanOnVoidedUpgrade runs only on a void), and
+     *    the renewal and the wind-up lock an invoice only while it is still
+     *    open (LockAnInvoiceWhileOpen); the returns that lock a paid one
+     *    (refunds, ReturnAnUpgradeTheEndPrevented, a reversed refund) take no
+     *    subscription or order after it;
+     *  - void and refunded: terminal (InvoiceStateMachine); nothing
+     *    transitions them, so nothing waits for a subscription behind them -
+     *    the returns that lock one take only the wallet after it;
+     *  - uncollectible: no path on this platform writes the status;
+     *  - draft: IssueInvoice creates it and opens it in one transaction, so
+     *    no other path ever finds one committed.
+     * The lock order is written down in WhatAnInvoiceStillHolds.
      */
     public function lockTheInvoicesItDrawsOn(Subscription $subscription): void
     {

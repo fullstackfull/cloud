@@ -42,20 +42,35 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
  * And a block a customer may be given an address from — expanded for
  * allocation, in a pool whose scope serves customers — must name a network a
  * customer machine may be attached to (Network::acceptsCustomerAttachments()).
- * The VPS build refuses an address on no such segment permanently
- * (`vps.network_not_attachable`), and no route attaches a network to a block
- * once it is registered, so a block registered without one was addresses the
- * allocator handed out and every build then refused — while the preflight
- * counted them. Held space, IPv6 and a management pool's blocks are not
+ * The VPS build reserves only from subnets on a segment a customer machine
+ * can be plugged into (IpAllocator `attachableOnly`), so an address on no
+ * such segment is never handed to it: a pool holding only such blocks fails
+ * every build as capacity (`ipam.pool_exhausted`) until it goes to review;
+ * `vps.network_not_attachable` is left for a network that changed between the
+ * reservation and the build. No route attaches a network to a block once it
+ * is registered, so a block registered without one was addresses no build
+ * could ever use — which the preflight, before round four, counted. Held space, IPv6 and a management pool's blocks are not
  * addresses a customer machine is plugged in at, and name a network or not
- * as the operator likes. The bridge is not required here: a dedicated server
- * is not attached by one, and a network's bridge can be recorded afterwards;
- * `mapping.network` counts only addresses on a segment that has one
- * (IpAllocator::customerAttachableCount()). Nor is the gateway: a dedicated
- * server's install profile can carry a default route of its own. A VPS has
- * nothing but the block's gateway to take one from, so the same count, the
- * VPS build's reservation and the VPS sale pass over a block with none
- * (Subnet::hasGateway()), and no route adds one once it is registered.
+ * as the operator likes. The bridge is deliberately not required here: a
+ * customer pool also serves dedicated servers, which are not attached by one,
+ * and a network's bridge can be recorded afterwards. What stops a VPS being
+ * sold onto a block whose network has none is the sale, not registration:
+ * checkout asks the allocator's own rule (LocalPlacementFeasibility via
+ * IpAllocator::holdsACustomerAttachableHost()) and refuses a pool with no
+ * host on a network that can carry a machine, and `mapping.network` counts
+ * only addresses on a segment that has one
+ * (IpAllocator::customerAttachableCount()). Once an active subnet is on a
+ * network, the bridge cannot be cleared (InventoryController::updateNetwork()),
+ * so an estate that sells cannot lose its bridge underneath the sale. That is
+ * the one thing held there: the network's other fields, and what happens to
+ * the subnets and addresses behind a pool, are checked at the next sale and
+ * the next build, not frozen.
+ *
+ * Nor is the gateway required: a dedicated server's install profile can carry
+ * a default route of its own. A VPS has nothing but the block's gateway to
+ * take one from, so the same count, the VPS build's reservation and the VPS
+ * sale pass over a block with none (Subnet::hasGateway()), and no route adds
+ * one once it is registered.
  *
  * ---------------------------------------------------------------------------
  * No two blocks in one realm share an address

@@ -288,10 +288,13 @@ final readonly class MappingChain
      * this counts is what a build can be given. The operator's subnet route
      * refuses a customer block with no customer network (RegisterSubnet), but
      * it does not require the bridge (a dedicated server is not attached by
-     * one); a network's bridge can be cleared afterwards through the network
-     * route (its `is_active` cannot be switched off while an active subnet
-     * uses it — the route refuses that); and rows written before the subnet
-     * route refused are still there. This count is what reads all three.
+     * one), so a network may have none from the start (the network route
+     * refuses clearing a bridge, or switching `is_active` off, while an active
+     * subnet uses it — round five); and rows written before either route
+     * refused are still there. This count is what reads them. Checkout asks
+     * the allocator the same question (IpAllocator::holdsACustomerAttachableHost(),
+     * from LocalPlacementFeasibility) and refuses to sell a VPS onto a pool
+     * with no host on such a segment.
      *
      * And in a block that names a gateway (Subnet::hasGateway()). The subnet
      * route accepts a customer block with none — a dedicated server's install

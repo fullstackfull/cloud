@@ -21,6 +21,9 @@ enum AuditAction: string
     // Money.
     case InvoiceVoided = 'invoice.voided';
     case PaymentRefunded = 'payment.refunded';
+    // A refund the provider reported failed or cancelled after reporting it
+    // succeeded: un-booked, and the money held again (SettleRefundFromProvider).
+    case RefundReversedByProvider = 'payment.refund_reversed';
 
     /*
      * What the platform sells, and for how much.

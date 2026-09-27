@@ -32,6 +32,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property array<string, mixed> $resources
  * @property ?string $changed_by_user_id
  * @property CarbonImmutable $changed_at
+ * @property ?CarbonImmutable $delivered_at when its settlement was heard while the subscription was live
  */
 final class PlanChange extends Model
 {
@@ -54,6 +55,7 @@ final class PlanChange extends Model
             'from_recurring_amount_minor' => 'integer',
             'resources' => 'array',
             'changed_at' => 'immutable_datetime',
+            'delivered_at' => 'immutable_datetime',
         ];
     }
 }
