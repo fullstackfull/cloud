@@ -108,6 +108,38 @@ final class APlanChangeIsAskedOfTheMachineAsItRunsTest extends BillingApiTestCas
     }
 
     #[Test]
+    public function an_upgrade_back_to_the_bought_shape_accepted_with_room_is_not_payable_once_the_node_fills(): void
+    {
+        /*
+         * The payment asks the change's question again (PlanChangeDelivery::
+         * refusalForTheChange()), measured from what the service ran before
+         * the change. Read from the shape the service was bought at - the
+         * target itself - the growth read as none, and the payment was taken
+         * for a resize the node then refused.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $this->customer = $customer;
+        $small = $this->plan('small', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160], 9_000);
+        $large = $this->plan('large', ['vcpu' => 8, 'memory_mib' => 16384, 'disk_gib' => 160], 90_000);
+        $subscription = $this->paidSubscriptionOn($customer, $large);
+        $this->builtMachineFor($subscription, $large);
+
+        $this->changePlan($user, $subscription, $small, 'r7a-down-00003')->assertOk();
+        $this->runWorker(ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->sole());
+
+        $this->changePlan($user, $subscription, $large, 'r7a-up-000003')->assertOk();
+        /** @var Invoice $invoice */
+        $invoice = Invoice::query()->where('subscription_id', $subscription->id)->where('status', InvoiceStatus::Open->value)->sole();
+
+        DB::table('compute_nodes')->where('id', $this->node->id)->update(['allocated_memory_mib' => 131072 - 4096]);
+
+        $this->actingAs($user)->getJson('/api/v1/invoices/'.$invoice->id)->assertOk()->assertJsonPath('data.is_payable', false);
+        $this->actingAs($user)->postJson('/api/v1/invoices/'.$invoice->id.'/payments')
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'invoice.plan_change_not_deliverable');
+    }
+
+    #[Test]
     public function a_downgrade_after_a_delivered_upgrade_resizes_the_machine(): void
     {
         [$customer, $user] = $this->accountWithOwner();
