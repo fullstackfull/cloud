@@ -565,10 +565,10 @@ final readonly class IpAllocator
      *
      * $assignable names the machine wearing the address, as in commit(), and
      * is written only if a caller passes one. The one caller today, the admin
-     * surface, passes none — for a timed-out VPS there is no machine row to
-     * name, AdoptOrphanResource creating none. What an assignment that names
-     * no machine costs is written down where the operator reaches it, in
-     * IpamQuarantineController.
+     * surface, passes the service's VPS machine row when there is one (an
+     * adopted VPS build has one, adoption recording it) and none otherwise.
+     * What an assignment that names no machine costs is written down where
+     * the operator reaches it, in IpamQuarantineController.
      *
      * @throws QuarantineNotClearableException
      * @throws InvalidIpAddressException

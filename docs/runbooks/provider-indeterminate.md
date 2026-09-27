@@ -146,32 +146,32 @@ tells you what is there now. There is no override.
 platform claims a machine on a name a create under the id was sent with and a
 shape that does not contradict the plan; a machine that took the id after this
 build's create built nothing can carry both. Adopting a stranger's machine,
-and then the DBA step below, hands this customer another customer's machine.
+hands this customer another customer's machine: the adoption records it as
+theirs, to resize, power and destroy.
 
-**Adopt** records the machine and delivers the service. It does **not** create
-the platform's machine record and does **not** commit the address: the
-address the first attempt reserved was quarantined when it timed out, and a
-timeout's quarantine does not expire on a clock — it waits for a person. So
-after adopting, until there is a route for either, a DBA must, in the same
-shift:
+**Adopt** records the machine and delivers the service, and for a VPS build it
+creates the platform's machine record (`virtual_machines`) from what the
+hypervisor reports where it finds the machine — node, shape, power state — so
+the platform can resize, power, console, reinstall, destroy, terminate and
+watch it for drift like any other, and the customer sees it. The adoption's
+record (`result.adoption.capacity`) says `machine_recorded` and the row's id,
+or, when no row was written, `machine_reason`: the machine was not found at
+the hypervisor, the hypervisor could not be asked, or a row already exists.
+With no row written, the platform cannot manage the machine, and nothing on
+the platform writes the row later: an adoption is settled once. Escalate it;
+this runbook has no route for it.
 
-- insert the `virtual_machines` row for the reserved id, so the platform can
-  power, console, reinstall, destroy and watch it for drift; and
-- move the quarantined address to an assignment on that machine.
-
-Until both are done the customer's machine runs with an address the platform
-shows as quarantined and assigned to nothing, and the platform cannot manage
-the machine.
-
-The address has a route of its own now (F-34):
+Adopt does **not** commit the address: the address the first attempt reserved
+was quarantined when it timed out, and a timeout's quarantine does not expire
+on a clock — it waits for a person. Adopt it with its own route (F-34):
 `POST /api/admin/infrastructure/ip-addresses/{address}/adopt`, evidence
 required, which takes it out of quarantine as an assignment for the job's
-customer and service. It is not the second bullet: the assignment it records
-names **no machine**, because there is no machine row to name, and nothing on
-the platform ends an assignment that names no machine — destroying the service
-later does not bring the address back. If the `virtual_machines` row is
-inserted, point that assignment at it (`assignable_type`, `assignable_id`)
-rather than inserting a second one; the live-assignment index refuses a second.
+customer and service, on the service's machine record — so adopt the build
+first. Destroying the machine later brings the address back through
+quarantine. Adopted onto a service with no machine record, the assignment
+names **no machine**, and nothing on the platform ends an assignment that
+names no machine.
+
 The list of timed-out addresses, and the release for one whose machine does not
 exist, are in [ip-exhaustion](ip-exhaustion.md).
 

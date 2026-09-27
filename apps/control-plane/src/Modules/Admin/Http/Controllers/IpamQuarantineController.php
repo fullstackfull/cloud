@@ -11,6 +11,7 @@ use Lynomia\Http\Concerns\ListsAcrossTenants;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
 use Lynomia\Modules\Ipam\Domain\Enums\ReleaseReason;
 use Lynomia\Modules\Ipam\Domain\Services\IpAllocator;
@@ -38,18 +39,21 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
  * the one piece the enum's docblock implies rather than names. It lists only
  * the quarantines an operator may clear.
  *
- * Adoption keeps the address away from the pool for ever by recording the
+ * Adoption keeps the address with the machine by recording the
  * assignment that was already true; release hands it back.
  *
- * There is no way back. `releaseAssignment()` has one production caller,
- * `DestroyVpsHandler`, which finds assignments by
+ * The way back is the machine. `releaseAssignment()` has one production
+ * caller, `DestroyVpsHandler`, which finds assignments by
  * `assignable_type`/`assignable_id`, and so does the only other path that ends
- * one — `holdAssignmentsOf()`, called by `DecommissionDedicatedServer`.
- * Adoption writes neither, because the only surface that calls
- * `adoptQuarantinedAddress()` — this one — names no machine: it takes none,
- * and for a timed-out VPS there is none to take — `AdoptOrphanResource`
- * creates no machine row to point at. An adopted address leaves the pool
- * permanently, and no surface on this platform can return it.
+ * one — `holdAssignmentsOf()`, called by `DecommissionDedicatedServer`. So the
+ * assignment names the service's VPS machine row when it has one — an adopted
+ * VPS build has one since adoption records it
+ * (NodeCapacityFollowsAnAdoption; D7-3, round seven) — and destroying the
+ * machine later brings the address back through quarantine, as any other
+ * machine's does. When the service has no machine row (a build whose
+ * machine the adoption could not find at the hypervisor, or a service that is
+ * not a VPS), the assignment names no machine, and nothing on this platform
+ * ends it: that address leaves the pool permanently.
  *
  * Both acts are assertions about the provider, so the evidence the operator
  * looked at is required and lands in the audit trail, in the same
@@ -129,6 +133,8 @@ final class IpamQuarantineController
             : ProvisioningJob::query()->find($closed->provisioning_job_id);
 
         $serviceId = array_key_exists('service_id', $validated) ? $validated['service_id'] : $job?->service_id;
+        // The machine wearing the address, when the service has one (the class docblock).
+        $machine = $serviceId === null ? null : VirtualMachine::query()->where('service_id', $serviceId)->first();
 
         /** @var IpAssignment $assignment */
         $assignment = app(RecordActAtomically::class)->execute(
@@ -136,6 +142,7 @@ final class IpamQuarantineController
                 address: $found,
                 serviceId: $serviceId,
                 macAddress: $validated['mac_address'] ?? null,
+                assignable: $machine,
             ),
             describe: static fn (IpAssignment $assignment): AuditedAct => new AuditedAct(
                 action: AuditAction::QuarantinedAddressAdopted,

@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Provisioning\Application\Actions;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Provisioning\Application\DTOs\AdoptionLookup;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ReservationsFollowAnAdoption;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
@@ -44,7 +45,10 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
  * transaction, and the adoption's record says where it went. An
  * adoption that left it where the last attempt was placed left one node
  * charged for a machine it does not run and the machine's own node charged
- * nothing (D5, round six).
+ * nothing (D5, round six). For a VPS build the adopted machine's row is
+ * written there too, from what the hypervisor reported (D7-3, round seven).
+ * Where the resource is, is asked of the provider before this transaction
+ * begins, and acted on inside it (lookFor(), then follow()).
  */
 final readonly class AdoptOrphanResource
 {
@@ -60,6 +64,8 @@ final readonly class AdoptOrphanResource
      * @param  string|null  $remoteJobId  The provider's job id, when the orphan was found through one.
      * @param  array<string, mixed>  $evidence  What the operator saw at the provider, kept as the
      *                                          justification for the adoption.
+     * @param  AdoptionLookup|null  $lookup  What lookFor() asked, before the caller's own transaction;
+     *                                       asked here, before this one, when not given.
      *
      * @throws OrphanAdoptionRejectedException
      */
@@ -69,8 +75,21 @@ final readonly class AdoptOrphanResource
         ?string $remoteJobId = null,
         array $evidence = [],
         string $adoptedBy = 'system',
+        ?AdoptionLookup $lookup = null,
     ): ProvisioningJob {
-        $adopted = DB::transaction(function () use ($job, $providerReference, $remoteJobId, $evidence, $adoptedBy): ProvisioningJob {
+        /*
+         * Asked before anything is locked: the provider may be slow, and the
+         * locks below are the ones every other adoption of this reference,
+         * and every worker settling this job, waits on (X7-3, round seven).
+         * A caller that opens a transaction of its own around this one asks
+         * first, before opening it (lookFor()), and passes the answer. The
+         * answer is re-checked under the lock by follow().
+         */
+        $looked = $lookup !== null && $lookup->jobId === (string) $job->getKey() && $lookup->providerReference === $providerReference
+            ? $lookup->answer
+            : $this->lookFor($job, $providerReference)->answer;
+
+        $adopted = DB::transaction(function () use ($job, $providerReference, $remoteJobId, $evidence, $adoptedBy, $looked): ProvisioningJob {
             // Taken before anything is read, so that the check for an existing
             // claimant and the write that becomes one are a single step.
             $this->lockReference($providerReference, $remoteJobId);
@@ -98,7 +117,7 @@ final readonly class AdoptOrphanResource
             ];
             unset($result['error']);
 
-            $capacity = $this->reservations->follow($locked, $providerReference);
+            $capacity = $this->reservations->follow($locked, $providerReference, $looked);
 
             if ($capacity !== []) {
                 $result['adoption']['capacity'] = $capacity;
@@ -141,6 +160,21 @@ final readonly class AdoptOrphanResource
         ));
 
         return $adopted;
+    }
+
+    /**
+     * Asks the provider what the adoption will act on, with nothing locked
+     * and nothing written (ReservationsFollowAnAdoption::lookFor()). For a
+     * caller that wraps execute() in a transaction of its own: asked before
+     * that transaction opens, and passed to execute().
+     */
+    public function lookFor(ProvisioningJob $job, string $providerReference): AdoptionLookup
+    {
+        return new AdoptionLookup(
+            jobId: (string) $job->getKey(),
+            providerReference: $providerReference,
+            answer: $this->reservations->lookFor(ProvisioningJob::query()->find($job->getKey()) ?? $job, $providerReference),
+        );
     }
 
     /**

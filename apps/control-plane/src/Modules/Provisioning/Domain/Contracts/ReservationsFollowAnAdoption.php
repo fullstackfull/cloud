@@ -20,16 +20,32 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
  * "nothing was built" - holds none to move: they are taken again where the
  * resource is, or the resource is charged to nothing. Which rows those are, and
  * how to find where the resource is, belongs to the module that reserved
- * them, as release and quarantine do (ResourceReservationReleaser).
+ * them, as release and quarantine do (ResourceReservationReleaser). So does
+ * what else the module records of a resource that exists: a VPS build's
+ * implementation writes the adopted machine's row as well
+ * (NodeCapacityFollowsAnAdoption).
  */
 interface ReservationsFollowAnAdoption
 {
     /**
+     * Called before the adoption's transaction, with nothing locked, for
+     * whatever follow() needs to ask the provider. It must write nothing.
+     * Asking inside the transaction held the job's row lock and the
+     * adoption's advisory locks for as long as the provider took to answer
+     * (X7-3, round seven). Returns the answer for follow(), or null when it
+     * has nothing to ask about this job. A failure of the platform's own
+     * database is thrown, and the adoption does not happen.
+     */
+    public function lookFor(ProvisioningJob $job, string $providerReference): mixed;
+
+    /**
      * Called inside the adoption's transaction, after its checks, with the
-     * job locked. Returns what it found and did, for the adoption's record
-     * (empty when it has nothing to say about this job).
+     * job locked and lookFor()'s answer, which it re-checks against the rows
+     * as they stand under the lock before acting on it. Returns what it found
+     * and did, for the adoption's record (empty when it has nothing to say
+     * about this job).
      *
      * @return array<string, scalar|null>
      */
-    public function follow(ProvisioningJob $job, string $providerReference): array;
+    public function follow(ProvisioningJob $job, string $providerReference, mixed $looked): array;
 }

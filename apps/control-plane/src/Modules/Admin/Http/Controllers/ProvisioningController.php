@@ -137,12 +137,20 @@ final class ProvisioningController
      * briefly down will succeed on a second run, and until now the only way to
      * ask for one was an UPDATE statement.
      *
-     * What makes it safe is that the action refuses every case where running
-     * the job again would cause a second event rather than repeat an attempt —
-     * a resource already built, a disk already replaced — and there is no flag
-     * here that can override it. The evidence the operator checked is required
-     * and audited, because "I looked at the cluster and it has room now" is the
-     * whole justification for the retry.
+     * What makes it safe is two things, and there is no flag here that can
+     * override either. The action refuses what an attempt wrote down that
+     * running it again would turn into a second event rather than a repeat —
+     * a resource already built, a disk already replaced
+     * (RetryProvisioningJob). And where an attempt may have acted without
+     * writing anything down — a lost answer — the handler that runs again
+     * looks before it acts: a VPS create looks under the identity it reserved
+     * (F-15), and a resize reads the machine's shape from the hypervisor
+     * before it grows it, so a growth that already landed is not applied
+     * twice (D7-2, round seven). That is not every case: a handler that
+     * neither writes down what it did nor looks before acting again is held
+     * by neither, and this endpoint does not claim otherwise. The evidence
+     * the operator checked is required and audited, because "I looked at the
+     * cluster and it has room now" is the whole justification for the retry.
      */
     public function retry(Request $request, string $job): JsonResponse
     {
@@ -266,6 +274,9 @@ final class ProvisioningController
 
         $user = $request->user();
 
+        // The provider is asked before the audit's transaction opens (X7-3).
+        $lookup = app(AdoptOrphanResource::class)->lookFor($found, $validated['provider_reference']);
+
         $adopted = app(RecordActAtomically::class)->execute(
             act: static fn (): ProvisioningJob => app(AdoptOrphanResource::class)->execute(
                 job: $found,
@@ -275,6 +286,7 @@ final class ProvisioningController
                 adoptedBy: $user instanceof User
                     ? sprintf('%s <%s>', $user->name, $user->email)
                     : 'system',
+                lookup: $lookup,
             ),
             describe: static fn (ProvisioningJob $job): AuditedAct => new AuditedAct(
                 action: AuditAction::OrphanAdopted,
