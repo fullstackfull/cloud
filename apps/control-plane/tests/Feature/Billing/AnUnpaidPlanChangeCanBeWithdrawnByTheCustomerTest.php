@@ -114,7 +114,7 @@ final class AnUnpaidPlanChangeCanBeWithdrawnByTheCustomerTest extends TestCase
         $card = $this->actingAs($this->user)->postJson('/api/v1/invoices/'.$invoice->getKey().'/payments')
             ->assertStatus(409)
             ->assertJsonPath('error.code', 'invoice.plan_change_not_deliverable');
-        $this->assertStringContainsString('withdraw', (string) $card->json('error.message'), 'The refusal does not tell the customer the way out.');
+        $this->assertStringContainsString('You can withdraw the change from this invoice', (string) $card->json('error.message'), 'The refusal does not tell the customer the way out.');
 
         $ledger = app(WalletLedger::class);
         $wallet = $ledger->walletFor($this->customer, 'KWD');
