@@ -402,6 +402,39 @@ class Backup extends Model
     }
 
     /**
+     * What names the review this copy read, for a verdict to be bound to.
+     *
+     * The operator's verdict is given hours after they read the review, and
+     * the settling request reads the row afresh, so the compare-and-set in
+     * {@see self::settleReview()} compares against a copy read a moment ago,
+     * not the one the operator looked at. The review list hands out this
+     * token and the verdict carries it back; the settling action compares it
+     * with the row it has locked.
+     *
+     * It is the review's attempt, as {@see self::attemptColumns()} names it
+     * for `needs_review` — which operation was interrupted, and that
+     * operation's handle and start — digested with the row's id. So it tells
+     * two reviews of one archive apart exactly as far as those columns do:
+     * two attempts of one operation, both without a handle, started in the
+     * same stored instant and both lost, would read the same. Null for a row
+     * not in review.
+     */
+    public function reviewToken(): ?string
+    {
+        if ($this->getRawOriginal('state') !== BackupState::NeedsReview->value) {
+            return null;
+        }
+
+        $read = [(string) $this->getKey()];
+
+        foreach ($this->attemptColumns(BackupState::NeedsReview) as $column) {
+            $read[$column] = $this->getRawOriginal($column);
+        }
+
+        return hash('sha256', (string) json_encode($read));
+    }
+
+    /**
      * Whether a restore could actually be started from this archive.
      *
      * The state is not the whole answer, and treating it as one was the

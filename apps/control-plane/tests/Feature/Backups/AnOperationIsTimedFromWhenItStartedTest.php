@@ -257,6 +257,7 @@ final class AnOperationIsTimedFromWhenItStartedTest extends VpsApiTestCase
             ->postJson('/api/admin/backups/'.$old->id.'/resolve', [
                 'verdict' => 'completed',
                 'evidence' => 'qmrestore task log on pve-01 ends TASK OK at 02:14',
+                'review' => $this->reviewOf($old),
             ])
             ->assertOk()
             ->assertJsonPath('data.state', BackupState::Restored->value);
@@ -293,6 +294,7 @@ final class AnOperationIsTimedFromWhenItStartedTest extends VpsApiTestCase
             ->postJson('/api/admin/backups/'.$old->id.'/resolve', [
                 'verdict' => 'failed',
                 'evidence' => 'task was killed by the node reboot at 01:00; disks untouched',
+                'review' => $this->reviewOf($old),
             ])
             ->assertOk()
             ->assertJsonPath('data.state', BackupState::Succeeded->value);
@@ -329,12 +331,12 @@ final class AnOperationIsTimedFromWhenItStartedTest extends VpsApiTestCase
         $operator = $this->operator();
 
         $this->actingAs($operator)
-            ->postJson('/api/admin/backups/'.$readable->id.'/resolve', ['verdict' => 'completed', 'evidence' => 'PBS verify job log: OK'])
+            ->postJson('/api/admin/backups/'.$readable->id.'/resolve', ['verdict' => 'completed', 'evidence' => 'PBS verify job log: OK', 'review' => $this->reviewOf($readable)])
             ->assertOk()
             ->assertJsonPath('data.state', BackupState::Verified->value);
 
         $this->actingAs($operator)
-            ->postJson('/api/admin/backups/'.$unreadable->id.'/resolve', ['verdict' => 'failed', 'evidence' => 'PBS verify: chunk 9ac1 missing'])
+            ->postJson('/api/admin/backups/'.$unreadable->id.'/resolve', ['verdict' => 'failed', 'evidence' => 'PBS verify: chunk 9ac1 missing', 'review' => $this->reviewOf($unreadable)])
             ->assertOk()
             ->assertJsonPath('data.state', BackupState::Failed->value);
 
@@ -384,7 +386,7 @@ final class AnOperationIsTimedFromWhenItStartedTest extends VpsApiTestCase
         $this->assertSame(BackupState::Running, $lost->refresh()->quarantined_from);
 
         $this->actingAs($this->operator())
-            ->postJson('/api/admin/backups/'.$lost->id.'/resolve', ['verdict' => 'completed', 'evidence' => 'I think it worked'])
+            ->postJson('/api/admin/backups/'.$lost->id.'/resolve', ['verdict' => 'completed', 'evidence' => 'I think it worked', 'review' => $this->reviewOf($lost)])
             ->assertStatus(422);
 
         $this->assertSame(BackupState::NeedsReview, $lost->refresh()->state);
@@ -399,7 +401,7 @@ final class AnOperationIsTimedFromWhenItStartedTest extends VpsApiTestCase
         $fine = $this->oldArchiveFor($customer, $machine);
 
         $this->actingAs($this->operator())
-            ->postJson('/api/admin/backups/'.$fine->id.'/resolve', ['verdict' => 'failed', 'evidence' => 'mistake'])
+            ->postJson('/api/admin/backups/'.$fine->id.'/resolve', ['verdict' => 'failed', 'evidence' => 'mistake', 'review' => str_repeat('0', 64)])
             ->assertStatus(422);
 
         $this->assertSame(BackupState::Succeeded, $fine->refresh()->state);
@@ -413,7 +415,7 @@ final class AnOperationIsTimedFromWhenItStartedTest extends VpsApiTestCase
         $this->travel(13)->hours();
         app(ReconcileRunningBackups::class)->execute();
 
-        $body = ['verdict' => 'completed', 'evidence' => 'looked'];
+        $body = ['verdict' => 'completed', 'evidence' => 'looked', 'review' => (string) Backup::query()->findOrFail($old->id)->reviewToken()];
 
         // The queue itself shows archive and task identifiers across every
         // account: the same permission, not merely a login.
@@ -451,10 +453,10 @@ final class AnOperationIsTimedFromWhenItStartedTest extends VpsApiTestCase
         $seenByBoth = Backup::query()->findOrFail($old->id);
         $this->assertSame(BackupState::NeedsReview, $seenByBoth->state);
 
-        app(SettleBackupReview::class)->execute($seenByBoth, completed: true, evidence: 'TASK OK', resolvedBy: 'first');
+        app(SettleBackupReview::class)->execute($seenByBoth, completed: true, evidence: 'TASK OK', resolvedBy: 'first', review: (string) $seenByBoth->reviewToken());
 
         try {
-            app(SettleBackupReview::class)->execute($seenByBoth, completed: false, evidence: 'task killed', resolvedBy: 'second');
+            app(SettleBackupReview::class)->execute($seenByBoth, completed: false, evidence: 'task killed', resolvedBy: 'second', review: (string) $seenByBoth->reviewToken());
             $this->fail('A second verdict on a settled row must be refused.');
         } catch (IllegalBackupTransitionException) {
             // refused
@@ -464,6 +466,53 @@ final class AnOperationIsTimedFromWhenItStartedTest extends VpsApiTestCase
         $this->assertSame(1, AuditEntry::query()->whereIn('action', [AuditAction::BackupOperationConfirmed, AuditAction::BackupOperationFailed])->count());
         $this->assertSame(1, $this->notifications($customer, NotificationType::RestoreCompleted));
         $this->assertSame(0, $this->notifications($customer, NotificationType::RestoreFailed));
+    }
+
+    #[Test]
+    public function a_verdict_on_the_review_an_operator_read_does_not_settle_a_later_one(): void
+    {
+        /*
+         * An operator reads the list and goes to the node. Meanwhile somebody
+         * else settles that review, the customer restores again, and the
+         * second restore is lost in turn: the row is back in review, for an
+         * attempt this operator never looked at. Their verdict — "it
+         * finished", about the first restore — is not about the second, and
+         * the settling request's own fresh read of the row cannot tell.
+         */
+        [$customer, $user, $machine, $old] = $this->restoreStartedOnAnOldArchive();
+        $this->travel(13)->hours();
+        app(ReconcileRunningBackups::class)->execute();
+
+        $seen = $this->reviewOf($old);
+
+        $this->actingAs($this->operator())
+            ->postJson('/api/admin/backups/'.$old->id.'/resolve', ['verdict' => 'failed', 'evidence' => 'task killed by the reboot', 'review' => $seen])
+            ->assertOk();
+
+        $this->actingAs($user)
+            ->postJson($this->restoreUrl($machine, $old), ['confirmation' => $machine->hostname])
+            ->assertStatus(202);
+        $this->travel(13)->hours();
+        app(ReconcileRunningBackups::class)->execute();
+        $this->assertSame(BackupState::NeedsReview, $old->refresh()->state);
+        $audited = AuditEntry::query()->count();
+
+        $this->actingAs($this->operator())
+            ->postJson('/api/admin/backups/'.$old->id.'/resolve', ['verdict' => 'completed', 'evidence' => 'TASK OK on the first restore', 'review' => $seen])
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'backup.review_changed');
+
+        $row = $old->refresh();
+        $this->assertSame(BackupState::NeedsReview, $row->state, 'A verdict on the first restore is not one on the second.');
+        $this->assertNull($row->restored_at);
+        $this->assertSame($audited, AuditEntry::query()->count(), 'Nothing is recorded for a refused verdict.');
+        $this->assertSame(0, $this->notifications($customer, NotificationType::RestoreCompleted));
+
+        // The positive control: the review as it now stands can be settled.
+        $this->actingAs($this->operator())
+            ->postJson('/api/admin/backups/'.$old->id.'/resolve', ['verdict' => 'completed', 'evidence' => 'TASK OK on the second restore', 'review' => $this->reviewOf($old)])
+            ->assertOk()
+            ->assertJsonPath('data.state', BackupState::Restored->value);
     }
 
     #[Test]
@@ -483,7 +532,7 @@ final class AnOperationIsTimedFromWhenItStartedTest extends VpsApiTestCase
         $this->assertSame(BackupState::NeedsReview, $timedOut->refresh()->state);
 
         $this->actingAs($this->operator())
-            ->postJson('/api/admin/backups/'.$timedOut->id.'/resolve', ['verdict' => 'failed', 'evidence' => 'no task on the node'])
+            ->postJson('/api/admin/backups/'.$timedOut->id.'/resolve', ['verdict' => 'failed', 'evidence' => 'no task on the node', 'review' => $this->reviewOf($timedOut)])
             ->assertOk();
 
         $this->travel(1)->hours();
@@ -561,6 +610,25 @@ final class AnOperationIsTimedFromWhenItStartedTest extends VpsApiTestCase
     private function restoreUrl(VirtualMachine $machine, Backup $backup): string
     {
         return '/api/v1/vps/'.$machine->id.'/backups/'.$backup->id.'/restore';
+    }
+
+    /**
+     * The token the review list gives for this row: what an operator's
+     * verdict carries back.
+     */
+    private function reviewOf(Backup $backup): string
+    {
+        $rows = $this->actingAs($this->operator())->getJson('/api/admin/backups/needs-review?per_page=100')->assertOk()->json('data');
+
+        foreach ($rows as $row) {
+            if ($row['id'] === $backup->id) {
+                $this->assertIsString($row['review']);
+
+                return $row['review'];
+            }
+        }
+
+        $this->fail('The row is not on the review list.');
     }
 
     private function operator(Role $role = Role::SuperAdmin): User

@@ -380,6 +380,7 @@ return [
         'restore_confirmation_mismatch' => 'Type the machine\'s hostname exactly to confirm. A restore replaces every disk on it.',
         'restore_in_flight' => 'A restore is already running on this machine. Wait for it to finish.',
         'restore_in_progress' => 'A restore is already running on this machine. Wait for it to finish.',
+        'review_changed' => 'This review has changed since it was read. Read it again before deciding.',
         'still_in_flight' => 'This backup has not finished yet.',
         'symlink_refused' => 'That path is a link and cannot be opened from a backup.',
         'too_many_paths' => 'Too many paths were selected for one restore.',

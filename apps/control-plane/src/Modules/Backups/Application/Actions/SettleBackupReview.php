@@ -9,6 +9,7 @@ use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Backups\Application\Services\BackupAnnouncements;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
+use Lynomia\Modules\Backups\Domain\Exceptions\BackupReviewChangedException;
 use Lynomia\Modules\Backups\Domain\Exceptions\IllegalBackupTransitionException;
 use Lynomia\Modules\Backups\Domain\ValueObjects\BackupNotificationKey;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
@@ -46,6 +47,15 @@ use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
  * same transaction as the state change. The row is locked for the decision, so
  * two operators settling the same row produce one verdict and one refusal.
  *
+ * And the verdict is about the review the person read, not whichever one the
+ * row holds when they answer. The two can differ: hours pass between reading
+ * the list and deciding, and in them the review can be settled by somebody
+ * else, the archive restored again, and that restore lost in turn — the row
+ * back in review, for an attempt this person never looked at. The verdict
+ * carries the review's token ({@see Backup::reviewToken()}), handed out by
+ * the review list, and it is compared with the locked row: a different review
+ * is refused ({@see BackupReviewChangedException}), and nothing is written.
+ *
  * The customer is told the outcome in the same words the reconciler would
  * have used had it seen the task finish, under the same keys, so an outcome
  * the reconciler already announced is not announced twice.
@@ -58,16 +68,27 @@ final readonly class SettleBackupReview
     ) {}
 
     /**
+     * @param  string  $review  the token of the review the verdict is about,
+     *                          as the review list gave it
+     *
      * @throws IllegalBackupTransitionException the row is not in review, or
      *                                          not in a review a verdict can settle
+     * @throws BackupReviewChangedException the row is in a review other than the one read
      */
-    public function execute(Backup $backup, bool $completed, string $evidence, string $resolvedBy): Backup
+    public function execute(Backup $backup, bool $completed, string $evidence, string $resolvedBy, string $review): Backup
     {
         /** @var array{0: Backup, 1: BackupState} $result */
         $result = $this->record->execute(
-            act: static function () use ($backup, $completed): array {
+            act: static function () use ($backup, $completed, $review): array {
                 $locked = Backup::query()->lockForUpdate()->findOrFail($backup->getKey());
                 $interrupted = $locked->quarantined_from;
+                $current = $locked->reviewToken();
+
+                // Not in review at all is settleReview()'s refusal; in a
+                // different review than the one read is this one.
+                if ($current !== null && ! hash_equals($current, $review)) {
+                    throw BackupReviewChangedException::forBackup((string) $locked->getKey());
+                }
 
                 $locked->settleReview($completed, self::attributesFor($interrupted, $completed));
 

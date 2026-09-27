@@ -27,7 +27,9 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
  * The list names which operation each row interrupted, because that decides
  * what a verdict can mean, and says whether this surface can settle it. The
  * verdict itself is {@see SettleBackupReview}: `completed` or `failed`, with
- * the evidence the operator read, audited in the same transaction. Rows it
+ * the evidence the operator read and the `review` token the list gave for
+ * the row, audited in the same transaction; a verdict whose token no longer
+ * names the row's review is refused with `backup.review_changed` (409). Rows it
  * cannot settle — an unaccounted-for backup, a deletion with an unknown
  * outcome, a row from before the platform recorded which operation was
  * interrupted — are listed and refused, not guessed at.
@@ -59,6 +61,9 @@ final class BackupReviewController
             'verification_task_id' => $backup->verification_task_id,
             'verification_started_at' => $backup->verification_started_at?->toIso8601String(),
             'in_review_since' => $backup->updated_at?->toIso8601String(),
+            // What a verdict on this review sends back as `review`, so it
+            // settles this review and no later one.
+            'review' => $backup->reviewToken(),
         ]);
     }
 
@@ -67,6 +72,7 @@ final class BackupReviewController
         $validated = $request->validate([
             'verdict' => ['required', 'string', 'in:completed,failed'],
             'evidence' => ['required', 'string', 'min:3', 'max:1000'],
+            'review' => ['required', 'string', 'size:64'],
         ]);
 
         $found = Backup::query()->findOrFail($backup);
@@ -91,6 +97,7 @@ final class BackupReviewController
                 completed: $validated['verdict'] === 'completed',
                 evidence: $validated['evidence'],
                 resolvedBy: $user instanceof User ? sprintf('%s <%s>', $user->name, $user->email) : 'system',
+                review: $validated['review'],
             );
         } catch (IllegalBackupTransitionException) {
             // Settled by somebody else between the read above and the lock.

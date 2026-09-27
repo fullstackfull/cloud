@@ -2919,6 +2919,7 @@ return [
             'verification_task_id' => ['type' => ['string', 'null']],
             'verification_started_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'in_review_since' => ['$ref' => '#/components/schemas/Timestamp'],
+            'review' => ['type' => 'string', 'description' => 'Names this review: the interrupted operation and its attempt. A verdict sends it back as `review`, and is refused (409 `backup.review_changed`) if the row is in a different review by then.'],
         ],
     ],
     'AdminBackupVerdict' => [
