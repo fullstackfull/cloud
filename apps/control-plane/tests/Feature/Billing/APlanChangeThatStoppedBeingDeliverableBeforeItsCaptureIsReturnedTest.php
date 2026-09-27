@@ -20,6 +20,7 @@ use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Notifications\Application\Actions\RenderNotification;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
+use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
@@ -254,6 +255,48 @@ final class APlanChangeThatStoppedBeingDeliverableBeforeItsCaptureIsReturnedTest
         $this->assertNull($change->fresh()?->returned_at, 'A superseded change was returned.');
         $this->assertNotNull($change->fresh()?->delivered_at);
         $this->assertSame(0, (int) WalletTransaction::query()->where('invoice_id', $invoice->getKey())->sum('amount_minor'));
+    }
+
+    #[Test]
+    public function a_return_to_a_plan_whose_last_unit_sold_in_the_window_is_made_and_the_excess_recorded(): void
+    {
+        /*
+         * F-06's residue (the re-audit after round six): a paid upgrade stops
+         * counting its unit against the plan it left, so that plan can sell
+         * the unit between the payment and the settlement. The return puts
+         * the subscription back on it all the same - it is the plan the
+         * customer already held, and the service never left its shape - so
+         * the plan's stock_limit is exceeded, by at most the change's units.
+         * Not refused, and not silent: the audit entry and the log say by
+         * how much.
+         */
+        $starter = $this->sharedHostingPlan('starter', stockLimit: 1);
+        $this->buySharedHosting($this->customer, $starter);
+        $subscription = Subscription::query()->where('customer_id', $this->customer->getKey())->sole();
+        [$planId, $priceId] = $this->operatorPutsAPlanOnSale($subscription);
+        $package = $this->operatorMapsAPackage($planId);
+
+        $this->changePlan($subscription, $planId, $priceId)->assertOk();
+        /** @var Invoice $invoice */
+        $invoice = Invoice::query()->where('subscription_id', $subscription->getKey())->where('status', InvoiceStatus::Open->value)->sole();
+
+        // Paid, the settlement not yet heard: the unit on the starter plan is given up.
+        Event::fakeFor(fn () => app(SettleInvoice::class)->execute($invoice, Transaction::factory()->forCustomer($this->customer)->amount(Money::ofMinor($invoice->total_minor, 'KWD'))->create()), [InvoicePaid::class]);
+
+        // And sold to another account.
+        $another = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
+        $this->buySharedHosting($another, $starter);
+        $this->assertSame(1, app(PlanCapacity::class)->claimed((string) $starter->getKey()));
+
+        $this->actingAs($this->operator)->deleteJson('/api/admin/catalogue/hosting-packages/'.$package)->assertOk();
+        $this->redeliverTheSettlementOf($invoice->fresh() ?? $invoice);
+
+        $this->assertNotNull(PlanChange::query()->where('proration_invoice_id', $invoice->getKey())->sole()->returned_at);
+        $this->assertSame((string) $starter->getKey(), (string) $subscription->fresh()?->plan_id, 'A return to the plan the customer held was refused for its stock.');
+        $this->assertSame(2, app(PlanCapacity::class)->claimed((string) $starter->getKey()));
+
+        $entry = AuditEntry::query()->where('context->reason', 'plan_change_not_deliverable_at_settlement')->sole();
+        $this->assertSame(1, $entry->context['plan_stock_exceeded_by'] ?? null, 'The plan was put over its stock limit and nothing said so.');
     }
 
     #[Test]

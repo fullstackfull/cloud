@@ -10,6 +10,7 @@ use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Billing\Application\Actions\ReturnWhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
@@ -56,7 +57,10 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *    and no change was made after it. The machine or the account never left
  *    that plan's shape. A paid upgrade stops counting its unit against the
  *    plan it left, so that plan may have sold the unit in the window; the
- *    subscription goes back all the same, because that is what it runs.
+ *    subscription goes back all the same, because that is what it runs. The
+ *    plan's stock_limit is then exceeded, by at most the change's units, and
+ *    the audit entry and the log say by how much (`plan_stock_exceeded_by`,
+ *    stockExceededBy()) - it used to be exceeded silently (F-06's residue).
  *  - The change's record says it was returned and why (`returned_at`,
  *    `return_reason`), which is what keeps it from reading as a paid change
  *    awaiting delivery (PlanChangeDelivery::aPaidChangeAwaitsDelivery()).
@@ -97,6 +101,7 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
         );
 
         $restored = $this->restoreThePlan($locked, $change);
+        $exceededBy = $restored ? $this->stockExceededBy((string) $change->from_plan_id) : 0;
 
         PlanChange::query()
             ->whereKey($change->getKey())
@@ -113,6 +118,7 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
                 'reason' => self::AUDIT_REASON,
                 'refusal' => $refusal,
                 'plan_restored' => $restored,
+                'plan_stock_exceeded_by' => $exceededBy,
                 'proration_invoice_id' => (string) $invoice->getKey(),
                 'plan_change_id' => (string) $change->getKey(),
                 'returned_to_wallet_minor' => $credited,
@@ -125,6 +131,7 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
             'plan_change_id' => (string) $change->getKey(),
             'refusal' => $refusal,
             'plan_restored' => $restored,
+            'plan_stock_exceeded_by' => $exceededBy,
             'returned_to_wallet_minor' => $credited,
         ]);
 
@@ -192,5 +199,30 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
         $locked->save();
 
         return true;
+    }
+
+    /**
+     * By how many units the plan the subscription went back to is now over
+     * its stock_limit (zero when it is not, or has none), read under the
+     * plan's lock (restoreThePlan() took it) and after the move.
+     *
+     * A paid upgrade stops counting its unit against the plan it left
+     * (PlanCapacity::claimed()), so that plan can have sold the unit between
+     * the payment and this settlement. The return is not refused for it: the
+     * customer held that plan, and the machine or account never left its
+     * shape. So the stock may be exceeded, by at most this change's units -
+     * recorded here, for an operator, rather than left silent (F-06's
+     * residue, the re-audit after round six).
+     */
+    private function stockExceededBy(string $planId): int
+    {
+        /** @var Plan|null $plan */
+        $plan = Plan::query()->find($planId);
+
+        if ($plan === null || $plan->stock_limit === null) {
+            return 0;
+        }
+
+        return max(0, $this->capacity->claimed($planId) - (int) $plan->stock_limit);
     }
 }

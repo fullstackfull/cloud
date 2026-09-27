@@ -133,7 +133,13 @@ final readonly class PlanCapacity
      * puts the subscription back, and the plan it goes back to must still
      * have its unit. Released only once the upgrade's invoice is paid; an
      * open plan-change invoice is always the subscription's latest change,
-     * because no other change can be made while one is open.
+     * because no other change can be made while one is open. A void of an
+     * unpaid upgrade - an operator's, a renewal's lapse, the customer's
+     * withdrawal - therefore always finds its unit. A paid change returned at
+     * its settlement (ReturnAPlanChangeNoLongerDeliverable) may not: the plan
+     * can have sold the unit between the payment and the settlement, and the
+     * return is made all the same, exceeding stock_limit by at most the
+     * change's units and recording by how much.
      */
     public function claimed(string $planId, ?Customer $customer = null): int
     {

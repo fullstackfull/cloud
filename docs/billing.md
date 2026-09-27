@@ -86,7 +86,10 @@ payment is opened, and again when the payment's settlement is heard - a card pay
 captured after it was opened, and an operator can withdraw the package or fill the node
 in between. A change the settlement refuses is **returned**, not delivered as nothing:
 what the invoice holds is credited to the customer's wallet against the invoice, the
-subscription goes back to the plan and the recurring amount it came from, the change is
+subscription goes back to the plan and the recurring amount it came from (a paid upgrade
+stops holding its unit of that plan, so the plan may have sold it in the window: the return
+is made all the same, exceeding the plan's `stock_limit` by at most the change's units, and
+the audit entry records by how much as `plan_stock_exceeded_by`), the change is
 recorded `returned_at` with its `return_reason`, and a `subscription.plan_changed` audit
 entry with the reason `plan_change_not_deliverable_at_settlement` names the invoice, the
 refusal and the amount returned (`ReturnAPlanChangeNoLongerDeliverable`), and the customer
