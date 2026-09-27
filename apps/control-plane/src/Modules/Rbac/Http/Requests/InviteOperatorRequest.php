@@ -29,10 +29,12 @@ final class InviteOperatorRequest extends FormRequest
                  * operator", and using it to silently replace somebody's
                  * authority would be a role change nobody asked for. The role
                  * endpoint is where that is done, and it is audited as such.
+                 * Read without a lock; InviteOperator asks again under one and
+                 * refuses with the same words.
                  */
                 function (string $attribute, mixed $value, callable $fail): void {
                     if (is_string($value) && InviteOperator::alreadyAnOperator($value)) {
-                        $fail('That address already belongs to an operator. Change their roles instead.');
+                        $fail(InviteOperator::THE_ADDRESS_IS_AN_OPERATORS);
                     }
                 },
             ],

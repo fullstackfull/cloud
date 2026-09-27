@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Rbac\Application\Actions;
 
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
@@ -86,15 +87,21 @@ use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
  *    role away, and never from themselves, so what this binds is the race:
  *    two super admins demoting each other at once, each checked before the
  *    other's change landed. The locked read below settles it.
- *  - A login that holds no staff role (`rbac.not_an_operator`). This route
- *    takes any login's id, and a staff role given to a customer login is
- *    operator authority for whoever holds that login's credentials — a
+ *  - A login that holds no staff role, answered as a login that does not
+ *    exist (ModelNotFoundException: 404 `resource.not_found`), whatever the
+ *    roles — the controller looks the id up among operators only, and this
+ *    asks again under the row lock. A staff role given to a customer login
+ *    is operator authority for whoever holds that login's credentials — a
  *    password somebody chose at POST /api/v1/register without proving the
  *    mailbox (B1, re-audit after round five). A customer login becomes an
  *    operator only through InviteOperator, which takes those credentials away
- *    first; that is grantToInvited(), and nothing else calls it. An operator
- *    whose staff roles were emptied is, for this rule, a customer login again
- *    (and still holds `customer` if it held it before).
+ *    first; that is grantToInvited(), and nothing else calls it. `roles: []`
+ *    on one used to go through, answer with the customer's name and address
+ *    and record a change that changed nothing (B8-2, re-audit after round
+ *    seven); the refusal of any other set was 422 `rbac.not_an_operator`,
+ *    which told the caller the id was a login. An operator whose staff roles
+ *    were emptied is, for this rule, a customer login again (and still holds
+ *    `customer` if it held it before).
  */
 final readonly class ChangeOperatorRoles
 {
@@ -106,6 +113,7 @@ final readonly class ChangeOperatorRoles
      * @param  list<string>  $roles
      *
      * @throws RoleChangeRefusedException
+     * @throws ModelNotFoundException when the target holds no staff role
      */
     public function execute(User $actor, User $target, array $roles): User
     {
@@ -148,8 +156,8 @@ final readonly class ChangeOperatorRoles
                 /** @var list<string> $before */
                 $before = $locked->getRoleNames()->values()->all();
 
-                if (! $mayPromote && $roles !== [] && ! InviteOperator::holdsAStaffRole($locked)) {
-                    throw RoleChangeRefusedException::becauseTheLoginIsNotAnOperator();
+                if (! $mayPromote && ! InviteOperator::holdsAStaffRole($locked)) {
+                    throw (new ModelNotFoundException)->setModel(User::class, [$locked->getKey()]);
                 }
 
                 $after = self::keepingCustomer($before, $roles);

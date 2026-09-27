@@ -7,10 +7,12 @@ namespace Lynomia\Modules\Rbac\Application\Actions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Identity\Infrastructure\Notifications\OperatorInvitation;
 use Lynomia\Modules\Rbac\Application\DTOs\InvitedOperator;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
@@ -65,10 +67,31 @@ use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
  * grant used to run after the first two had committed, so a refused grant
  * (422 `rbac.role_not_yours_to_grant`) left a user row and an audit entry
  * recording an invitation that never happened. The reset link is sent only
- * after the commit.
+ * after the commit, in the invitation's own mail (OperatorInvitation).
+ *
+ * An address that already holds a staff role is refused, not re-roled — and
+ * that is decided here, inside the transaction, as well as in the request.
+ * The request's check (alreadyAnOperator()) runs before any lock, so a second
+ * invitation of the same address that committed between it and this
+ * transaction used to be promoted as if it were a customer login: its roles
+ * replaced, its credentials revoked and the other invitation's reset token
+ * deleted (B8-1, re-audit after round seven). Invitations of one address now
+ * queue on an advisory lock keyed by the address, and the login is read
+ * after it, under its row lock; one that holds a staff role is refused with
+ * the request's own refusal (THE_ADDRESS_IS_AN_OPERATORS), so the caller
+ * cannot tell which of the two checks answered. The advisory lock also
+ * covers the address with no login yet, which has no row to lock: two
+ * invitations of it used to both find none, and the second failed on the
+ * unique index with a 500.
  */
 final readonly class InviteOperator
 {
+    /**
+     * The refusal of an address that already holds a staff role — the same
+     * words from the request and from the check under the lock.
+     */
+    public const string THE_ADDRESS_IS_AN_OPERATORS = 'That address already belongs to an operator. Change their roles instead.';
+
     public function __construct(
         private RecordActAtomically $record,
         private ChangeOperatorRoles $roles,
@@ -78,6 +101,7 @@ final readonly class InviteOperator
      * @param  list<string>  $roles
      *
      * @throws RoleChangeRefusedException
+     * @throws ValidationException when the address already holds a staff role
      */
     public function execute(User $actor, string $email, string $name, array $roles): InvitedOperator
     {
@@ -85,7 +109,20 @@ final readonly class InviteOperator
 
         [$operator, $promoted] = DB::transaction(fn (): array => $this->inviteAndGrant($actor, $address, $name, $roles));
 
-        Password::sendResetLink(['email' => $operator->email]);
+        /*
+         * The broker's token, in the invitation's own words rather than the
+         * generic reset mail: that one says "if you did not request a password
+         * reset, no further action is required", and a promoted login's owner
+         * has to act — its password, sessions and second factor are gone
+         * already. The same mail for every invitation, so it says nothing
+         * about whether the address had a login.
+         */
+        Password::sendResetLink(
+            ['email' => $operator->email],
+            static function (User $user, string $token): void {
+                $user->notify(new OperatorInvitation($token));
+            },
+        );
 
         return new InvitedOperator($operator->fresh() ?? $operator, $promoted);
     }
@@ -112,8 +149,19 @@ final readonly class InviteOperator
                  * a unique violation and a 500 — for a delegate, a status no
                  * new address produces (B7-2, re-audit after round six).
                  */
+                DB::statement('select pg_advisory_xact_lock(hashtext(?))', ['operator-invitation:'.$address]);
+
                 /** @var User|null $existing */
                 $existing = User::query()->withTrashed()->where('email', $address)->lockForUpdate()->first();
+
+                /*
+                 * The request refused this address if it was an operator's
+                 * when it looked; this is whether it is one now. A deleted
+                 * login is not refused, as there: nobody is its operator.
+                 */
+                if ($existing !== null && ! $existing->trashed() && self::holdsAStaffRole($existing)) {
+                    throw ValidationException::withMessages(['email' => self::THE_ADDRESS_IS_AN_OPERATORS]);
+                }
 
                 if ($existing !== null) {
                     $promoted = true;
@@ -195,9 +243,10 @@ final readonly class InviteOperator
      *    be operator authority nobody granted in this invitation, and beyond
      *    what a delegate may give.
      *
-     * Reached only for a login that holds no staff role: the request refuses
-     * an address that already belongs to an operator, and bringBack() takes
-     * a deleted login's staff roles away before it gets here.
+     * Reached only for a login that holds no staff role: an address that
+     * belongs to an operator is refused under the lock just before (and by
+     * the request before that), and bringBack() takes a deleted login's staff
+     * roles away before it gets here.
      *
      * @return list<string> the permissions the login held directly, now revoked
      */
@@ -273,7 +322,9 @@ final readonly class InviteOperator
      * Whether this address already belongs to somebody who holds a staff role.
      *
      * Used by the request to refuse a second invitation rather than silently
-     * resetting an operator's roles through a creation endpoint.
+     * resetting an operator's roles through a creation endpoint. It reads
+     * without a lock, so it is not the last word: inviteAndGrant() asks again
+     * under the lock.
      */
     public static function alreadyAnOperator(string $email): bool
     {

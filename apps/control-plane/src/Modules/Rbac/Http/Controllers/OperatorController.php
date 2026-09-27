@@ -27,6 +27,10 @@ use Symfony\Component\HttpFoundation\Response;
  * this surface: the list would otherwise grow to the size of the customer base
  * and turn an operator screen into an account directory. A customer who was
  * made an operator holds both, and appears here with its staff roles only.
+ * The role route answers a login that holds no staff role 404, as it answers
+ * an id that does not exist (updateRoles()). The invitation is the one route
+ * here that reaches a customer login, by its address, and it makes it an
+ * operator; store() says which callers are told that the login existed.
  */
 final class OperatorController
 {
@@ -114,7 +118,20 @@ final class OperatorController
         /** @var User $actor */
         $actor = $request->user();
 
-        $target = User::query()->findOrFail($operator);
+        /*
+         * An operator's id, or 404: a login that holds no staff role is
+         * answered exactly as an id that does not exist, whatever `roles`
+         * says, before anything about the request is judged against it.
+         * `roles: []` on a customer login used to answer 200 with the
+         * customer's name, address and creation date, and record a role
+         * change that changed nothing (B8-2, re-audit after round seven);
+         * a role the delegate does not hold used to answer 422 for a
+         * customer login and 404 for an unknown id. ChangeOperatorRoles asks
+         * again under the row lock and answers the same.
+         */
+        $target = User::query()
+            ->whereHas('roles', static fn ($query) => $query->whereIn('name', ChangeOperatorRolesRequest::assignable()))
+            ->findOrFail($operator);
 
         $changed = $change->execute($actor, $target, $request->roles());
 
