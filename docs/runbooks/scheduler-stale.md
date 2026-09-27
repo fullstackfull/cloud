@@ -7,7 +7,9 @@ happening, sweeps not advancing.
 
 A command that keeps failing raises `ScheduledCommandFailing` (warning, to the
 platform channel): it has failed three runs in a row, read from
-`lynomia_scheduled_command_consecutive_failures`, for five minutes. The alert
+`lynomia_scheduled_command_consecutive_failures`, for five minutes. Each failed
+run counts once, so for `hosting:reconcile`, which runs every four hours, the
+alert comes no sooner than eight hours and five minutes after the first failure. The alert
 names the command in its `command` label. A success resets the count, so the
 alert clears on the first run that succeeds.
 
@@ -80,8 +82,11 @@ one that has stopped being invoked: no alert watches that.
 
 Do not silence `ScheduledCommandFailing` for a command you expect to keep
 failing. `hosting:reconcile` and `backups:reconcile` exit non-zero on purpose
-when reconciling a node or a backup failed. For `hosting:reconcile` the node
-list says which (the node's `reconcile_error`). For `backups:reconcile` the
-backup stays in its in-flight state and is named only in the log line "A backup
-could not be reconciled with its provider." with its `backup_id` — it is not in
-the review queue. The alert clears once a run succeeds.
+when reconciling a node, a backup or a file restore failed. For
+`hosting:reconcile` the node list says which (the node's `reconcile_error`).
+For `backups:reconcile` there are two log lines, and either one makes the run
+exit non-zero. A backup stays in its in-flight state and is named only in the
+log line "A backup could not be reconciled with its provider." with its
+`backup_id` — it is not in the review queue. A file restore is named in the log
+line "A file restore could not be reconciled with its provider." with its
+`file_restore_id`. The alert clears once a run succeeds.
