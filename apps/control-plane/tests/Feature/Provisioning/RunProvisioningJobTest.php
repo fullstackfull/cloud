@@ -104,6 +104,11 @@ final class RunProvisioningJobTest extends ProvisioningTestCase
     #[Test]
     public function a_transient_failure_is_retried_with_backoff(): void
     {
+        // Frozen and read once: a clock read again at the assertion has
+        // moved on by however long the attempt took.
+        $this->freezeSecond();
+        $now = now()->toImmutable();
+
         $job = $this->queueJob(['outcome' => 'transient']);
 
         $this->runWorker($job->id);
@@ -114,19 +119,20 @@ final class RunProvisioningJobTest extends ProvisioningTestCase
         $this->assertSame(FailureClass::Transient, $job->failure_class);
         $this->assertSame(1, $job->attempts);
         $this->assertNotNull($job->next_attempt_at);
-        $this->assertEqualsWithDelta(30, now()->diffInSeconds($job->next_attempt_at), 2);
+        $this->assertEquals(30, $now->diffInSeconds($job->next_attempt_at));
 
         Queue::assertPushed(RunProvisioningJob::class, 1);
 
         // The second wait is longer than the first: a provider that is still
         // refusing connections after thirty seconds is not going to be fixed
         // by asking again thirty seconds later.
+        $now = now()->toImmutable();
         $this->runWorker($job->id);
 
         $job = $job->fresh();
         $this->assertNotNull($job);
         $this->assertSame(2, $job->attempts);
-        $this->assertEqualsWithDelta(120, now()->diffInSeconds($job->next_attempt_at), 2);
+        $this->assertEquals(120, $now->diffInSeconds($job->next_attempt_at));
     }
 
     #[Test]
@@ -285,9 +291,10 @@ final class RunProvisioningJobTest extends ProvisioningTestCase
 
         $this->runWorker($job->id);
 
-        // The reservations are what the next attempt will use. Handing them
-        // back mid-retry gives the customer's address to somebody else while
-        // their build is still going.
+        // The reservations are carried to the next attempt (its capacity
+        // moved with it if it is placed elsewhere, ReserveNodeCapacity).
+        // Handing them back mid-retry gives the customer's address to
+        // somebody else while their build is still going.
         $this->assertSame([], $this->releaser->actions());
     }
 

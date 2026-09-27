@@ -25,6 +25,9 @@ use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
  * memory advertises capacity it does not have and the scheduler would believe
  * it. Clamping loses the accounting for one machine; not clamping oversells
  * the node to every machine that comes after.
+ *
+ * It locks the reservation row, then the node, then the pool: the one order
+ * every capacity path keeps (ReserveNodeCapacity's docblock).
  */
 final readonly class ReleaseNodeCapacity
 {

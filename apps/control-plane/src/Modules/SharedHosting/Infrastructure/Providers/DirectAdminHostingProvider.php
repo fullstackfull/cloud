@@ -342,10 +342,29 @@ final class DirectAdminHostingProvider implements HostingProvider
          * every reconciliation pass. Reconciliation needs to know which
          * accounts exist, not what they are called on the web, so the domain is
          * left null rather than paid for.
+         *
+         * `list` as one value is not that form. Empty — `list=` or the bare
+         * key — it says there is nothing to list, as `list[]=` does. Carrying
+         * anything — `list=bob`, `list=alice,bob` — it names accounts in a
+         * form nobody here has established, and reading it as no accounts
+         * used to report every live account on the node missing: Critical
+         * drift and an alert, from a body that plainly named one. It is
+         * refused, as any other unreadable read is.
          */
+        $list = $body['list'] ?? null;
+
+        if (is_string($list) && trim($list) !== '') {
+            throw HostingProviderException::unexpectedResponse(
+                self::NAME,
+                'list_accounts',
+                'the account listing names its accounts as one value, not in the list form, so it cannot be read as the accounts on the node',
+                ['node' => $node->hostname, 'command' => 'CMD_API_SHOW_USERS'],
+            );
+        }
+
         /** @var list<string> $names */
         $names = array_values(array_filter(
-            is_array($body['list'] ?? null) ? $body['list'] : [],
+            is_array($list) ? $list : [],
             static fn (mixed $name): bool => is_string($name) && trim($name) !== '',
         ));
 

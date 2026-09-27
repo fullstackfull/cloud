@@ -94,11 +94,17 @@ final class HeldQuarantineClockTest extends TestCase
         $this->allocator->holdAssignment($a, ReleaseReason::ServiceTerminated);
         $this->allocator->holdAssignment($b, ReleaseReason::ServiceTerminated);
 
+        // Frozen, and read once: the window is counted from the moment the
+        // clock starts, and a clock read again at the assertion is a day
+        // late for a run that crosses midnight between the two.
+        $this->freezeSecond();
+        $startedAt = now()->toImmutable();
+
         $this->assertSame(1, $this->allocator->startHeldQuarantines($mine));
 
         $this->assertSame(
-            now()->addDays(7)->toDateString(),
-            IpAddress::query()->findOrFail($a->ip_address_id)->quarantined_until?->toDateString(),
+            $startedAt->addDays(7)->getTimestamp(),
+            IpAddress::query()->findOrFail($a->ip_address_id)->quarantined_until?->getTimestamp(),
         );
         $this->assertNull(IpAddress::query()->findOrFail($b->ip_address_id)->quarantined_until);
     }
@@ -244,11 +250,15 @@ final class HeldQuarantineClockTest extends TestCase
         $assignment = $this->assign($chassis);
         $this->allocator->holdAssignment($assignment, ReleaseReason::Abuse);
 
+        // Frozen and read once, as above.
+        $this->freezeSecond();
+        $startedAt = now()->toImmutable();
+
         $this->allocator->startHeldQuarantines($chassis);
 
         $this->assertSame(
-            now()->addDays(7 * IpPool::ABUSE_QUARANTINE_MULTIPLIER)->toDateString(),
-            IpAddress::query()->findOrFail($assignment->ip_address_id)->quarantined_until?->toDateString(),
+            $startedAt->addDays(7 * IpPool::ABUSE_QUARANTINE_MULTIPLIER)->getTimestamp(),
+            IpAddress::query()->findOrFail($assignment->ip_address_id)->quarantined_until?->getTimestamp(),
         );
     }
 

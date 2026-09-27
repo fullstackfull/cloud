@@ -58,17 +58,18 @@ final class IpPoolExhaustedException extends DomainException
 
     /**
      * Exhausted as a VPS build asks: counting only addresses in subnets whose
-     * network a customer machine can be plugged into. The sentence says so,
-     * because "0 left" in a pool full of available addresses on a bridgeless
-     * or management segment sends an operator to buy address space when what
-     * is missing is a bridge.
+     * network a customer machine can be plugged into and that name a gateway.
+     * The sentence says so, because "0 left" in a pool full of available
+     * addresses on a bridgeless or management segment, or in a block with no
+     * gateway, sends an operator to buy address space when what is missing is
+     * a bridge or a gateway.
      */
     public static function onSegmentsAMachineCanBeAttachedTo(string $name, string $id, string $scopeType, int $requested, int $available): self
     {
         $exception = new self(sprintf(
             '%s "%s" has %d allocatable address(es) left on a network a customer machine can be attached to '
-            .'(active, customer-facing, with a bridge); %d were requested. Addresses on any other network are not '
-            .'counted.',
+            .'(active, customer-facing, with a bridge), in a block with a gateway; %d were requested. Addresses on '
+            .'any other network, or in a block with no gateway, are not counted.',
             $scopeType === 'subnet' ? 'Subnet' : 'IP pool',
             $name,
             $available,

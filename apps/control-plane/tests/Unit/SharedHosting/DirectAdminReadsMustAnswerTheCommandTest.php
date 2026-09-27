@@ -96,6 +96,65 @@ final class DirectAdminReadsMustAnswerTheCommandTest extends TestCase
         $this->assertSame(['alice', 'bob'], array_map(static fn ($a): string => $a->username, $accounts));
     }
 
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function listingsNamedAsOneValue(): iterable
+    {
+        yield 'one name, not as a list element' => ['list=bob'];
+        yield 'two names in one value' => ['list=alice,bob'];
+        yield 'one name beside a verdict' => ['error=0&list=bob'];
+    }
+
+    /**
+     * `list` as a single value that says something is not the list form
+     * (`list[]=…`), and what it means has not been established. It used to be
+     * read as no accounts at all — an empty node, which is Critical
+     * MissingAtProvider drift and an alert for every live account on it — when
+     * the one thing the body plainly does is name an account.
+     */
+    #[Test]
+    #[DataProvider('listingsNamedAsOneValue')]
+    public function a_listing_that_names_accounts_as_one_value_is_refused(string $body): void
+    {
+        $this->fakeBodies(['CMD_API_SHOW_USERS' => $body]);
+
+        try {
+            $result = (new DirectAdminHostingProvider(new SecretRedactor))->listAccounts($this->node());
+        } catch (HostingProviderException $refusal) {
+            $this->assertStringContainsString('not in the list form', $refusal->getMessage());
+
+            return;
+        }
+
+        $this->fail('A listing that names an account as one value was read as: '.json_encode($result));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function emptyListings(): iterable
+    {
+        yield 'an empty value' => ['list='];
+        yield 'an empty list element' => ['list[]='];
+        yield 'the bare key' => ['list'];
+        yield 'an empty value beside a verdict' => ['error=0&list='];
+    }
+
+    /**
+     * The positive control for the refusal above: a listing that says, in any
+     * of these forms, that there is nothing on the node is still an empty
+     * node, not an unreadable one.
+     */
+    #[Test]
+    #[DataProvider('emptyListings')]
+    public function a_listing_that_names_nothing_in_the_list_is_an_empty_node(string $body): void
+    {
+        $this->fakeBodies(['CMD_API_SHOW_USERS' => $body]);
+
+        $this->assertSame([], (new DirectAdminHostingProvider(new SecretRedactor))->listAccounts($this->node()));
+    }
+
     #[Test]
     public function a_bare_verdict_is_not_read_as_an_empty_node(): void
     {

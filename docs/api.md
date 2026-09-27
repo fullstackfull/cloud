@@ -13,14 +13,15 @@
 >
 > | Surface | Status |
 > |---|---|
-> | `/api/v1` identity, account and API tokens | implemented, 22 operations |
-> | `/api/v1` business — catalogue, orders, billing, wallet, services, VPS, backups, dedicated, hosting, IPAM | implemented, 39 operations |
-> | `/api/admin` — the operator surface | implemented, 12 operations, each gated on its own permission |
+> | `/api/v1` identity, account and API tokens | implemented |
+> | `/api/v1` business — catalogue, orders, billing, wallet, services, VPS, backups, dedicated, hosting, IPAM | implemented |
+> | `/api/admin` — the operator surface | implemented; every route behind the staff gate and its own permission, and reachable only from an operator's portal session (a personal access token is refused) |
 > | `/webhooks/{provider}` | implemented — signature verified before the body is parsed, replays acknowledged without being applied twice |
 >
-> Not present, and absent because it is not implemented rather than because it
-> is undocumented: a support-ticket API, DNS zone management, and restore or
-> delete for backups. See `docs/build-status.md`.
+> Support tickets, DNS zones and records, and backup restore, file restore and
+> deletion are routes like the rest and are listed in `docs/openapi.yaml`. What
+> each has been verified against — a simulator or a real provider — is recorded
+> in `docs/build-status.md`, not here.
 
 ## Two surfaces, one implementation
 
@@ -35,9 +36,10 @@ deliberate: there is exactly one implementation of every operation, and anything
 can do in the UI they can also automate. A separate internal API drifts from the public one
 within a release or two, and the public one is always the poorer for it.
 
-Administrative capability is to live behind its own prefix so that an over-scoped customer
-token cannot reach it by accident. Route-level permission checks are the enforcement; the
-prefix is defence in depth. No route is registered under `/api/admin` yet.
+Administrative capability lives behind its own prefix, `/api/admin`. The prefix is not the
+control. Every route there carries the staff gate (`EnsureTheCallerIsStaff`), which refuses a
+login holding no staff role and any request a personal access token authenticated, and each
+route names the permission it requires.
 
 ## Authentication
 
@@ -55,6 +57,10 @@ read `localStorage`; an `HttpOnly` cookie it cannot.
 Tokens are scoped, rate-limited per token, optionally restricted to a CIDR allow-list, and
 bound to exactly one customer account — so a token belonging to a user who administers
 several accounts can never act outside the one it was issued for.
+
+A token is a credential for the customer API only. `/api/admin` refuses any request a personal
+access token authenticated, even when the token's holder is staff: operators reach it through the
+portal session.
 
 Revocation is recorded rather than performed by deletion: the row survives so that "which
 token did this?" remains answerable after the token is gone.

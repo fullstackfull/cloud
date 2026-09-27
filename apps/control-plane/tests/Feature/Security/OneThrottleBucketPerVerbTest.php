@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Tests\Feature\Security;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Route;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\ReadsTheMiddlewareARouteRuns;
 use Tests\TestCase;
 
 /**
@@ -26,9 +28,20 @@ use Tests\TestCase;
  *
  * The convention was already written down in routes/v1/dedicated.php. This is
  * the check that keeps it true.
+ *
+ * What it reads: for every route, the middleware the router runs for it
+ * (ReadsTheMiddlewareARouteRuns — Router::gatherRouteMiddleware(): aliases
+ * resolved to classes with their parameters, `withoutMiddleware()` exclusions
+ * removed), and in that list every entry whose class is ThrottleRequests or a
+ * subclass. Not what the route declares: Route::gatherMiddleware() saw only
+ * the `throttle:` alias, so a numeric throttle written as
+ * `ThrottleRequests::class.':5,1'` escaped it, and it reported entries a
+ * `withoutMiddleware()` had removed (the OB5-2 class, re-audit of round
+ * four).
  */
 final class OneThrottleBucketPerVerbTest extends TestCase
 {
+    use ReadsTheMiddlewareARouteRuns;
     use RefreshDatabase;
 
     #[Test]
@@ -37,22 +50,16 @@ final class OneThrottleBucketPerVerbTest extends TestCase
         $offenders = [];
 
         foreach (Route::getRoutes() as $route) {
-            foreach ($route->gatherMiddleware() as $middleware) {
-                if (! is_string($middleware) || ! str_starts_with($middleware, 'throttle:')) {
-                    continue;
-                }
-
-                $arguments = explode(',', substr($middleware, strlen('throttle:')));
-
+            foreach ($this->parametersOf($route, ThrottleRequests::class) as $arguments) {
                 // `throttle:api` and friends name a limiter registered in the
                 // service provider, which builds its own key. Only the numeric
                 // form takes a prefix, and only the numeric form needs one.
-                if (! is_numeric($arguments[0])) {
+                if ($arguments === [] || ! is_numeric($arguments[0])) {
                     continue;
                 }
 
                 if (count($arguments) < 3 || trim($arguments[2]) === '') {
-                    $offenders[] = sprintf('%s %s (%s)', $route->methods()[0], $route->uri(), $middleware);
+                    $offenders[] = sprintf('%s %s (throttle:%s)', $route->methods()[0], $route->uri(), implode(',', $arguments));
                 }
             }
         }

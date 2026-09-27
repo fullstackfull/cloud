@@ -66,6 +66,12 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
  * the subnets and addresses behind a pool, are checked at the next sale and
  * the next build, not frozen.
  *
+ * Nor is the gateway required: a dedicated server's install profile can carry
+ * a default route of its own. A VPS has nothing but the block's gateway to
+ * take one from, so the same count, the VPS build's reservation and the VPS
+ * sale pass over a block with none (Subnet::hasGateway()), and no route adds
+ * one once it is registered.
+ *
  * ---------------------------------------------------------------------------
  * No two blocks in one realm share an address
  * ---------------------------------------------------------------------------

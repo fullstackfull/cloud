@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Tests\Feature\Security;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Route;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\ReadsTheMiddlewareARouteRuns;
 use Tests\TestCase;
 
 /**
@@ -20,12 +22,19 @@ use Tests\TestCase;
  * `subscription-cancel:` - so a reader deciding which limits were shared, or
  * tightening one of them, would have been misled by the name.
  *
- * What this reads: the middleware strings Laravel's router gathers for the
- * three named routes below, and nothing else. It does not measure a limit by
- * sending requests.
+ * What this reads: for the three named routes below, the middleware the
+ * router runs (ReadsTheMiddlewareARouteRuns — Router::gatherRouteMiddleware():
+ * aliases resolved to classes with their parameters, `withoutMiddleware()`
+ * exclusions removed), and in it the third parameter of every entry whose
+ * class is ThrottleRequests or a subclass and whose first parameter is a
+ * number. Nothing else; it does not measure a limit by sending requests. It
+ * used to read Route::gatherMiddleware(), which kept a throttle that
+ * `->withoutMiddleware(...)` had removed (the OB5-2 class, re-audit of round
+ * four).
  */
 final class EachBillingLimiterIsNamedForWhatItLimitsTest extends TestCase
 {
+    use ReadsTheMiddlewareARouteRuns;
     use RefreshDatabase;
 
     #[Test]
@@ -44,13 +53,9 @@ final class EachBillingLimiterIsNamedForWhatItLimitsTest extends TestCase
             $this->assertNotNull($route, $name.' is not registered; this pin would be vacuous.');
 
             $prefixes = [];
-            foreach ($route->gatherMiddleware() as $middleware) {
-                if (is_string($middleware) && str_starts_with($middleware, 'throttle:')) {
-                    $arguments = explode(',', substr($middleware, strlen('throttle:')));
-
-                    if (is_numeric($arguments[0]) && isset($arguments[2])) {
-                        $prefixes[] = trim($arguments[2]);
-                    }
+            foreach ($this->parametersOf($route, ThrottleRequests::class) as $arguments) {
+                if ($arguments !== [] && is_numeric($arguments[0]) && isset($arguments[2])) {
+                    $prefixes[] = trim($arguments[2]);
                 }
             }
 

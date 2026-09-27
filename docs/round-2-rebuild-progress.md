@@ -142,3 +142,21 @@ All five round-four bands merged at `a6b583b`: backend 5,601 / 5,601, 690
 testsuites `skipped="0"`, exit 0; vitest 648 / 648, tsc and eslint clean;
 `make infra-validate` 0 and every infrastructure self-test green. An
 independent re-audit after round four is dispatched against `a6b583b`.
+
+### Round five — fixing what the re-audit after round four found
+
+The re-audit against `a6b583b` (five bands plus "what round four introduced",
+with skeptics) is in `scratchpad` digests until its document is written. Its
+numbered verdicts: F-07 partially reproduces (a customer-facing network with no
+bridge is sold onto); F-09 partially reproduces (overlapping reconcile sweeps
+settle a later restore attempt); F-23 partially reproduces (by-value excuses hid
+unwritten server and node states). Every other finding re-audited does not
+reproduce. The unnumbered items it found stay unnumbered.
+
+| Band | Scope | Status | Commit |
+|---|---|---|---|
+| A | F-07 network attachability; system ledger keys a customer's Idempotency-Key can take; renewal/plan-change deadlock; undelivered paid upgrade on wind-up; refund failed after success; wording | fixing | — |
+| B | a customer-surface API token accepted on `/api/admin`; six route oracles blind to `withoutMiddleware`; domain-queue permission test; one-super-admin chain walked | upheld with reservations; merged `89eab7a`; stale `docs/api.md` counts and the "not present" paragraph corrected at integration | `8a2bd93` |
+| C | F-09 compare-and-set and poll bookkeeping on the attempt; a scalar DirectAdmin `list` read as no accounts; file-restore lock oracle | upheld with reservations after one repair (indeterminate-poll call site has no committed test; operator verdicts not bound to the review seen); merged `0b06f52` | `376584a` |
+| D | a VPS built with no gateway; a quarantine test red at midnight (and two more of that shape); capacity left on the node a retry moved away from, now moved in one lock order | upheld with reservations after one repair (a VPS already on a gateway-less block cannot be reinstalled; `SyncClusterInventory` locks node, pool, node outside the stated capacity order); merged `7493efe` | `1600178` |
+| E | F-23 per-case entries replace the by-value excuses for `NodeStatus`, `ServerState` and `DomainContactRole`; no whole-enum excuse beside per-case answers (coordinator) | rejected once (DomainContactRole), repaired; upheld with reservations (the pairing check has no dedicated test; the spelled check reads comments; a const-list writer is not seen) | `6568d78`, `8633cdb` |

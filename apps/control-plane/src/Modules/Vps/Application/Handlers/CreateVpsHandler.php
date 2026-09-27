@@ -196,6 +196,9 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
     /** The hypervisor could not be asked what is at the reserved identity. */
     public const string IDENTITY_UNVERIFIABLE = 'vps.create_identity_unverifiable';
 
+    /** The address's block names no gateway, so the machine would have no default route. */
+    public const string SUBNET_HAS_NO_GATEWAY = 'vps.subnet_has_no_gateway';
+
     /**
      * The machine found is named, and not with any name a create under this
      * identity is recorded as sent with — which, while none is, is every name
@@ -472,7 +475,10 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
         // Capacity first, keyed on the job so a retry commits once. Without the
         // key a retried job would commit a second machine's worth of capacity
         // that release can never give back — there is only one machine to
-        // destroy.
+        // destroy. A retry placed on another node than the attempt that
+        // reserved moves the commitment here in the same transaction
+        // (ReserveNodeCapacity), so the node built on below is always the
+        // node that holds this job's reservation.
         try {
             $this->reserveCapacity->execute(
                 node: $node,
@@ -581,14 +587,37 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
         }
 
         /*
+         * The machine's default route is its block's gateway, and nothing
+         * else: cloud-init is given `gw=` and the guest has no other way to
+         * learn one. A block registered with no gateway is legitimate — a
+         * dedicated server's install profile can carry a default route — but
+         * a VPS built in one comes up with `gw=` empty, billed and unreachable.
+         * The reservation takes addresses only from blocks with a gateway
+         * (`attachableOnly`), so this is reached only when the row changed
+         * between the reservation and this read; refused permanently, before
+         * anything is sent, rather than built without a route.
+         */
+        if (! $address->subnet->hasGateway()) {
+            return ProvisioningResult::failed(
+                FailureClass::Permanent,
+                self::SUBNET_HAS_NO_GATEWAY,
+                sprintf(
+                    'The subnet holding %s names no gateway, so a machine given that address would have no default route.',
+                    $address->address,
+                ),
+                metadata: ['subnet_id' => (string) $address->subnet_id],
+            );
+        }
+
+        /*
          * The name this create is sent with, written down now and not
          * earlier: the last statement before the call, committed on its own.
          * It is what a later attempt claims a machine at this identity by,
          * so it must hold every name a create was sent with and nothing an
          * attempt merely reserved — an attempt that stopped at capacity, at
-         * the address or at the network above sent nothing, and a stranger
-         * named as this build names its machine is not this build's on its
-         * account.
+         * the address, at the network or at the gateway above sent nothing,
+         * and a stranger named as this build names its machine is not this
+         * build's on its account.
          *
          * The names recorded until now are read first and kept: if the
          * cluster refuses this create, the create built nothing, and a

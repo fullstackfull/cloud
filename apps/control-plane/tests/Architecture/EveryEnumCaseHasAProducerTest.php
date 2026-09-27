@@ -174,18 +174,15 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
         ClusterStatus::class => ['kind' => 'by value', 'site' => 'src/Modules/Infrastructure/Http/Controllers/InventoryController.php', 'why' => 'An operator sets a cluster\'s status.'],
         ComputeDriver::class => ['kind' => 'by value', 'site' => 'src/Modules/Infrastructure/Http/Controllers/InventoryController.php', 'why' => 'An operator registers a cluster with its driver.'],
         CpuArchitecture::class => ['kind' => 'by value', 'site' => 'src/Modules/Infrastructure/Http/Controllers/VmTemplateController.php', 'why' => 'An operator declares a template\'s architecture; a node reports its own.'],
-        NodeStatus::class => ['kind' => 'by value', 'site' => 'src/Modules/Infrastructure/Application/Reference/LoadReferenceTopologyForSimulation.php', 'why' => 'A node\'s status comes from the operator\'s reference topology; the inventory sync writes maintenance, and a new row takes the model\'s string default.'],
         OsFamily::class => ['kind' => 'by value', 'site' => 'src/Modules/Infrastructure/Http/Controllers/VmTemplateController.php', 'why' => 'An operator declares a template\'s OS family.'],
         SuspensionPolicy::class => ['kind' => 'by value', 'site' => 'src/Modules/Compute/Domain/Enums/SuspensionPolicy.php', 'why' => 'Read from config(\'compute.suspension_policy\'); unset means the strictest.'],
         DedicatedPowerAction::class => ['kind' => 'by value', 'site' => 'src/Modules/Dedicated/Http/Requests/PowerActionRequest.php', 'why' => 'The customer names the power action.'],
         ZoneImportMode::class => ['kind' => 'by value', 'site' => 'src/Modules/Dns/Http/Requests/ApplyZoneImportRequest.php', 'why' => 'The customer chooses merge or replace.'],
-        DomainContactRole::class => ['kind' => 'by value', 'site' => 'src/Modules/Domains/Application/Actions/UpdateDomainContacts.php', 'why' => 'Contacts arrive keyed by role in the customer\'s request.'],
         CustomerRole::class => ['kind' => 'by value', 'site' => 'src/Modules/Identity/Http/Requests/InviteMemberRequest.php', 'why' => 'The account owner chooses a member\'s role when inviting or changing it.'],
         CustomerStatus::class => ['kind' => 'by value', 'site' => 'src/Modules/Admin/Http/Controllers/CustomerController.php', 'why' => 'An operator sets a customer\'s status.'],
         CustomerType::class => ['kind' => 'by value', 'site' => 'src/Modules/Identity/Application/Actions/RegisterCustomer.php', 'why' => 'The person registering chooses the account type.'],
         DeploymentKind::class => ['kind' => 'by value', 'site' => 'src/Modules/Infrastructure/Http/Controllers/DeploymentJobController.php', 'why' => 'An operator requests an apply or a verify.'],
         GpuPassthroughMode::class => ['kind' => 'by value', 'site' => 'src/Modules/Infrastructure/Http/Controllers/ServerController.php', 'why' => 'An operator registers a card with its passthrough mode.'],
-        ServerState::class => ['kind' => 'by value', 'site' => 'src/Modules/Infrastructure/Application/Reference/LoadReferenceTopologyForSimulation.php', 'why' => 'A managed server\'s state comes from the reference topology; the deployment path writes the others.'],
         PreflightMode::class => ['kind' => 'by value', 'site' => 'src/Modules/Infrastructure/Http/Controllers/PreflightController.php', 'why' => 'An operator chooses the preflight mode (and the console command takes it as an option).'],
         ReferenceKind::class => ['kind' => 'by value', 'site' => 'src/Modules/Infrastructure/Domain/Reference/ReferenceTopology.php', 'why' => 'Each object in the reference topology document names its kind.'],
         IpPoolScope::class => ['kind' => 'by value', 'site' => 'src/Modules/Infrastructure/Http/Controllers/InventoryController.php', 'why' => 'An operator creates a pool with its scope.'],
@@ -242,6 +239,16 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
         RegistrarCapability::class.'::Renewal' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'No registrar adapter declares it and nothing asks for it.'],
         RegistrarCapability::class.'::PremiumPricing' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'No registrar adapter declares it; DomainPricing refuses premium names by the string premium_pricing.'],
         RegistrarCapability::class.'::MultiYearTerms' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'No registrar adapter declares it and nothing asks for it.'],
+        DomainContactRole::class.'::Registrant' => ['kind' => 'spelled', 'site' => 'src/Modules/Domains/Http/Controllers/DomainController.php', 'spelling' => 'DomainContactRole::Registrant', 'why' => 'Ordering a domain and updating its contacts both key the one contact the customer gives by this role.'],
+        DomainContactRole::class.'::Administrative' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'The order and contact-update requests accept a registrant only, and DomainController passes only that role to OrderDomainRegistration and UpdateDomainContacts, the only writers of domain contacts.'],
+        DomainContactRole::class.'::Technical' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'The order and contact-update requests accept a registrant only; nothing writes a technical contact.'],
+        DomainContactRole::class.'::Billing' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'The order and contact-update requests accept a registrant only; nothing writes a billing contact.'],
+        NodeStatus::class.'::Active' => ['kind' => 'spelled', 'site' => 'src/Modules/Infrastructure/Application/Actions/ChangeComputeNodeStatus.php', 'spelling' => 'NodeStatus::Active', 'why' => 'An operator puts a node into service: ComputeNodeController builds the status by value from the SETTABLE list this names.'],
+        NodeStatus::class.'::Draining' => ['kind' => 'spelled', 'site' => 'src/Modules/Infrastructure/Application/Actions/ChangeComputeNodeStatus.php', 'spelling' => 'NodeStatus::Draining', 'why' => 'An operator drains a node: built by value from the same SETTABLE list.'],
+        NodeStatus::class.'::Offline' => ['kind' => 'unwritten', 'owner' => 'Compute', 'why' => 'ChangeComputeNodeStatus refuses offline and the reconcile sweep records a silent node as unhealthy, not offline; only the simulation-only reference topology loader can write it.'],
+        ServerState::class.'::Connected' => ['kind' => 'unwritten', 'owner' => 'Infrastructure', 'why' => 'The deployment path writes registered, profiled and managed; nothing writes connected outside the simulation-only reference topology loader.'],
+        ServerState::class.'::Discovered' => ['kind' => 'unwritten', 'owner' => 'Infrastructure', 'why' => 'RegisterServer writes registered, AssignDesiredState profiled and RunDeploymentJob managed; nothing discovers a server into this state (AssignDesiredState only reads it) outside the simulation-only reference topology loader.'],
+        ServerState::class.'::Retired' => ['kind' => 'unwritten', 'owner' => 'Infrastructure', 'why' => 'Nothing retires a managed server; only the simulation-only reference topology loader could write it.'],
         DomainState::class.'::TransferredAway' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'Nothing detects a transfer away: no registrar adapter, reconciliation or action reports that a name left for another registrar, so no row is written transferred_away. DomainState::canBecome() only permits it, and holdsTheName() and the domains_one_live_holder index only read it.'],
         CountryCurrencyChangeState::class.'::Requested' => ['kind' => 'unwritten', 'owner' => 'Identity', 'why' => 'RequestCountryCurrencyChange writes blocked or awaiting_approval; nothing writes requested.'],
         LoginOutcome::class.'::UnverifiedEmail' => ['kind' => 'unwritten', 'owner' => 'Identity', 'why' => 'No sign-in path records an unverified-email outcome.'],
@@ -344,6 +351,22 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
 
             if (array_filter($cases, static fn (array $producers): bool => $producers === []) === []) {
                 $stale[] = "{$enum} — every case now has a producer";
+            }
+
+            // A case answered for in CASES beside a whole-enum excuse is one
+            // the excuse's own site refuses by a literal `in:` rule (as
+            // CustomerStatus::Closed beside the operator's active/suspended
+            // choice). Any other pairing means the enum's cases are being
+            // answered for one at a time, and the whole-enum excuse would
+            // hide whichever of them nobody named.
+            $accepted = $excuse['kind'] === 'by value' ? self::valuesTheSiteAccepts($enum, $excuse['site']) : null;
+
+            foreach (array_keys(self::CASES) as $answered) {
+                $value = self::enumOf($answered) === $enum ? constant($answered) : null;
+
+                if ($value !== null && ($accepted === null || ! $value instanceof BackedEnum || in_array((string) $value->value, $accepted, true))) {
+                    $stale[] = "{$answered} — answered for in CASES beside {$enum}'s whole-enum excuse, whose site does not refuse it; answer for every case of the enum in CASES instead";
+                }
             }
 
             if (isset($governed[$enum])) {
@@ -531,6 +554,52 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
      */
     public static function casesTheSiteCannotAccept(string $enum, string $site, array $cases): array
     {
+        $restricting = self::restrictingRules($enum, $site);
+
+        if ($restricting === []) {
+            return [];
+        }
+
+        $accepted = array_merge(...array_values($restricting));
+        $refused = [];
+
+        foreach ($cases as $case => $producers) {
+            $value = constant($case);
+
+            if ($producers !== [] || isset(self::CASES[$case]) || ! $value instanceof BackedEnum) {
+                continue;
+            }
+
+            if (! in_array((string) $value->value, $accepted, true)) {
+                $refused[$case] = array_keys($restricting);
+            }
+        }
+
+        return $refused;
+    }
+
+    /**
+     * The values a by-value site's literal `in:` rules accept, or null when it
+     * has none (then it is read as accepting every case).
+     *
+     * @param  class-string  $enum
+     * @return list<string>|null
+     */
+    private static function valuesTheSiteAccepts(string $enum, string $site): ?array
+    {
+        $restricting = self::restrictingRules($enum, $site);
+
+        return $restricting === [] ? null : array_values(array_merge(...array_values($restricting)));
+    }
+
+    /**
+     * The literal `in:` rules in the site whose every value is a value of the enum.
+     *
+     * @param  class-string  $enum
+     * @return array<string, list<string>>
+     */
+    private static function restrictingRules(string $enum, string $site): array
+    {
         $values = array_map(static fn (BackedEnum $case): string => (string) $case->value, is_subclass_of($enum, BackedEnum::class) ? $enum::cases() : []);
         $path = EnumCaseReferences::ROOT.'/'.$site;
         $restricting = [];
@@ -553,26 +622,7 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
             }
         }
 
-        if ($restricting === []) {
-            return [];
-        }
-
-        $accepted = array_merge(...array_values($restricting));
-        $refused = [];
-
-        foreach ($cases as $case => $producers) {
-            $value = constant($case);
-
-            if ($producers !== [] || isset(self::CASES[$case]) || ! $value instanceof BackedEnum) {
-                continue;
-            }
-
-            if (! in_array((string) $value->value, $accepted, true)) {
-                $refused[$case] = array_keys($restricting);
-            }
-        }
-
-        return $refused;
+        return $restricting;
     }
 
     private static function enumOf(string $case): string

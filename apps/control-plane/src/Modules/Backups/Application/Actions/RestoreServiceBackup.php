@@ -164,14 +164,19 @@ final readonly class RestoreServiceBackup
                 'last_polled_at' => null,
                 'poll_count' => 0,
                 // Cleared in the same compare-and-set that moves the row, so
-                // no reader ever sees `restoring` beside a previous attempt's
-                // handle. An archive can be restored more than once, and the
-                // previous restore's task finished long ago: a sweep that
-                // polled it between this write and the handle's — or after a
-                // crash between the two — read "OK", wrote `Restored` and
-                // released the machine while this restore was writing it
-                // (F-09). Without a handle the row is left for the handle to
-                // arrive, or for its own clock to hand it to a person.
+                // the table never holds `restoring` beside a previous
+                // attempt's handle. An archive can be restored more than
+                // once, and the previous restore's task finished long ago: a
+                // sweep that polled it between this write and the handle's —
+                // or after a crash between the two — read "OK", wrote
+                // `Restored` and released the machine while this restore was
+                // writing it (F-09). Without a handle the row is left for the
+                // handle to arrive, or for its own clock to hand it to a
+                // person. A sweep that loaded the row during the previous
+                // attempt still holds that handle in memory; clearing it here
+                // does not reach that copy, and what stops it settling this
+                // attempt is the compare-and-set on the attempt
+                // ({@see Backup::transitionTo()}).
                 'restore_task_id' => null,
                 // This attempt has restored nothing yet.
                 'restored_at' => null,

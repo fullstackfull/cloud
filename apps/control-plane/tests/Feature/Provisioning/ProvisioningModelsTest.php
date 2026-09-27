@@ -74,10 +74,15 @@ final class ProvisioningModelsTest extends ProvisioningTestCase
     #[Test]
     public function the_deadline_is_derived_from_the_attempt_that_is_running(): void
     {
+        // Frozen and read once: a clock read again at the assertion has
+        // moved on by however long the write took.
+        $this->freezeSecond();
+        $now = now()->toImmutable();
+
         $job = ProvisioningJob::factory()->running(startedSecondsAgo: 60)->create(['timeout_seconds' => 900]);
 
         $this->assertNotNull($job->deadline());
-        $this->assertEqualsWithDelta(840, now()->diffInSeconds($job->deadline()), 2);
+        $this->assertEquals(840, $now->diffInSeconds($job->deadline()));
 
         // A job nobody has started has no deadline to miss.
         $this->assertNull(ProvisioningJob::factory()->create()->deadline());

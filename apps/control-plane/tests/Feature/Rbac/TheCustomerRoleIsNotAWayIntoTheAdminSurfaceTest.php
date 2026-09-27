@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Tests\Feature\Rbac;
 
 use Database\Seeders\RolePermissionSeeder;
+use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Route;
+use Lynomia\Http\Middleware\EnsureTheCallerIsStaff;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
@@ -175,9 +178,28 @@ final class TheCustomerRoleIsNotAWayIntoTheAdminSurfaceTest extends TestCase
         }
     }
 
+    /**
+     * Reads, for every route whose URI starts `api/admin`, the list
+     * Router::gatherRouteMiddleware() returns: the middleware the router runs
+     * for that route — group and route middleware resolved to class names
+     * (with parameters), anything named by `withoutMiddleware()` removed, and
+     * the result sorted into the kernel's middleware priority. It asserts that
+     * list holds `Authenticate:sanctum` and EnsureTheCallerIsStaff, the staff
+     * gate after the authentication.
+     *
+     * Not Route::gatherMiddleware(): that is what the route declares, and it
+     * keeps `staff` in the list when `->withoutMiddleware('staff')` removes it
+     * from what runs (OB5-2, re-audit of round four — that mutation on
+     * audit.index left this test green while a customer whose role held
+     * audit.view read GET /api/admin/audit: 200).
+     *
+     * It reads route registration, not requests; the behaviour of the gate is
+     * held by the tests above.
+     */
     #[Test]
     public function every_admin_route_carries_the_staff_gate_after_authentication(): void
     {
+        $router = app(Router::class);
         $missing = [];
 
         foreach (Route::getRoutes() as $route) {
@@ -185,16 +207,16 @@ final class TheCustomerRoleIsNotAWayIntoTheAdminSurfaceTest extends TestCase
                 continue;
             }
 
-            $middleware = array_values(array_filter($route->gatherMiddleware(), 'is_string'));
-            $auth = array_search('auth:sanctum', $middleware, true);
-            $staff = array_search('staff', $middleware, true);
+            $middleware = array_values(array_filter($router->gatherRouteMiddleware($route), 'is_string'));
+            $auth = array_search(Authenticate::class.':sanctum', $middleware, true);
+            $staff = array_search(EnsureTheCallerIsStaff::class, $middleware, true);
 
             if ($auth === false || $staff === false || $staff < $auth) {
                 $missing[] = implode('|', $route->methods()).' '.$route->uri();
             }
         }
 
-        $this->assertSame([], $missing, "Admin routes without the staff gate after auth:sanctum:\n  ".implode("\n  ", $missing));
+        $this->assertSame([], $missing, "Admin routes that do not run the staff gate after auth:sanctum:\n  ".implode("\n  ", $missing));
     }
 
     /**

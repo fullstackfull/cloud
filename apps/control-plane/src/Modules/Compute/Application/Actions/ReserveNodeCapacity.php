@@ -32,12 +32,29 @@ use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
  * increment is a lost update: both commit, the node's committed memory exceeds
  * what it has, and the failure surfaces weeks later as the OOM killer choosing
  * somebody's database.
+ *
+ * ---------------------------------------------------------------------------
+ * One lock order
+ * ---------------------------------------------------------------------------
+ *
+ * Every path that commits or gives back capacity — this action, a move of a
+ * keyed commitment to another node or pool (below), and ReleaseNodeCapacity —
+ * locks in one order: the reservation row, then `compute_nodes` rows
+ * ascending by id, then `compute_storages` rows ascending by id, and nothing
+ * of an earlier kind after one of a later kind. A move done as a release and
+ * then a reserve locked old node, old pool, new node, new pool, while a plain
+ * reserve on the new node locks new node, then pool: the two could each hold
+ * what the other waited for, and PostgreSQL would kill an order or a build.
+ * So a move takes every row it will touch up front, in this order, before it
+ * gives anything back; the release and reserve that follow re-lock rows the
+ * transaction already holds. Pinned by CapacityPathsTakeTheirLocksInOneOrderTest.
  */
 final readonly class ReserveNodeCapacity
 {
     public function __construct(
         private NodeCapacityPolicy $policy,
         private CustomerNodeCensus $census,
+        private ReleaseNodeCapacity $release,
     ) {}
 
     /**
@@ -71,6 +88,19 @@ final readonly class ReserveNodeCapacity
              * loses capacity permanently and silently, in proportion to how
              * often provisioning is retried — which is highest exactly when the
              * fleet is already under strain.
+             *
+             * Returned as already committed only when it is committed where
+             * this call asks: on this node and in this pool. A retry is placed
+             * afresh, and may land elsewhere — the first attempt's node filled
+             * up, or went into maintenance — and a live reservation on the
+             * old node returned as if it were on the new one leaves the old
+             * node charged for a machine it does not run and the new one
+             * running a machine nobody charged it for, which the scheduler
+             * then sells again. So the commitment moves: every row the move
+             * touches is locked first, in the one order (class docblock), then
+             * the old one is given back and this one taken, in this one
+             * transaction, so a refusal below leaves the old one standing as
+             * it was.
              */
             if ($reservationKey !== null) {
                 $existing = NodeCapacityReservation::query()
@@ -79,10 +109,15 @@ final readonly class ReserveNodeCapacity
                     ->first();
 
                 if ($existing !== null) {
-                    /** @var ComputeNode $alreadyCommitted */
-                    $alreadyCommitted = ComputeNode::query()->findOrFail($existing->node_id);
+                    if ($existing->node_id === (string) $node->getKey() && $existing->storage_id === $storageId) {
+                        /** @var ComputeNode $alreadyCommitted */
+                        $alreadyCommitted = ComputeNode::query()->findOrFail($existing->node_id);
 
-                    return $alreadyCommitted;
+                        return $alreadyCommitted;
+                    }
+
+                    $this->lockForAMove($reservationKey, $existing, $node, $storageId);
+                    $this->release->execute($node, $resources, reservationKey: $reservationKey);
                 }
             }
 
@@ -194,6 +229,38 @@ final readonly class ReserveNodeCapacity
 
             return $locked;
         });
+    }
+
+    /**
+     * Takes every row a move touches, in the one order (the class docblock):
+     * the reservation, then both nodes ascending by id, then both pools
+     * ascending by id. One statement per row, in an order PHP chose, so the
+     * order does not depend on how the database sorts the ids.
+     */
+    private function lockForAMove(string $reservationKey, NodeCapacityReservation $existing, ComputeNode $node, ?string $storageId): void
+    {
+        NodeCapacityReservation::query()
+            ->where('reservation_key', $reservationKey)
+            ->whereNull('released_at')
+            ->lockForUpdate()
+            ->first();
+
+        $nodeIds = array_values(array_unique([(string) $existing->node_id, (string) $node->getKey()]));
+        sort($nodeIds, SORT_STRING);
+
+        foreach ($nodeIds as $id) {
+            ComputeNode::query()->lockForUpdate()->find($id);
+        }
+
+        $storageIds = array_values(array_unique(array_filter(
+            [(string) $existing->storage_id, (string) $storageId],
+            static fn (string $id): bool => $id !== '',
+        )));
+        sort($storageIds, SORT_STRING);
+
+        foreach ($storageIds as $id) {
+            ComputeStorage::query()->lockForUpdate()->find($id);
+        }
     }
 
     /**

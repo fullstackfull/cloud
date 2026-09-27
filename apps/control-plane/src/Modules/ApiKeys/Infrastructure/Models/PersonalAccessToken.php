@@ -14,6 +14,10 @@ use Symfony\Component\HttpFoundation\IpUtils;
 /**
  * A scoped API token for the public customer API.
  *
+ * For that API only: EnsureTheCallerIsStaff refuses a request to /api/admin
+ * that any token of this class authenticated, whatever its holder's roles
+ * (OB5-1). The operator surface is reached through the portal session.
+ *
  * Extends Sanctum's model to add:
  *  - ULID keys, matching the rest of the schema;
  *  - the customer the token acts for, so a token belonging to a user who is a
