@@ -45,12 +45,16 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  * What it reads and what it does not see is stated here once, because the
  * gate's verdict is only as good as this list.
  *
- * Every name, function, method, property, operator and node type it
- * recognises is an element of one of the public constants below, and the
- * code decides by membership of those constants and nothing spelled
- * elsewhere. The gate requires a control in its fixture for every element
- * of every constant ({@see self::VOCABULARY}), so an element added without
- * a control, or removed while its control stands, turns the gate red.
+ * Every name it matches — function, method, property, constant, variable,
+ * attribute, doc tag, parameter, prefix — and every node type a reading
+ * decision turns on is an element of one of the public constants below.
+ * What is fixed in code, not in a constant, is the walk's own shape: which
+ * node kinds it treats as calls, closures, nested functions and classes, the
+ * order it visits a call's receiver, arguments and callback, how a method
+ * resolves, how set-up is gathered, what a flow descends into. The gate
+ * requires a control for every element of every constant in
+ * {@see self::VOCABULARY} and for each behaviour its `STRUCTURAL` list
+ * names; nothing else is claimed to be held.
  *
  * ===========================================================================
  * WHAT IT READS
@@ -96,7 +100,9 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  *  - **any other closure** is walked in the current state, and what it does to
  *    the bit does not leak out.
  *
- * **Assertions** are calls whose name begins `assert`, on any receiver. One is
+ * **Assertions** are calls whose name begins with an element of
+ * {@see self::ASSERTION_PREFIXES}, on any receiver or none (PHPUnit's
+ * function-style `assertSame()` included). One is
  * a finding when the clock is not pinned there and the compared value reads
  * the clock:
  *
@@ -136,10 +142,13 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  * answers differ (`'now'`, `'today'`, `'+7 days'`, `'tomorrow noon'`,
  * `'next monday'`). One whose answers agree (`'2026-01-01'`,
  * `'@1790505192'`) is absolute, and so is one `strtotime()` cannot parse
- * (`'not a date'`, on which Carbon throws). An empty or blank literal (`''`),
- * which Carbon and PHP read as now, is relative. An argument that is not a
- * plain literal (a variable, a concatenation, an interpolation, `null`) is
- * never relative.
+ * (`'not a date'`, on which Carbon throws). A blank literal (`''`) is
+ * relative given to a constructor ({@see self::CLOCK_CONSTRUCTORS},
+ * {@see self::NATIVE_CONSTRUCTORS}: `new Carbon('')` is now) or to a parser in
+ * {@see self::BLANK_LITERAL_PARSERS} (`Carbon::parse('')` is now), and
+ * absolute given to any other (`Carbon::make('')` is null). An argument that
+ * is not a plain literal (a variable, a concatenation, an interpolation,
+ * `null`) is never relative, and only the first argument is read.
  *
  * A clock read **flows into** a value when it is the value, or:
  *
@@ -181,6 +190,9 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  *  - **Code outside the set**: a pin or an assertion in a vendor trait or base
  *    class, a helper reached through a variable (`$helper->check()`) or a
  *    dynamic name, a data provider's values.
+ *  - **An unpacked argument** (`assertSame(...$pair)`) is not read.
+ *  - **A function or class declared inside a test** (an anonymous class
+ *    included) is not walked: its body runs, if at all, somewhere else.
  *  - **Assertion helpers that do not begin `assert`**, such as
  *    `AssertableJson::where()` inside `assertJson(fn …)`.
  *  - **Bound comparisons.** `assertLessThanOrEqual`, `assertGreaterThan`,
@@ -334,8 +346,57 @@ final class UnpinnedClockAssertions
     /** Static methods that pin for the callback they are given, then restore the clock. */
     public const array TEST_NOW_SCOPES = ['withTestNow'];
 
-    /** Receivers through which a helper in the set is followed. */
-    public const array HELPER_SCOPES = ['this', 'self', 'static', 'parent'];
+    /**
+     * Receivers through which a helper in the set is followed, and the class
+     * the helper is looked up from: the class running the test, the class
+     * that wrote the call, or that class's parent.
+     */
+    public const array HELPER_SCOPES = ['this' => 'running', 'self' => 'writing', 'static' => 'running', 'parent' => 'parent'];
+
+    /** The variable a call must be made on to pin, unpin or be followed as a helper. */
+    public const array THIS_VARIABLES = ['this'];
+
+    /** `$this->travel($n)`, the receiver of a Wormhole unit. */
+    public const array TRAVEL_METHODS = ['travel'];
+
+    /** Constants that, given to a test-now setter or as a pin callback, mean nothing. */
+    public const array NULL_CONSTANTS = ['null'];
+
+    /** A call whose name begins with one of these is an assertion. */
+    public const array ASSERTION_PREFIXES = ['assert'];
+
+    /** Named arguments that are never compared. */
+    public const array MESSAGE_PARAMETERS = ['message'];
+
+    /** A public, non-static method whose name begins with one of these is a test. */
+    public const array TEST_PREFIXES = ['test'];
+
+    /** Attributes, by short name, that make a public, non-static method a test. */
+    public const array TEST_ATTRIBUTES = ['Test'];
+
+    /** Doc tags that make a public, non-static method a test. */
+    public const array TEST_DOC_TAGS = ['@test'];
+
+    /** Attributes, by short name, of a method run before each test. */
+    public const array BEFORE_ATTRIBUTES = ['Before'];
+
+    /** Doc tags of a method run before each test. */
+    public const array BEFORE_DOC_TAGS = ['@before'];
+
+    /** The set-up method, resolved through the hierarchy. */
+    public const array SET_UP_METHODS = ['setUp'];
+
+    /** A trait's set-up method is this prefix and the trait's short name. */
+    public const array TRAIT_SET_UP_PREFIXES = ['setUp'];
+
+    /** Method-call nodes: a pin, an unpin, a helper, an implicit or combining Carbon method, a predicate method. */
+    public const array METHOD_CALLS = [MethodCall::class, NullsafeMethodCall::class];
+
+    /** Property-fetch nodes, for {@see self::IMPLICIT_PROPERTIES}. */
+    public const array PROPERTY_FETCHES = [PropertyFetch::class, NullsafePropertyFetch::class];
+
+    /** Static parsers that read a blank literal (`''`) as now (`Carbon::make('')` is null). */
+    public const array BLANK_LITERAL_PARSERS = ['parse'];
 
     /**
      * Every constant the gate requires a control for, with the kind of
@@ -373,6 +434,21 @@ final class UnpinnedClockAssertions
         'TEST_NOW_SETTERS' => ['clean', 'test_now_setter'],
         'TEST_NOW_SCOPES' => ['clean', 'test_now_scope'],
         'HELPER_SCOPES' => ['found', 'helper_scope'],
+        'THIS_VARIABLES' => ['clean', 'this_variable'],
+        'TRAVEL_METHODS' => ['clean', 'travel_method'],
+        'NULL_CONSTANTS' => ['found', 'null_constant'],
+        'ASSERTION_PREFIXES' => ['found', 'assertion_prefix'],
+        'MESSAGE_PARAMETERS' => ['clean', 'message_parameter'],
+        'TEST_PREFIXES' => ['found', 'test_prefix'],
+        'TEST_ATTRIBUTES' => ['found', 'test_attribute'],
+        'TEST_DOC_TAGS' => ['found', 'test_doc_tag'],
+        'BEFORE_ATTRIBUTES' => ['clean', 'before_attribute'],
+        'BEFORE_DOC_TAGS' => ['clean', 'before_doc_tag'],
+        'SET_UP_METHODS' => ['clean', 'set_up_method'],
+        'TRAIT_SET_UP_PREFIXES' => ['clean', 'trait_set_up_prefix'],
+        'METHOD_CALLS' => ['found', 'method_call'],
+        'PROPERTY_FETCHES' => ['found', 'property_fetch'],
+        'BLANK_LITERAL_PARSERS' => ['found', 'blank_literal_parser'],
     ];
 
     /** @var array<string, array{node: ClassLike, file: string, parent: ?string, traits: list<string>}> */
@@ -471,15 +547,16 @@ final class UnpinnedClockAssertions
     /**
      * Is this a string literal whose meaning depends on when it is read?
      */
-    public static function isRelative(Expr $expr): bool
+    public static function isRelative(Expr $expr, bool $blankIsNow = false): bool
     {
         if (! $expr instanceof String_) {
             return false;
         }
 
-        // Carbon and PHP read an empty string as now; strtotime() cannot parse it.
+        // strtotime() cannot parse a blank string; the constructors and
+        // Carbon::parse() read it as now, Carbon::make() as null.
         if (trim($expr->value) === '') {
-            return true;
+            return $blankIsNow;
         }
 
         $utc = new DateTimeZone('UTC');
@@ -525,7 +602,8 @@ final class UnpinnedClockAssertions
             if (! $nativeOnly && in_array($method, self::CLOCK_STATICS, true)) {
                 return true;
             }
-            if (! $nativeOnly && in_array($method, self::STATIC_PARSERS, true) && $args !== [] && self::isRelative($args[0]->value)) {
+            if (! $nativeOnly && in_array($method, self::STATIC_PARSERS, true) && $args !== []
+                && self::isRelative($args[0]->value, in_array($method, self::BLANK_LITERAL_PARSERS, true))) {
                 return true;
             }
 
@@ -535,7 +613,7 @@ final class UnpinnedClockAssertions
         if ($expr instanceof New_) {
             $class = $expr->class instanceof Name ? $expr->class->getLast() : null;
             $args = $expr->isFirstClassCallable() ? [] : $expr->getArgs();
-            $relative = $args === [] || self::isRelative($args[0]->value);
+            $relative = $args === [] || self::isRelative($args[0]->value, true);
             if (in_array($class, self::NATIVE_CONSTRUCTORS, true)) {
                 return $relative;
             }
@@ -550,7 +628,7 @@ final class UnpinnedClockAssertions
             return true;
         }
 
-        if (($expr instanceof MethodCall || $expr instanceof NullsafeMethodCall)) {
+        if (self::isOneOf($expr, self::METHOD_CALLS)) {
             if (! $expr->name instanceof Identifier || $expr->isFirstClassCallable()) {
                 return false;
             }
@@ -564,7 +642,7 @@ final class UnpinnedClockAssertions
                 && self::anyArgumentReadsClock($args, $nativeOnly);
         }
 
-        if ($expr instanceof PropertyFetch || $expr instanceof NullsafePropertyFetch) {
+        if (self::isOneOf($expr, self::PROPERTY_FETCHES)) {
             return ! $nativeOnly && $expr->name instanceof Identifier
                 && in_array($expr->name->toString(), self::IMPLICIT_PROPERTIES, true);
         }
@@ -577,6 +655,27 @@ final class UnpinnedClockAssertions
                         return true;
                     }
                 }
+            }
+        }
+
+        return false;
+    }
+
+    private static function isThis(Node $node): bool
+    {
+        return $node instanceof Variable && in_array($node->name, self::THIS_VARIABLES, true);
+    }
+
+    private static function isNull(Node $node): bool
+    {
+        return $node instanceof ConstFetch && in_array(strtolower($node->name->toString()), self::NULL_CONSTANTS, true);
+    }
+
+    private static function isAssertion(string $name): bool
+    {
+        foreach (self::ASSERTION_PREFIXES as $prefix) {
+            if (str_starts_with($name, $prefix)) {
+                return true;
             }
         }
 
@@ -667,32 +766,42 @@ final class UnpinnedClockAssertions
             return false;
         }
 
-        if (str_starts_with($method->name->toString(), 'test')) {
-            return true;
+        foreach (self::TEST_PREFIXES as $prefix) {
+            if (str_starts_with($method->name->toString(), $prefix)) {
+                return true;
+            }
         }
 
+        return self::marked($method, self::TEST_ATTRIBUTES, self::TEST_DOC_TAGS);
+    }
+
+    /**
+     * @param  list<string>  $attributes
+     * @param  list<string>  $tags
+     */
+    private static function marked(ClassMethod $method, array $attributes, array $tags): bool
+    {
         foreach ($method->attrGroups as $group) {
             foreach ($group->attrs as $attr) {
-                if ($attr->name->getLast() === 'Test') {
+                if (in_array($attr->name->getLast(), $attributes, true)) {
                     return true;
                 }
             }
         }
 
-        return (bool) preg_match('/@test\b/', (string) $method->getDocComment()?->getText());
+        $doc = (string) $method->getDocComment()?->getText();
+        foreach ($tags as $tag) {
+            if (preg_match('/'.preg_quote($tag, '/').'\b/', $doc)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function isBefore(ClassMethod $method): bool
     {
-        foreach ($method->attrGroups as $group) {
-            foreach ($group->attrs as $attr) {
-                if ($attr->name->getLast() === 'Before') {
-                    return true;
-                }
-            }
-        }
-
-        return (bool) preg_match('/@before\b/', (string) $method->getDocComment()?->getText());
+        return self::marked($method, self::BEFORE_ATTRIBUTES, self::BEFORE_DOC_TAGS);
     }
 
     /**
@@ -704,16 +813,20 @@ final class UnpinnedClockAssertions
         $this->stack = [$this->test];
         $pinned = false;
 
-        $setUp = $this->findMethod($class, 'setUp');
-        if ($setUp !== null) {
-            $pinned = $this->walk($setUp[0]->stmts ?? [], $pinned, $setUp[1]);
+        foreach (self::SET_UP_METHODS as $name) {
+            $setUp = $this->findMethod($class, $name);
+            if ($setUp !== null) {
+                $pinned = $this->walk($setUp[0]->stmts ?? [], $pinned, $setUp[1]);
+            }
         }
 
         foreach ($this->hierarchyTraits($class) as $trait) {
             $short = substr($trait, (int) strrpos('\\'.$trait, '\\'));
-            $method = $this->findMethod($trait, 'setUp'.$short);
-            if ($method !== null) {
-                $pinned = $this->walk($method[0]->stmts ?? [], $pinned, $method[1]);
+            foreach (self::TRAIT_SET_UP_PREFIXES as $prefix) {
+                $method = $this->findMethod($trait, $prefix.$short);
+                if ($method !== null) {
+                    $pinned = $this->walk($method[0]->stmts ?? [], $pinned, $method[1]);
+                }
             }
         }
 
@@ -806,7 +919,7 @@ final class UnpinnedClockAssertions
             return $pinned;
         }
 
-        if ($node instanceof MethodCall || $node instanceof NullsafeMethodCall || $node instanceof StaticCall || $node instanceof FuncCall) {
+        if (self::isOneOf($node, self::METHOD_CALLS) || $node instanceof StaticCall || $node instanceof FuncCall) {
             return $this->call($node, $pinned, $owner);
         }
 
@@ -820,7 +933,7 @@ final class UnpinnedClockAssertions
     private function call(MethodCall|NullsafeMethodCall|StaticCall|FuncCall $call, bool $pinned, string $owner): bool
     {
         $name = $call->name instanceof Identifier ? $call->name->toString() : ($call->name instanceof Name ? $call->name->getLast() : null);
-        $onThis = ($call instanceof MethodCall || $call instanceof NullsafeMethodCall) && $call->var instanceof Variable && $call->var->name === 'this';
+        $onThis = self::isOneOf($call, self::METHOD_CALLS) && self::isThis($call->var);
         $class = $call instanceof StaticCall && $call->class instanceof Name ? $call->class : null;
         $args = $call->isFirstClassCallable() ? [] : $call->getArgs();
 
@@ -829,8 +942,8 @@ final class UnpinnedClockAssertions
         }
 
         if ($call instanceof MethodCall && in_array($name, self::WORMHOLE_UNITS, true)
-            && $call->var instanceof MethodCall && $call->var->var instanceof Variable && $call->var->var->name === 'this'
-            && $call->var->name instanceof Identifier && $call->var->name->toString() === 'travel') {
+            && $call->var instanceof MethodCall && self::isThis($call->var->var)
+            && $call->var->name instanceof Identifier && in_array($call->var->name->toString(), self::TRAVEL_METHODS, true)) {
             $pinned = $this->walk($call->var->getArgs(), $pinned, $owner);
 
             return $this->pinCall($args, 0, $pinned, $owner);
@@ -848,7 +961,7 @@ final class UnpinnedClockAssertions
             if (in_array($name, self::TEST_NOW_SETTERS, true)) {
                 $pinned = $this->walk($args, $pinned, $owner);
                 $value = $args[0]->value ?? null;
-                if ($value === null || ($value instanceof ConstFetch && strtolower($value->name->toString()) === 'null')) {
+                if ($value === null || self::isNull($value)) {
                     return false;
                 }
                 $this->pins++;
@@ -869,12 +982,12 @@ final class UnpinnedClockAssertions
         }
 
         // The receiver is evaluated first, then the arguments.
-        if ($call instanceof MethodCall || $call instanceof NullsafeMethodCall) {
+        if (self::isOneOf($call, self::METHOD_CALLS)) {
             $pinned = $this->walk($call->var, $pinned, $owner);
         }
         $pinned = $this->walk($args, $pinned, $owner);
 
-        if ($name !== null && str_starts_with($name, 'assert') && ! ($call instanceof FuncCall)) {
+        if ($name !== null && self::isAssertion($name)) {
             $native = self::comparesAClockRead($name, $args, true);
             if ($native || (! $pinned && self::comparesAClockRead($name, $args, false))) {
                 $this->findings[] = [
@@ -889,11 +1002,11 @@ final class UnpinnedClockAssertions
 
         // A helper in the set, walked inline in the state of the call — an
         // assertion helper of the test's own (`assertStamped()`) included.
-        $scope = $onThis ? 'this' : ($class !== null ? $class->toLowerString() : null);
-        if ($name !== null && in_array($scope, self::HELPER_SCOPES, true)) {
-            $lookupFrom = match ($scope) {
+        $scope = $onThis ? $call->var->name : ($class !== null ? $class->toLowerString() : null);
+        if ($name !== null && is_string($scope) && isset(self::HELPER_SCOPES[$scope])) {
+            $lookupFrom = match (self::HELPER_SCOPES[$scope]) {
                 'parent' => $this->classes[$owner]['parent'] ?? null,
-                'self' => $owner,
+                'writing' => $owner,
                 default => $this->testClass,
             };
             $method = $this->findMethod($lookupFrom, $name);
@@ -923,7 +1036,7 @@ final class UnpinnedClockAssertions
 
         $this->pins++;
         $callback = $args[$callbackAt]->value ?? null;
-        if ($callback === null || ($callback instanceof ConstFetch && strtolower($callback->name->toString()) === 'null')) {
+        if ($callback === null || self::isNull($callback)) {
             return true;
         }
 
@@ -948,7 +1061,7 @@ final class UnpinnedClockAssertions
                 continue;
             }
             $compared = $arg->name !== null
-                ? $arg->name->toString() !== 'message' && $positions !== []
+                ? ! in_array($arg->name->toString(), self::MESSAGE_PARAMETERS, true) && $positions !== []
                 : in_array($i, $positions, true);
             if ($compared && ($predicate ? self::isEqualityWithAClockRead($arg->value, $nativeOnly) : self::readsClock($arg->value, $nativeOnly))) {
                 return true;
@@ -972,7 +1085,7 @@ final class UnpinnedClockAssertions
             return self::readsClock($expr->left, $nativeOnly) || self::readsClock($expr->right, $nativeOnly);
         }
 
-        if (($expr instanceof MethodCall || $expr instanceof NullsafeMethodCall) && $expr->name instanceof Identifier
+        if (self::isOneOf($expr, self::METHOD_CALLS) && $expr->name instanceof Identifier
             && self::named($expr->name->toString(), self::PREDICATE_METHODS, self::PREDICATE_PREFIXES)) {
             return self::readsClock($expr, $nativeOnly);
         }

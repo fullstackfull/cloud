@@ -79,23 +79,29 @@ use Tests\Support\UnpinnedClockAssertions;
  *
  *  - **Controls.** `Fixtures/clock-reads-at-assertions.php.txt` holds tests
  *    named `found_*` (each must be reported) and `clean_*` (none may be), and
- *    the two lists are compared exactly, so a narrowed reader and a widened
- *    one both go red. Two kinds:
- *     - **one per element** of every constant the scanner decides by
- *       ({@see UnpinnedClockAssertions::VOCABULARY}, and every compared
- *       position of every {@see UnpinnedClockAssertions::EQUALITY} entry),
- *       named `<found|clean>_<prefix>__<element>`. The scanner decides by
- *       membership of those constants and nothing spelled elsewhere, and
+ *    the scanner's verdict on each is compared exactly. What that holds is
+ *    exactly this: every element of the constants listed in
+ *    {@see UnpinnedClockAssertions::VOCABULARY} (and every compared position
+ *    of every {@see UnpinnedClockAssertions::EQUALITY} entry) and every
+ *    behaviour named in {@see self::STRUCTURAL} has its own control, so a
+ *    change to the scanner that alters its verdict on one of them turns the
+ *    gate red. A behaviour in neither has no control and is not claimed to
+ *    be held.
+ *     - Element controls are named `<found|clean>_<prefix>__<element>`, and
  *       {@see self::every_element_the_scanner_recognises_has_its_own_control()}
  *       fails when an element has no control, when a control names an
- *       element no longer listed, or when a public list constant is missing
- *       from the vocabulary;
- *     - **one per structural claim** the docblock makes that no constant
- *       carries (set-up, parents, traits, `#[Before]`, inherited tests,
- *       `self::` resolution, callbacks, closures not leaking, relative and
- *       absolute literals, the function and clock-static argument flows,
- *       messages and bounds not read, the `031f6c9` and `e0aa0ab` shapes),
- *       listed in {@see self::STRUCTURAL}, each required to exist.
+ *       element no longer listed, when a public list constant is missing
+ *       from the vocabulary, when a {@see self::STRUCTURAL} control is
+ *       missing, or when two controls share a name.
+ *     - Structural controls are hand-written, one per behaviour the
+ *       scanner's code (rather than a constant) decides: how tests, set-up
+ *       and helpers are found and resolved, what the walk visits and in what
+ *       order, what flows and what does not, the literal rules, and the
+ *       `031f6c9` and `e0aa0ab` shapes. Two are methods that must *not* be
+ *       read as tests (`ignored_*`), so they are named outside `found_`/`clean_`.
+ *     - The file a finding names (the helper's, not the test's) needs two
+ *       sources, so {@see self::a_finding_in_a_helper_names_the_file_that_holds_it()}
+ *       holds it.
  *  - **Excuses.** A test may be excused only in {@see self::EXCUSES}, with its
  *    reason, and an excuse whose test no longer has the shape fails the gate:
  *    none outlives its reason.
@@ -164,6 +170,41 @@ final class NoAssertionComparesAClockReadOnAnUnpinnedClockTest extends TestCase
         'found_a_doc_tagged_test_let_go' => '@test marks a test',
         'clean_pinned_through_self' => 'self:: resolves from the class that wrote it',
         'found_the_native_clock_even_frozen' => 'PHP\'s own clock is a finding pinned',
+        'found_in_a_trait_test' => 'a test declared in a trait is read',
+        'clean_this_resolves_from_the_running_class' => '$this-> resolves from the class running the test',
+        'clean_static_resolves_from_the_running_class' => 'static:: resolves from the class running the test',
+        'clean_a_trait_method_before_the_parents' => 'a method resolves from traits before the parent',
+        'found_the_classs_own_method_before_its_traits' => 'a method resolves from the class before its traits',
+        'clean_pinned_by_a_parents_trait' => 'set-up is gathered from the parents\' traits',
+        'clean_pinned_by_a_trait_a_trait_uses' => 'set-up is gathered from traits a trait uses',
+        'clean_pinned_by_a_parents_before' => '#[Before] is gathered from parents',
+        'ignored_a_static_method' => 'a static method is not a test',
+        'ignored_a_protected_method' => 'a non-public method is not a test',
+        'found_in_another_closure' => 'any closure is walked where it is written',
+        'found_after_an_arrow_function_that_freezes' => 'an arrow function\'s pin does not leak',
+        'clean_a_pin_in_a_receiver' => 'a call\'s receiver is walked',
+        'clean_a_pin_in_an_argument' => 'a call\'s arguments are walked',
+        'clean_an_assertion_whose_arguments_pin' => 'an assertion is judged after its arguments are walked',
+        'found_native_inside_a_test_now_scope' => 'a test-now scope\'s callback is its second argument',
+        'clean_freeze_given_a_null_callback' => 'a pin given a null callback pins',
+        'clean_a_nullsafe_pin' => 'a nullsafe call on $this pins',
+        'found_a_nullsafe_predicate_method' => 'a nullsafe predicate method is an equality',
+        'clean_a_diff_between_two_stored_dates' => 'an implicit method reads the clock only given nothing',
+        'clean_age_on_a_frozen_clock' => 'freezing reaches age',
+        'clean_a_relative_word_that_is_not_the_first_argument' => 'only the first argument is read as a literal',
+        'clean_a_named_argument_of_a_non_equality_assertion' => 'a named argument of an assertion that compares nothing is not compared',
+        'clean_a_predicate_message' => 'a predicate\'s second argument is not compared',
+        'clean_make_of_a_blank_literal' => 'Carbon::make(\'\') is null, not now',
+        'found_a_constructor_of_a_blank_literal' => 'a constructor given \'\' is now',
+        'found_a_function_style_assertion' => 'a function-style assertion is an assertion',
+        'found_a_clock_function_in_capitals' => 'function names are read case-insensitively',
+        'clean_an_unpacked_argument' => 'an unpacked argument is not read',
+        'clean_a_class_declared_inside_a_test' => 'a class declared inside a test is not walked',
+        'found_after_a_pin_given_a_callable' => 'a pin given a non-closure callable leaves the clock free',
+        'found_an_assertion_inside_a_pin_argument' => 'a pin\'s other arguments are walked',
+        'found_an_assertion_inside_a_travel_argument' => 'travel()\'s arguments are walked',
+        'found_an_assertion_inside_a_setter_argument' => 'a test-now setter\'s arguments are walked',
+        'clean_a_pin_in_a_nullsafe_receiver' => 'a nullsafe call\'s receiver is walked',
     ];
 
     private static ?UnpinnedClockAssertions $suite = null;
@@ -254,7 +295,7 @@ final class NoAssertionComparesAClockReadOnAnUnpinnedClockTest extends TestCase
             $list = $scanner->getConstant($constant);
             $this->assertIsArray($list, "{$constant} is not a list the scanner has.");
             foreach (array_is_list($list) ? $list : array_keys($list) as $element) {
-                $required[] = sprintf('%s_%s__%s', $kind, $prefix, substr((string) strrchr('\\'.$element, '\\'), 1));
+                $required[] = sprintf('%s_%s__%s', $kind, $prefix, (string) preg_replace('/\W/', '', substr((string) strrchr('\\'.$element, '\\'), 1)));
             }
         }
         foreach (UnpinnedClockAssertions::EQUALITY as $assertion => $positions) {
@@ -273,14 +314,42 @@ final class NoAssertionComparesAClockReadOnAnUnpinnedClockTest extends TestCase
         }
 
         $this->assertSame([], $unlisted, 'These lists decide what the scanner reads but have no controls: add them to VOCABULARY.');
-        $this->assertSame([], array_values(array_diff($required, $controls)), 'These elements have no control of their own in the fixture.');
+        // A control satisfies a requirement by its name, or by its name after a
+        // prefix that makes it a test (`test_found_test_prefix__test`).
+        $satisfies = static fn (string $control, string $wanted): bool => $control === $wanted || str_ends_with($control, '_'.$wanted);
         $this->assertSame(
             [],
-            array_values(array_filter($controls, static fn (string $c): bool => str_contains($c, '__') && ! in_array($c, $required, true))),
+            array_values(array_filter($required, static fn (string $r): bool => array_filter($controls, static fn (string $c): bool => $satisfies($c, $r)) === [])),
+            'These elements have no control of their own in the fixture.',
+        );
+        $this->assertSame(
+            [],
+            array_values(array_filter($controls, static fn (string $c): bool => str_contains($c, '__')
+                && array_filter($required, static fn (string $r): bool => $satisfies($c, $r)) === [])),
             'These controls name an element no list holds any more.',
         );
-        $this->assertSame([], array_values(array_diff(array_keys(self::STRUCTURAL), $controls)), 'These structural controls are missing.');
+        $fixture = (string) file_get_contents(self::root().'/'.self::FIXTURE);
+        $this->assertSame(
+            [],
+            array_values(array_filter(array_keys(self::STRUCTURAL), static fn (string $c): bool => ! str_contains($fixture, "function {$c}("))),
+            'These structural controls are missing.',
+        );
         $this->assertSame(array_values(array_unique($controls)), $controls, 'Two controls share a name, so one of them is not told apart.');
+    }
+
+    /**
+     * A finding inside a helper names the file that holds the helper, not the
+     * test's: the one place a reader has to go to fix it.
+     */
+    #[Test]
+    public function a_finding_in_a_helper_names_the_file_that_holds_it(): void
+    {
+        $scanner = new UnpinnedClockAssertions([
+            'tests/A.php' => '<?php namespace T; final class ATest extends \\Tests\\TestCase { use H; #[\\PHPUnit\\Framework\\Attributes\\Test] public function t(): void { $this->check(); } }',
+            'tests/H.php' => '<?php namespace T; trait H { private function check(): void { $this->assertEquals(now(), $this->at); } }',
+        ]);
+
+        $this->assertSame(['tests/H.php'], array_column($scanner->findings(), 'file'));
     }
 
     #[Test]
