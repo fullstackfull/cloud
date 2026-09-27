@@ -1207,13 +1207,17 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
     }
 
     #[Test]
-    public function a_paid_change_from_before_this_period_that_never_recorded_delivery_blocks_nothing(): void
+    public function a_paid_change_from_before_the_last_period_that_never_recorded_delivery_blocks_nothing(): void
     {
         /*
          * `delivered_at` was added without a back-fill: a change settled
          * before it existed that queued nothing looks undelivered for ever.
-         * Only the current period's changes are read, so such a row cannot
-         * hold the customer's plan changes past a renewal.
+         * Only changes made in the current period and the one before it are
+         * read, so such a row cannot hold the customer's plan changes past
+         * a second renewal. (One period used to be read; a change paid just
+         * before a renewal and settled after it then stopped holding the
+         * next change - AChangePaidBeforeTheRenewalAndSettledAfterItIsStillAwaitedTest,
+         * round seven.)
          */
         [$customer, $user] = $this->accountWithOwner();
         $subscription = $this->paidSubscriptionOn($customer, $this->small);
@@ -1224,9 +1228,18 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
         Event::fake([InvoicePaid::class]);
         app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
 
-        PlanChange::query()->where('proration_invoice_id', $upgrade->getKey())
-            ->update(['changed_at' => CarbonImmutable::instance($subscription->fresh()->current_period_start)->subDay()]);
+        $start = CarbonImmutable::instance($subscription->fresh()->current_period_start);
 
+        // Made in the period before this one: still read, still held.
+        PlanChange::query()->where('proration_invoice_id', $upgrade->getKey())
+            ->update(['changed_at' => $start->subDay()]);
+        $this->changePlan($user, $subscription->fresh(), $this->xl, 'last-period-up-2')
+            ->assertStatus(409)
+            ->assertJsonPath('error.details.refusals', 'previous_change_pending');
+
+        // Made before that: not read.
+        PlanChange::query()->where('proration_invoice_id', $upgrade->getKey())
+            ->update(['changed_at' => $subscription->fresh()->billing_period->retreat($start)->subDay()]);
         $this->changePlan($user, $subscription->fresh(), $this->xl, 'old-period-up-2')->assertOk();
     }
 
