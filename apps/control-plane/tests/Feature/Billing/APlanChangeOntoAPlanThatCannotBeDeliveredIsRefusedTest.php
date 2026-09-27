@@ -14,6 +14,7 @@ use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
+use Lynomia\Modules\Compute\Domain\Services\NodeCapacityPolicy;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
@@ -161,6 +162,36 @@ final class APlanChangeOntoAPlanThatCannotBeDeliveredIsRefusedTest extends TestC
     }
 
     #[Test]
+    public function a_vps_upgrade_whose_growth_the_node_cannot_hold_is_refused(): void
+    {
+        /*
+         * The resize grows the machine where it runs. On a node already
+         * committed to within 1 GiB of its schedulable memory, a 4 GiB growth
+         * fails at the resize as capacity, with the upgrade paid for; it is
+         * refused before the money moves. The same node with room: offered.
+         */
+        [$subscription, $large, $node] = $this->vpsSubscriptionOnANode();
+
+        $policy = app(NodeCapacityPolicy::class);
+        $node->forceFill(['allocated_memory_mib' => $policy->schedulableMemoryMib($node) - 1_024])->save();
+
+        $this->assertSame(['not_deliverable'], $this->optionFor($subscription, (string) $large->getKey())['refusals']);
+        $this->changePlan($subscription, (string) $large->getKey(), $this->priceOf($large), 'vps-no-room')
+            ->assertStatus(409)
+            ->assertJsonPath('error.details.refusals', 'not_deliverable');
+        $this->assertSame(0, Invoice::query()->where('subscription_id', $subscription->getKey())->count());
+
+        $node->forceFill(['allocated_memory_mib' => 0, 'allocated_cpu_cores' => $node->usableCpuCores() - 1])->save();
+        $this->assertSame(['not_deliverable'], $this->optionFor($subscription, (string) $large->getKey())['refusals'], 'A vCPU growth the node cannot hold was offered.');
+
+        $node->forceFill(['allocated_cpu_cores' => 0, 'allocated_storage_gib' => $node->storage_gib - 10])->save();
+        $this->assertSame(['not_deliverable'], $this->optionFor($subscription, (string) $large->getKey())['refusals'], 'A disk growth the node cannot hold was offered.');
+
+        $node->forceFill(['allocated_storage_gib' => 0])->save();
+        $this->assertSame([], $this->optionFor($subscription, (string) $large->getKey())['refusals']);
+    }
+
+    #[Test]
     public function a_vps_resize_is_not_refused_for_what_only_a_new_machine_needs(): void
     {
         /*
@@ -291,6 +322,19 @@ final class APlanChangeOntoAPlanThatCannotBeDeliveredIsRefusedTest extends TestC
         return $this->actingAs($this->user)
             ->withHeader('Idempotency-Key', $key)
             ->postJson('/api/v1/subscriptions/'.$subscription->getKey().'/plan', ['plan_id' => $planId, 'price_id' => $priceId]);
+    }
+
+    /**
+     * @return array{0: Subscription, 1: Plan, 2: ComputeNode}
+     */
+    private function vpsSubscriptionOnANode(): array
+    {
+        [$subscription, $large] = $this->vpsSubscription(withMachine: true);
+
+        /** @var VirtualMachine $machine */
+        $machine = VirtualMachine::query()->whereHas('service', fn ($s) => $s->where('subscription_id', $subscription->getKey()))->sole();
+
+        return [$subscription, $large, $machine->node()->firstOrFail()];
     }
 
     /**

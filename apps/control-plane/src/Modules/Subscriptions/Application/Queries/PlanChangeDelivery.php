@@ -8,6 +8,8 @@ use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
+use Lynomia\Modules\Compute\Domain\Services\NodeCapacityPolicy;
+use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Provisioning\Application\Services\LocalPlacementFeasibility;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
@@ -50,8 +52,10 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *    fleet's room, which checkout also asks, is not: a plan change moves the
  *    existing account onto another package on its own node and places
  *    nothing new.
- *  - VPS, when the shape changes: the service has a machine to resize. The
- *    target plan's placement (cluster, address pool, image, a node in
+ *  - VPS, when the shape changes: the service has a machine to resize, and
+ *    the node it runs on can hold its growth (growthTheNodeCannotHold(), the
+ *    ceilings NodeCapacityPolicy holds a placement to). The target plan's
+ *    placement (cluster, address pool, image, a node in
  *    service), which checkout asks before building a new machine, is not
  *    asked: a resize is applied to the machine where it already runs and
  *    reads none of it, and refusing on it would refuse a change that can be
@@ -76,6 +80,7 @@ final readonly class PlanChangeDelivery
 {
     public function __construct(
         private HostingPackageForPlan $packages,
+        private NodeCapacityPolicy $capacity,
     ) {}
 
     /**
@@ -104,12 +109,70 @@ final readonly class PlanChangeDelivery
         }
 
         if ($service->kind === ProductKind::Vps->value) {
-            return VirtualMachine::query()->where('service_id', $service->getKey())->exists()
-                ? null
-                : 'the service has no virtual machine to resize';
+            /** @var VirtualMachine|null $machine */
+            $machine = VirtualMachine::query()->where('service_id', $service->getKey())->first();
+
+            return $machine === null
+                ? 'the service has no virtual machine to resize'
+                : $this->growthTheNodeCannotHold($machine, PlanResources::fromArray($plan->resources ?? []));
         }
 
         return 'nothing can change the shape of this product in place';
+    }
+
+    /**
+     * Why the node the machine runs on cannot hold its growth to the target
+     * shape; null when it can, or when the machine does not grow.
+     *
+     * A resize grows the machine where it runs, so the node must hold the
+     * growth: the ceilings a placement is held to (NodeCapacityPolicy) and
+     * only those - usable memory, the capacity threshold on it, the CPU
+     * overcommit ceiling and the node's storage - against what the node has
+     * committed plus the growth. Status, health and architecture are not
+     * asked: the machine is already there. A growth the node cannot hold is
+     * a resize that fails as capacity with the money held; it is refused
+     * before the money moves instead.
+     *
+     * The growth is measured from the machine's recorded shape.
+     *
+     * INTEGRATION SEAM: this is the arithmetic of
+     * NodeCapacityPolicy::assessGrowth() (round six, group D), which this
+     * base does not yet have. When both are merged this method's body
+     * becomes that call - growth from the machine's held capacity commitment
+     * where D records one - so the quote and the resize ask one question.
+     */
+    private function growthTheNodeCannotHold(VirtualMachine $machine, PlanResources $target): ?string
+    {
+        $vcpu = max(0, ($target->vcpu ?? $machine->vcpu) - $machine->vcpu);
+        $memory = max(0, ($target->memoryMib ?? $machine->memory_mib) - $machine->memory_mib);
+        $disk = max(0, ($target->diskGib ?? $machine->disk_gib) - $machine->disk_gib);
+
+        if ($vcpu === 0 && $memory === 0 && $disk === 0) {
+            return null;
+        }
+
+        /** @var ComputeNode|null $node */
+        $node = $machine->node()->first();
+
+        if ($node === null) {
+            return 'the machine is on no node to grow on';
+        }
+
+        $memoryAfter = $node->allocated_memory_mib + $memory;
+
+        if ($memoryAfter > $node->usableMemoryMib() || $memoryAfter > $this->capacity->schedulableMemoryMib($node)) {
+            return 'the node the machine runs on cannot hold its memory growth';
+        }
+
+        if ($node->allocated_cpu_cores + $vcpu > $node->usableCpuCores()) {
+            return 'the node the machine runs on cannot hold its vCPU growth';
+        }
+
+        if ($node->allocated_storage_gib + $disk > $node->storage_gib) {
+            return 'the node the machine runs on cannot hold its disk growth';
+        }
+
+        return null;
     }
 
     /**
