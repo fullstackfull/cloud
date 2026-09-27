@@ -279,6 +279,50 @@ final class AFailureWhileReconcilingOneNodeStopsOnlyThatNodeTest extends TestCas
         }
     }
 
+    /**
+     * The caller's transaction was aborted on the way to the listing (here an
+     * adapter that ran a statement which failed, and swallowed it), so the
+     * next statement is refused with 25P02. The node cannot be stamped either:
+     * stopped()'s first statement would be refused the same way, and that
+     * refusal would leave execute() in place of this one. What leaves is the
+     * exception the listing raised, the same object.
+     */
+    #[Test]
+    public function a_statement_refused_because_the_callers_transaction_was_aborted_is_let_out_as_it_was_thrown(): void
+    {
+        $node = $this->node('node-aborted', '2026-09-01 00:00:00');
+        $refused = null;
+        $panel = Mockery::mock(HostingProvider::class);
+        $panel->shouldReceive('listAccounts')->andReturnUsing(static function () use (&$refused): array {
+            try {
+                DB::statement('select 1 / 0');
+            } catch (QueryException) {
+                // Swallowed: the caller's transaction is now aborted.
+            }
+
+            try {
+                DB::select('select 1');
+            } catch (QueryException $e) {
+                $refused = $e;
+
+                throw $e;
+            }
+
+            return [];
+        });
+        $this->app->singleton(HostingProviderFactory::class);
+        app(HostingProviderFactory::class)->swap($node, $panel);
+
+        try {
+            app(ReconcileHostingNodes::class)->execute();
+            $this->fail('A statement refused in an aborted transaction was swallowed.');
+        } catch (QueryException $e) {
+            $this->assertNotNull($refused);
+            $this->assertSame('25P02', $refused->errorInfo[0] ?? null);
+            $this->assertSame($refused, $e, 'What left execute() was not the refusal the listing raised: '.$e->getMessage());
+        }
+    }
+
     #[Test]
     public function the_command_fails_when_a_node_failed_after_comparing_every_other(): void
     {

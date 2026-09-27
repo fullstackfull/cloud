@@ -107,7 +107,7 @@ final readonly class SchedulerCollector implements MetricsCollector
 
         return Metric::gauge(
             'lynomia_scheduled_command_consecutive_failures',
-            'How many times in a row each scheduled command has failed. Reset to zero by a success, so this distinguishes a flap from an outage.',
+            'How many runs in a row each scheduled command has failed, each failed run counted once. Reset to zero by a success, so this distinguishes a flap from an outage.',
             $samples,
         );
     }

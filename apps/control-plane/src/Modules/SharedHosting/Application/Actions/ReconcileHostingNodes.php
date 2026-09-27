@@ -155,6 +155,21 @@ final readonly class ReconcileHostingNodes
                  * failure did before.
                  */
                 [$counted, $found] = DB::transaction(function () use ($node, $listed): array {
+                    /*
+                     * The node's row first, locked until this transaction
+                     * ends. Every drift below is serialised on RecordDrift's
+                     * own advisory lock, which inside this transaction is held
+                     * until the node commits; two sweeps overlapping on one
+                     * node that met the drifts in different orders (their
+                     * listings came back in different orders) each held one
+                     * the other wanted, and PostgreSQL failed one of them with
+                     * a deadlock. With the node locked first, the second sweep
+                     * waits here, before it has taken any drift lock, and
+                     * compares once the first has committed.
+                     * TwoOverlappingHostingSweepsInTwoProcessesTest holds it.
+                     */
+                    HostingNode::query()->whereKey($node->getKey())->lockForUpdate()->first();
+
                     /** @var list<HostingAccount> $rows */
                     $rows = HostingAccount::query()
                         ->where('hosting_node_id', $node->getKey())
@@ -209,8 +224,15 @@ final readonly class ReconcileHostingNodes
      * detected"), and PostgreSQL words its messages in the server's
      * lc_messages: a deadlock reported in another language is still 40P01.
      *
-     * And a statement refused because the transaction was already aborted
-     * (25P02), at any level: there is nothing the node could be stamped with.
+     * And a statement refused because a transaction was already aborted
+     * (25P02). What this changes is which exception leaves execute(). When the
+     * aborted transaction is the caller's, stamping the node is refused the
+     * same way, and without this the refusal of stopped()'s first statement
+     * would leave in place of the one the node's work met.
+     * AFailureWhileReconcilingOneNodeStopsOnlyThatNodeTest::a_statement_refused_because_the_callers_transaction_was_aborted_is_let_out_as_it_was_thrown()
+     * holds that. It is let out at any level, so a 25P02 raised inside the
+     * node's own transaction ends the sweep too, although that transaction
+     * has been rolled back.
      */
     private static function rethrowWhatAbortsTheCallersTransaction(Throwable $e): void
     {

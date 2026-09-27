@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Monitoring;
 
-use Illuminate\Console\Events\ScheduledTaskFailed;
-use Illuminate\Console\Events\ScheduledTaskFinished;
-use Illuminate\Console\Events\ScheduledTaskSkipped;
+use Closure;
 use Illuminate\Console\Scheduling\Event as ScheduledEvent;
+use Illuminate\Console\Scheduling\EventMutex;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Lynomia\Modules\Monitoring\Application\Collectors\SchedulerCollector;
 use Lynomia\Modules\Monitoring\Infrastructure\Formatters\PrometheusTextFormatter;
 use Lynomia\Modules\Monitoring\Infrastructure\Models\ScheduledRun;
@@ -27,78 +27,199 @@ use Tests\TestCase;
  * lost in a redeploy, a container that came back without its supervisor:
  * nothing errors, no alert fires, and the first symptom is a customer whose
  * subscription was never renewed.
+ *
+ * Every outcome here comes from Laravel's own `schedule:run` (and, for a
+ * background task, its own `schedule:finish`), not from events this test
+ * dispatches by hand. An earlier version of this file dispatched
+ * ScheduledTaskFinished alone for a failure; Laravel dispatches it and then
+ * ScheduledTaskFailed for the same run, and the listener counted both, so the
+ * test was green while every failed run was counted twice.
  */
 final class SchedulerLivenessTest extends TestCase
 {
     use RefreshDatabase;
 
     #[Test]
-    public function a_successful_run_is_recorded_against_the_command(): void
+    public function one_failed_run_of_a_command_is_one_failure_and_two_are_two(): void
     {
-        event(new ScheduledTaskFinished($this->task('subscriptions:renew'), 1.25));
+        /*
+         * A command that exits non-zero in the foreground — the only kind of
+         * entry routes/console.php has. schedule:run dispatches
+         * ScheduledTaskFinished with the exit code, and then throws and
+         * dispatches ScheduledTaskFailed for the same run.
+         */
+        $this->scheduleOnly(fn (Schedule $s) => $s->exec('false'));
+
+        $this->runTheScheduler();
 
         $run = ScheduledRun::query()->sole();
+        $this->assertSame('false', $run->command);
+        $this->assertSame(1, $run->consecutive_failures);
+        $this->assertNull($run->last_succeeded_at);
+        $this->assertNotNull($run->last_failed_at);
+        $this->assertStringContainsString('exit code [1]', (string) $run->last_failure);
 
-        // Normalised to what a person would type. Laravel hands over the whole
-        // invocation — binary, artisan path, quoting — which differs between
-        // hosts and would make one command look like several.
-        $this->assertSame('subscriptions:renew', $run->command);
-        $this->assertNotNull($run->last_succeeded_at);
-        $this->assertSame(0, $run->consecutive_failures);
-        $this->assertSame(1250, $run->last_runtime_ms);
+        $this->runTheScheduler();
+
+        $this->assertSame(2, ScheduledRun::query()->sole()->consecutive_failures);
     }
 
     #[Test]
-    public function a_failure_is_counted_and_does_not_move_the_last_success(): void
+    public function a_failure_is_counted_and_does_not_move_the_last_success_and_a_success_resets_it(): void
     {
         /*
          * The distinction the whole table exists for. A command that runs
          * every five minutes and fails every time keeps its last_ran_at
          * perfectly fresh, and an alert built on that stays green through a
          * total outage of the thing it is watching.
+         *
+         * One command string, so one row: it fails while the flag file exists.
          */
-        event(new ScheduledTaskFinished($this->task('subscriptions:renew'), 1.0));
+        $flag = tempnam(sys_get_temp_dir(), 'sched-flag-');
+        unlink($flag);
+        $this->scheduleOnly(fn (Schedule $s) => $s->exec('test ! -e '.escapeshellarg($flag)));
 
-        $succeededAt = ScheduledRun::query()->sole()->last_succeeded_at;
+        try {
+            $this->runTheScheduler();
+            $succeededAt = ScheduledRun::query()->sole()->last_succeeded_at;
+            $this->assertNotNull($succeededAt);
+            $this->assertSame(0, ScheduledRun::query()->sole()->consecutive_failures);
 
-        event(new ScheduledTaskFailed(
-            $this->task('subscriptions:renew'),
-            new RuntimeException('the payment provider refused every renewal'),
-        ));
-        event(new ScheduledTaskFailed(
-            $this->task('subscriptions:renew'),
-            new RuntimeException('again'),
-        ));
+            touch($flag);
+            $this->travel(1)->minutes();
+            $this->runTheScheduler();
+            $this->travel(1)->minutes();
+            $this->runTheScheduler();
 
-        $run = ScheduledRun::query()->sole();
+            $run = ScheduledRun::query()->sole();
+            $this->assertEquals($succeededAt, $run->last_succeeded_at);
+            $this->assertSame(2, $run->consecutive_failures);
+            $this->assertNotNull($run->last_failure);
 
-        $this->assertEquals($succeededAt, $run->last_succeeded_at);
-        $this->assertSame(2, $run->consecutive_failures);
-        // The newest failure's words, not the first one's: an operator
-        // reading this wants to know why it is failing now.
-        $this->assertSame('again', $run->last_failure);
+            // A success clears the streak, so the metric distinguishes a flap
+            // from an outage.
+            unlink($flag);
+            $this->runTheScheduler();
 
-        // A success clears the streak, so the metric distinguishes a flap from
-        // an outage.
-        event(new ScheduledTaskFinished($this->task('subscriptions:renew'), 1.0));
-
-        $this->assertSame(0, ScheduledRun::query()->sole()->consecutive_failures);
+            $run = ScheduledRun::query()->sole();
+            $this->assertSame(0, $run->consecutive_failures);
+            $this->assertNull($run->last_failure);
+        } finally {
+            @unlink($flag);
+        }
     }
 
     #[Test]
-    public function a_non_zero_exit_code_is_a_failure_even_though_the_task_finished(): void
+    public function a_closure_that_throws_is_one_failure_per_run_with_its_own_words(): void
     {
-        // "Finished" means the process ended, not that the work happened.
-        $task = $this->task('ipam:reclaim');
-        $task->exitCode = 1;
+        // Laravel dispatches only ScheduledTaskFailed for this one.
+        $this->scheduleOnly(fn (Schedule $s) => $s
+            ->call(static function (): void {
+                throw new RuntimeException('the payment provider refused every renewal');
+            })
+            ->name('closure-throws'));
 
-        event(new ScheduledTaskFinished($task, 0.5));
+        $this->runTheScheduler();
 
         $run = ScheduledRun::query()->sole();
-
-        $this->assertNull($run->last_succeeded_at);
+        $this->assertSame('closure-throws', $run->command);
         $this->assertSame(1, $run->consecutive_failures);
-        $this->assertNotNull($run->last_ran_at);
+        $this->assertSame('the payment provider refused every renewal', $run->last_failure);
+
+        $this->runTheScheduler();
+
+        $this->assertSame(2, ScheduledRun::query()->sole()->consecutive_failures);
+    }
+
+    #[Test]
+    public function a_closure_that_returns_false_is_one_failure_per_run(): void
+    {
+        // Exit code 1 without an exception: Finished, then Failed, like a command.
+        $this->scheduleOnly(fn (Schedule $s) => $s->call(static fn (): bool => false)->name('closure-refuses'));
+
+        $this->runTheScheduler();
+
+        $this->assertSame(1, ScheduledRun::query()->sole()->consecutive_failures);
+
+        $this->runTheScheduler();
+
+        $this->assertSame(2, ScheduledRun::query()->sole()->consecutive_failures);
+    }
+
+    #[Test]
+    public function a_background_run_is_counted_by_its_outcome_and_not_by_its_launch(): void
+    {
+        /*
+         * runInBackground: schedule:run starts the process and dispatches
+         * ScheduledTaskFinished with no exit code yet; the outcome arrives
+         * later, when the backgrounded shell calls schedule:finish, as
+         * ScheduledBackgroundTaskFinished. The launch is not a success.
+         *
+         * `true` is what is launched, so the backgrounded shell succeeds and
+         * its own schedule:finish (in a separate process, which does not
+         * define this entry) changes nothing. The outcome this test counts is
+         * the one it hands schedule:finish itself.
+         */
+        $event = $this->scheduleOnly(fn (Schedule $s) => $s->exec('true')->runInBackground());
+
+        $this->runTheScheduler();
+
+        $this->assertSame(0, ScheduledRun::query()->count(), 'a launch is not an outcome');
+
+        Artisan::call('schedule:finish', ['id' => $event->mutexName(), 'code' => 1]);
+
+        $run = ScheduledRun::query()->sole();
+        $this->assertSame(1, $run->consecutive_failures);
+        $this->assertNull($run->last_succeeded_at);
+        $this->assertSame('exited with code 1', $run->last_failure);
+
+        Artisan::call('schedule:finish', ['id' => $event->mutexName(), 'code' => 1]);
+        $this->assertSame(2, ScheduledRun::query()->sole()->consecutive_failures);
+
+        Artisan::call('schedule:finish', ['id' => $event->mutexName(), 'code' => 0]);
+        $run = ScheduledRun::query()->sole();
+        $this->assertSame(0, $run->consecutive_failures);
+        $this->assertNotNull($run->last_succeeded_at);
+    }
+
+    #[Test]
+    public function a_background_success_keeps_the_runtime_a_foreground_run_measured(): void
+    {
+        // The outcome of a background run carries no runtime. It must not
+        // erase the one the same command's last foreground run recorded.
+        $this->scheduleOnly(fn (Schedule $s) => $s->exec('true'));
+        $this->runTheScheduler();
+        $measured = ScheduledRun::query()->sole()->last_runtime_ms;
+        $this->assertNotNull($measured);
+
+        $event = $this->scheduleOnly(fn (Schedule $s) => $s->exec('true')->runInBackground());
+        Artisan::call('schedule:finish', ['id' => $event->mutexName(), 'code' => 0]);
+
+        $run = ScheduledRun::query()->sole();
+        $this->assertNotNull($run->last_succeeded_at);
+        $this->assertSame($measured, $run->last_runtime_ms);
+        $this->assertStringContainsString('lynomia_scheduled_command_last_runtime_seconds{command="true"}', $this->scrape());
+    }
+
+    #[Test]
+    public function a_successful_run_is_recorded_against_the_command_as_a_person_would_type_it(): void
+    {
+        /*
+         * Normalised to what a person would type. Laravel hands over the whole
+         * invocation — binary, artisan path, quoting — which differs between
+         * hosts and would make one command look like several. `list` is run
+         * for real, in a child process, because it reads nothing and writes
+         * nothing.
+         */
+        $this->scheduleOnly(fn (Schedule $s) => $s->command('list'));
+
+        $this->runTheScheduler();
+
+        $run = ScheduledRun::query()->sole();
+        $this->assertSame('list', $run->command);
+        $this->assertNotNull($run->last_succeeded_at);
+        $this->assertSame(0, $run->consecutive_failures);
+        $this->assertNotNull($run->last_runtime_ms);
     }
 
     #[Test]
@@ -110,9 +231,49 @@ final class SchedulerLivenessTest extends TestCase
          * either as a run makes a command that is permanently stuck look
          * perfectly healthy, because the skips keep arriving on schedule.
          */
-        event(new ScheduledTaskSkipped($this->task('infrastructure:reconcile')));
+        $event = $this->scheduleOnly(fn (Schedule $s) => $s->exec('true')->withoutOverlapping(60));
+
+        // A previous invocation still running holds the mutex.
+        $this->assertTrue($event->mutex->create($event));
+
+        $this->runTheScheduler();
 
         $this->assertSame(0, ScheduledRun::query()->count());
+    }
+
+    #[Test]
+    public function a_run_that_loses_the_overlap_lock_after_its_filter_passed_is_not_a_run(): void
+    {
+        /*
+         * The other way withoutOverlapping skips. Its filter asks whether the
+         * mutex exists and finds it free; Event::run then fails to create it,
+         * because another invocation took it in between, and returns without
+         * running anything and with no exit code. schedule:run dispatches
+         * ScheduledTaskFinished for it all the same. A mutex that says it is
+         * free and refuses every create is that race, every time.
+         */
+        $refusing = new class implements EventMutex
+        {
+            public function create(ScheduledEvent $event): bool
+            {
+                return false;
+            }
+
+            public function exists(ScheduledEvent $event): bool
+            {
+                return false;
+            }
+
+            public function forget(ScheduledEvent $event): void {}
+        };
+
+        $event = $this->scheduleOnly(fn (Schedule $s) => $s->exec('false')->withoutOverlapping(60));
+        $event->preventOverlapsUsing($refusing);
+
+        $this->runTheScheduler();
+
+        $this->assertTrue($event->skippedBecauseOverlapping, 'The race this test is about did not happen.');
+        $this->assertSame(0, ScheduledRun::query()->count(), 'A run that never started was recorded.');
     }
 
     #[Test]
@@ -124,19 +285,21 @@ final class SchedulerLivenessTest extends TestCase
          * yet, which is how a monitoring system teaches people to ignore it in
          * its first hour.
          */
-        event(new ScheduledTaskFailed($this->task('payments:reconcile'), new RuntimeException('nope')));
+        $this->scheduleOnly(fn (Schedule $s) => $s->exec('false'));
+
+        $this->runTheScheduler();
 
         $exposition = $this->scrape();
 
         $this->assertStringNotContainsString(
-            'lynomia_scheduled_command_last_success_timestamp_seconds{command="payments:reconcile"}',
+            'lynomia_scheduled_command_last_success_timestamp_seconds{command="false"}',
             $exposition,
         );
 
         // The failure count is published, though: that is how a command that
-        // has never once worked becomes visible.
+        // has never once worked becomes visible. One run, one failure.
         $this->assertStringContainsString(
-            'lynomia_scheduled_command_consecutive_failures{command="payments:reconcile"} 1',
+            'lynomia_scheduled_command_consecutive_failures{command="false"} 1'."\n",
             $exposition,
         );
     }
@@ -144,16 +307,18 @@ final class SchedulerLivenessTest extends TestCase
     #[Test]
     public function the_exposition_carries_the_timestamp_an_alert_reads(): void
     {
-        event(new ScheduledTaskFinished($this->task('subscriptions:renew'), 2.0));
+        $this->scheduleOnly(fn (Schedule $s) => $s->exec('true'));
+
+        $this->runTheScheduler();
 
         $exposition = $this->scrape();
 
         $this->assertStringContainsString(
-            'lynomia_scheduled_command_last_success_timestamp_seconds{command="subscriptions:renew"}',
+            'lynomia_scheduled_command_last_success_timestamp_seconds{command="true"}',
             $exposition,
         );
         $this->assertStringContainsString(
-            'lynomia_scheduled_command_last_runtime_seconds{command="subscriptions:renew"} 2',
+            'lynomia_scheduled_command_last_runtime_seconds{command="true"}',
             $exposition,
         );
     }
@@ -166,7 +331,9 @@ final class SchedulerLivenessTest extends TestCase
          * series per customer, service or host is how a Prometheus falls over,
          * and this endpoint is scraped every fifteen seconds for ever.
          */
-        event(new ScheduledTaskFinished($this->task('subscriptions:renew'), 1.0));
+        $this->scheduleOnly(fn (Schedule $s) => $s->exec('true'));
+
+        $this->runTheScheduler();
 
         foreach (app(SchedulerCollector::class)->collect() as $metric) {
             foreach ($metric->samples as $sample) {
@@ -175,20 +342,30 @@ final class SchedulerLivenessTest extends TestCase
         }
     }
 
+    /**
+     * Replaces the application's schedule with the one entry a test defines,
+     * due every minute, so schedule:run runs exactly that.
+     *
+     * @param  Closure(Schedule): ScheduledEvent  $define
+     */
+    private function scheduleOnly(Closure $define): ScheduledEvent
+    {
+        $schedule = app(Schedule::class);
+
+        (function (): void {
+            $this->events = [];
+        })->call($schedule);
+
+        return $define($schedule)->everyMinute();
+    }
+
+    private function runTheScheduler(): void
+    {
+        Artisan::call('schedule:run');
+    }
+
     private function scrape(): string
     {
         return app(PrometheusTextFormatter::class)->render(app(SchedulerCollector::class)->collect());
-    }
-
-    private function task(string $command): ScheduledEvent
-    {
-        $task = app(Schedule::class)->command($command);
-
-        // As the scheduler really reports it: the binary, the artisan path and
-        // the quoting a host happens to produce.
-        $task->command = "'/usr/bin/php8.4' 'artisan' ".$command;
-        $task->exitCode = 0;
-
-        return $task;
     }
 }

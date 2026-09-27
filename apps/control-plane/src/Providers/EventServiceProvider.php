@@ -206,9 +206,9 @@ final class EventServiceProvider extends BaseEventServiceProvider
      * Subscribers, which map several events to their own methods.
      *
      * Scheduler liveness lives here rather than in $listen because it listens
-     * to three of Laravel's own console events and needs a different method
-     * for each: finished, failed, and skipped — where "skipped" deliberately
-     * records nothing.
+     * to four of Laravel's own console events and needs a different method
+     * for each: finished, background finished, failed, and skipped — where
+     * "skipped" deliberately records nothing.
      *
      * The failure being watched for is not a command that errors. It is a
      * command that stops being invoked at all — a crashed scheduler, a cron

@@ -42,7 +42,9 @@ VM rather than over the customer's live one — always, without exception.
 
 ## A restore or verification stuck in review
 
-A row in `needs_review` whose `quarantined_from` is `restoring` or `verifying` is an
+A row in `needs_review` whose `interrupted_operation` (in
+`GET /api/admin/backups/needs-review`; the column behind it is `quarantined_from`) is
+`restoring` or `verifying` is an
 operation the platform stopped watching after `backups.max_poll_hours`. The archive is
 not the problem; the platform's knowledge is.
 
