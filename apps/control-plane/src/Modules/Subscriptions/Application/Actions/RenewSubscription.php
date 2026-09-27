@@ -148,8 +148,10 @@ final readonly class RenewSubscription
              * is at next_invoice_at and so may be before the period's end if
              * this subscription invoices ahead. In this transaction, before the
              * new period is billed: whatever was paid on the invoice goes back
-             * to the wallet, the invoice is voided, and the subscription goes
-             * back to the plan it has paid for.
+             * to the wallet - now, what it still holds; and what a refund in
+             * flight is returning, by that refund, or, if the refund fails, to
+             * the wallet when the failure is recorded - the invoice is voided,
+             * and the subscription goes back to the plan it has paid for.
              *
              * Renewing it instead - at either amount - let the customer pay
              * the small proration invoice after the renewal and be built a

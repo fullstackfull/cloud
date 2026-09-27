@@ -16,6 +16,7 @@ use Lynomia\Modules\Billing\Application\Actions\RecordInvoiceRefund;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
 use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
+use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
@@ -35,13 +36,16 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Models\OrderItem;
+use Lynomia\Modules\Payments\Application\Actions\IngestWebhookEvent;
 use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
+use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
 use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
 use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
 use Lynomia\Modules\Payments\Domain\Exceptions\RefundExceedsCaptureException;
 use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Payments\Infrastructure\Providers\FakePaymentProvider;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
@@ -409,6 +413,59 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
         $this->renewalLineAfterThePeriod($this->subscriptionOf($upgrade));
 
         $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(0, $this->walletOf($customer));
+    }
+
+    #[Test]
+    public function a_pending_refund_that_fails_after_the_lapse_returns_what_it_had_left_to_the_wallet_once(): void
+    {
+        /*
+         * B2 (the round-four verifier). The lapse leaves to a pending refund
+         * what that refund is returning. When the refund then failed, its
+         * reservation was released and the void invoice held 5.005 again,
+         * credited nowhere.
+         */
+        [$customer, $upgrade, $capture] = $this->upgradePartPaidByCard(5_005);
+
+        // The controlled provider answers pending for an amount ending in 05.
+        $refund = app(IssueRefund::class)->execute($capture, Money::ofMinor(5_005, 'KWD'), 'customer asked');
+        $this->assertSame(RefundStatus::Pending, $refund->status);
+
+        $this->renewalLineAfterThePeriod($this->subscriptionOf($upgrade));
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(0, $this->walletOf($customer), 'Precondition: the lapse left it to the refund.');
+
+        $failed = (new FakePaymentProvider)->emitWebhook(ProviderEventKind::RefundSucceeded, (string) $refund->provider_reference, Money::ofMinor(5_005, 'KWD'), refundStatus: RefundStatus::Failed);
+        app(IngestWebhookEvent::class)->execute('fake', $failed->rawPayload, $failed->headers);
+
+        $this->assertSame(RefundStatus::Failed, $refund->fresh()?->status);
+        $this->assertSame(5_005, $this->walletOf($customer), 'What the failed refund left on the withdrawn invoice reached the wallet.');
+        $this->assertSame(0, WhatAnInvoiceStillHolds::minor($upgrade->fresh()));
+
+        // Once: a redelivered failure credits nothing more, and the capture
+        // is not refundable to the card as well.
+        app(IngestWebhookEvent::class)->execute('fake', $failed->rawPayload, $failed->headers);
+        $this->assertSame(5_005, $this->walletOf($customer));
+
+        try {
+            app(IssueRefund::class)->execute($capture->fresh(), Money::ofMinor(5_005, 'KWD'), 'again');
+            $this->fail('Money returned to the wallet was refunded to the card as well.');
+        } catch (RefundExceedsCaptureException) {
+        }
+    }
+
+    #[Test]
+    public function a_pending_refund_that_succeeds_after_the_lapse_is_booked_and_credits_nothing(): void
+    {
+        [$customer, $upgrade, $capture] = $this->upgradePartPaidByCard(5_005);
+        $refund = app(IssueRefund::class)->execute($capture, Money::ofMinor(5_005, 'KWD'), 'customer asked');
+
+        $this->renewalLineAfterThePeriod($this->subscriptionOf($upgrade));
+
+        $done = (new FakePaymentProvider)->emitWebhook(ProviderEventKind::RefundSucceeded, (string) $refund->provider_reference, Money::ofMinor(5_005, 'KWD'), refundStatus: RefundStatus::Succeeded);
+        app(IngestWebhookEvent::class)->execute('fake', $done->rawPayload, $done->headers);
+
+        $this->assertSame(5_005, $upgrade->fresh()?->amount_refunded_minor);
         $this->assertSame(0, $this->walletOf($customer));
     }
 

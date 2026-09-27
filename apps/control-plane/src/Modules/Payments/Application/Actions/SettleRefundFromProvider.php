@@ -36,7 +36,14 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
  *    exactly as IssueRefund announces a refund answered succeeded, so the
  *    invoice books it the same way;
  *  - failed or cancelled: the row is closed and its reservation released - no
- *    money moved, and the capture is refundable again;
+ *    money moved, and the capture is refundable again. When the invoice it was
+ *    against has meanwhile been withdrawn (void: an upgrade that lapsed, the
+ *    open invoice of a subscription that ended), the withdrawal left this
+ *    money to the refund; with the refund gone, what the void invoice holds
+ *    again goes to the wallet (ReturnWhatAnInvoiceStillHolds), under the lock
+ *    order refund, invoice, wallet. Otherwise a lapse during a pending refund
+ *    that then failed left 5.005 on a void invoice, credited nowhere
+ *    (verifier's n1_pending_refund_lapse_then_refund_fails);
  *  - still pending, or an event that names no refund: nothing.
  *
  * Only a pending row moves. A row already final is left as it is: a
@@ -51,6 +58,10 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
  */
 final readonly class SettleRefundFromProvider
 {
+    public function __construct(
+        private ReturnToTheWalletWhatAFailedRefundLeft $withdrawn,
+    ) {}
+
     /**
      * @return Transaction|null the capture the refund was against, when a refund of this platform's was found
      */
@@ -93,6 +104,8 @@ final readonly class SettleRefundFromProvider
             ])->save();
 
             if ($status !== RefundStatus::Succeeded) {
+                $this->withdrawn->returnWhatAVoidInvoiceHolds($refund, $capture);
+
                 return $capture;
             }
 

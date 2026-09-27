@@ -17,6 +17,7 @@ use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Payments\Infrastructure\Providers\FakePaymentProvider;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -81,6 +82,7 @@ final class ARefundThePendingProviderSettlesLaterIsBookedTest extends TestCase
         $this->assertSame(RefundStatus::Failed, $refund->refresh()->status);
         $this->assertSame(0, $invoice->refresh()->amount_refunded_minor);
         $this->assertSame(5_005, $capture->refresh()->refundableAmount()->minorUnits(), 'No money moved, so the capture is refundable again.');
+        $this->assertSame(0, (int) WalletTransaction::query()->where('invoice_id', $invoice->getKey())->sum('amount_minor'), 'The invoice still stands, so nothing of it goes to the wallet.');
 
         // And a late "succeeded" for a refund already closed changes nothing.
         $late = (new FakePaymentProvider)->emitWebhook(ProviderEventKind::RefundSucceeded, (string) $refund->provider_reference, Money::ofMinor(5_005, 'KWD'), refundStatus: RefundStatus::Succeeded);

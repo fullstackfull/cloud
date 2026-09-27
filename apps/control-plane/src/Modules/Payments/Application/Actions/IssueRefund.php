@@ -83,6 +83,7 @@ final readonly class IssueRefund
     public function __construct(
         private PaymentProviderRegistry $registry,
         private WalletLedger $wallet,
+        private ReturnToTheWalletWhatAFailedRefundLeft $failedRefundLeft,
     ) {}
 
     /**
@@ -138,6 +139,8 @@ final readonly class IssueRefund
                 'provider_metadata' => ['error' => $e->getMessage()],
             ])->save();
 
+            $this->failedRefundLeft->returnWhatAVoidInvoiceHolds($refund, $transaction);
+
             throw $e;
         }
 
@@ -154,6 +157,10 @@ final readonly class IssueRefund
          * on the invoice the same way; one that fails there releases what it
          * reserved.
          */
+        if (in_array($result->status, [RefundStatus::Failed, RefundStatus::Cancelled], true)) {
+            $this->failedRefundLeft->returnWhatAVoidInvoiceHolds($refund, $transaction);
+        }
+
         if ($result->status === RefundStatus::Succeeded) {
             event(new RefundIssued(
                 refundId: $refund->id,

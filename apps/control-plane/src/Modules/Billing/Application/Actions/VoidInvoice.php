@@ -31,7 +31,10 @@ use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
  * lapsing plan-change upgrade, or the open invoice of a subscription that has
  * ended, whose part payment ReturnWhatAnInvoiceStillHolds returns before
  * voiding it - or whose part payment a refund in flight is already returning,
- * which the return rightly leaves alone (N-1). With nothing gone back, any
+ * which the return leaves to that refund (N-1). Should that refund fail at the
+ * provider, what the void invoice then holds again goes to the wallet when the
+ * failure is recorded (IssueRefund, SettleRefundFromProvider: both call
+ * ReturnWhatAnInvoiceStillHolds for a void invoice). With nothing gone back, any
  * money on the invoice refuses the void as before; and a paid or refunded
  * invoice is refused for its money whatever went back, before the state
  * machine refuses the transition.
