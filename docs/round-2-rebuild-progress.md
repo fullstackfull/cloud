@@ -168,3 +168,13 @@ merging `round5/A2`, the directories it touches 383 / 383, exit 0. Vitest
 648 / 648, tsc and eslint clean; `make infra-validate` 0 (with the Ansible
 virtual environment on `PATH`, which the safety-gate self-test needs). An
 independent re-audit after round five follows.
+
+### Round six — fixing what the re-audit after round five finds
+
+The re-audit after round five is running against `00a6e68` (five bands and "what
+round five introduced", with skeptics). Findings so far are recorded here as they
+are fixed.
+
+| Band | Scope | Status | Commit |
+|---|---|---|---|
+| E | F-23 `Role` answered per case where roles are chosen (its by-value site was a read); the Registrant spelling names the write (coordinator) | upheld with reservations (one shared `Role::cases()` spelling does not tell six staff cases apart; the spelled check is a substring match) | `b350894` |
