@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Billing\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
 use Lynomia\Http\Concerns\AuthorisesWithinAccount;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
@@ -78,6 +79,17 @@ final class InvoiceController
             // need every line of every one of them, and GET /invoices/{id} is
             // where the lines live.
             ->withCount('items')
+            /*
+             * Whether each invoice bills a recorded plan change, read once for
+             * the page. The resource asks the plan-change questions behind
+             * `is_payable` and `plan_change_withdrawable` only of an open
+             * invoice that does - at most one per subscription, since no
+             * change can be made while one is open - where it used to ask
+             * them of every open subscription invoice, row by row.
+             */
+            ->addSelect([InvoiceResource::BILLS_A_PLAN_CHANGE => DB::table('subscription_plan_changes')
+                ->selectRaw('count(*) > 0')
+                ->whereColumn('subscription_plan_changes.proration_invoice_id', 'invoices.id')])
             ->when($status !== null, fn ($query) => $query->where('status', $status->value))
             // Issued order where it exists, falling back to creation for the
             // drafts that have no issue date yet. The ULID tie-breaks two

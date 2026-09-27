@@ -42,6 +42,9 @@ final class InvoiceResource extends JsonResource
 {
     use SerialisesMoney;
 
+    /** The column a list query adds to say whether an invoice bills a recorded plan change. */
+    public const string BILLS_A_PLAN_CHANGE = 'bills_a_plan_change';
+
     /**
      * Whether this is being serialised as a document rather than as a row in
      * a list. A document carries the billing snapshot; a row does not.
@@ -95,6 +98,7 @@ final class InvoiceResource extends JsonResource
             // way out of a change that cannot be delivered, and of one the
             // customer no longer wants.
             'plan_change_withdrawable' => $this->status->isCollectible()
+                && $this->billsAPlanChange() !== false
                 && app(WithdrawAnUnpaidPlanChange::class)->withdrawable($this->resource),
 
             // The customer's own order and subscription, so a client can link
@@ -198,6 +202,28 @@ final class InvoiceResource extends JsonResource
             return false;
         }
 
+        if ($this->billsAPlanChange() === false) {
+            // No recorded plan change: refusalForTheInvoice() answers null.
+            return true;
+        }
+
         return app(PlanChangeDelivery::class)->refusalForTheInvoice($this->resource) === null;
+    }
+
+    /**
+     * Whether the invoice bills a recorded plan change, when the query that
+     * loaded it said so (InvoiceController::index(), one subquery for the
+     * page); null when it did not ask, and the questions are asked in full.
+     * An invoice that bills none is neither refused for a plan change
+     * (refusalForTheInvoice() answers null) nor withdrawable (withdrawable()
+     * answers false), so neither is asked of it.
+     */
+    private function billsAPlanChange(): ?bool
+    {
+        $attributes = $this->resource->getAttributes();
+
+        return array_key_exists(self::BILLS_A_PLAN_CHANGE, $attributes) && $attributes[self::BILLS_A_PLAN_CHANGE] !== null
+            ? (bool) $attributes[self::BILLS_A_PLAN_CHANGE]
+            : null;
     }
 }
