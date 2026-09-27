@@ -2470,6 +2470,22 @@ return [
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'AdminInvitedOperator' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'The operator an invitation created or promoted, as AdminOperator describes one, plus whether the address already had a login. An existing login — a customer account, perhaps one somebody else registered, since registration asks for no proof of the mailbox — is promoted with every credential it held taken away: its password is replaced by one nobody knows, its sessions, remember-me token and personal access tokens are revoked and its second factor is cleared, and the reset link the invitation mails is the only way in. Its customer memberships stay with the login, which from then on belongs to whoever proves the mailbox.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'name' => ['type' => 'string'],
+            'email' => ['type' => 'string'],
+            'roles' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'is_privileged' => ['type' => 'boolean'],
+            'has_signed_in' => ['type' => 'boolean', 'description' => 'False for an invited operator who has not followed their one-time link yet — a promoted login included, whatever sign-ins it had before.'],
+            'two_factor_enabled' => ['type' => 'boolean'],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'promoted_existing_account' => ['type' => ['boolean', 'null'], 'description' => 'True when the address already had a login that was promoted, false when a new one was created. Null unless the caller is a super admin: a delegate holding role.manage is not told whether an address had a login.'],
+        ],
+    ],
     'AdminRole' => [
         'type' => 'object',
         'additionalProperties' => false,

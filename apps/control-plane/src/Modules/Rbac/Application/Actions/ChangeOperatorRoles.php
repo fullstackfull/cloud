@@ -13,7 +13,7 @@ use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
 
 /**
- * Sets the roles an operator holds, and refuses the four ways that is an
+ * Sets the roles an operator holds, and refuses the five ways that is an
  * escalation.
  *
  * ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
  * the role at the same time both see somebody else holding it.
  *
  * ---------------------------------------------------------------------------
- * The four refusals
+ * The five refusals
  * ---------------------------------------------------------------------------
  *
  *  - Your own account. Grant, use, revoke is the shortest escalation there is,
@@ -50,6 +50,14 @@ use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
  *    role away, and never from themselves, so what this binds is the race:
  *    two super admins demoting each other at once, each checked before the
  *    other's change landed. The locked read below settles it.
+ *  - A login that holds no staff role (`rbac.not_an_operator`). This route
+ *    takes any login's id, and a staff role given to a customer login is
+ *    operator authority for whoever holds that login's credentials — a
+ *    password somebody chose at POST /api/v1/register without proving the
+ *    mailbox (B1, re-audit after round five). A customer login becomes an
+ *    operator only through InviteOperator, which takes those credentials away
+ *    first; that is grantToInvited(), and nothing else calls it. An operator
+ *    whose roles were emptied is, for this rule, a customer login again.
  */
 final readonly class ChangeOperatorRoles
 {
@@ -64,6 +72,31 @@ final readonly class ChangeOperatorRoles
      */
     public function execute(User $actor, User $target, array $roles): User
     {
+        return $this->change($actor, $target, $roles, mayPromote: false);
+    }
+
+    /**
+     * The same change, for InviteOperator only: the one caller allowed to give
+     * a staff role to a login that holds none, because it has just taken every
+     * credential that login held away (InviteOperator::takeAwayFromWhoeverHeldIt)
+     * inside the same transaction.
+     *
+     * @param  list<string>  $roles
+     *
+     * @throws RoleChangeRefusedException
+     */
+    public function grantToInvited(User $actor, User $invited, array $roles): User
+    {
+        return $this->change($actor, $invited, $roles, mayPromote: true);
+    }
+
+    /**
+     * @param  list<string>  $roles
+     *
+     * @throws RoleChangeRefusedException
+     */
+    private function change(User $actor, User $target, array $roles, bool $mayPromote): User
+    {
         if ($actor->is($target)) {
             throw RoleChangeRefusedException::becauseItIsYourOwnAccount();
         }
@@ -71,12 +104,16 @@ final readonly class ChangeOperatorRoles
         $this->assertEveryRoleIsTheActorsToGive($actor, $roles);
 
         return $this->record->execute(
-            act: function () use ($actor, $target, $roles): User {
+            act: function () use ($actor, $target, $roles, $mayPromote): User {
                 /** @var User $locked */
                 $locked = User::query()->lockForUpdate()->findOrFail($target->getKey());
 
                 /** @var list<string> $before */
                 $before = $locked->getRoleNames()->values()->all();
+
+                if (! $mayPromote && $roles !== [] && ! InviteOperator::holdsAStaffRole($locked)) {
+                    throw RoleChangeRefusedException::becauseTheLoginIsNotAnOperator();
+                }
 
                 $this->assertEveryRemovedRoleIsTheActorsToTake($actor, $before, $roles);
 

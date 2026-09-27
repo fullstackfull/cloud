@@ -55,14 +55,28 @@ final class OperatorController
         /** @var User $actor */
         $actor = $request->user();
 
-        $operator = $invite->execute(
+        $invited = $invite->execute(
             $actor,
             $request->string('email')->value(),
             $request->string('name')->value(),
             $request->roles(),
         );
 
-        return response()->json(['data' => self::describe($operator->load('roles'))], Response::HTTP_CREATED);
+        return response()->json(['data' => [
+            ...self::describe($invited->operator->load('roles')),
+            /*
+             * Whether the address already had a login — a customer account,
+             * perhaps one somebody else registered — which was promoted, and
+             * had every credential it held taken away, rather than a new login
+             * created. That the address has a login is something a super admin
+             * may know; a delegate holding `role.manage` is not told either
+             * way (null), so this endpoint is not a way for a delegate to ask
+             * whether an address is a customer.
+             */
+            'promoted_existing_account' => $actor->hasRole(Role::SuperAdmin->value)
+                ? $invited->promotedAnExistingLogin
+                : null,
+        ]], Response::HTTP_CREATED);
     }
 
     public function updateRoles(
