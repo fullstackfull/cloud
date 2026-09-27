@@ -930,6 +930,9 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
 
         app(CancelSubscription::class)->execute($subscription, immediately: true);
 
+        // The wind-up returned it, before the settlement is heard.
+        $this->assertSame($upgrade->fresh()->total_minor, $this->walletOf($customer), 'The wind-up kept an upgrade paid for and never delivered.');
+
         app(ResizeOnPlanChangeSettlement::class)->handle(new InvoicePaid(
             invoiceId: (string) $upgrade->getKey(),
             customerId: (string) $customer->getKey(),
@@ -939,6 +942,78 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
         ));
 
         $this->assertSame(0, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->count());
+
+        /*
+         * OA-3 (the coordinator's ruling on round four's re-audit): the
+         * upgrade was paid for and never delivered - its resize suppressed
+         * because the subscription ended - so its money is returned to the
+         * wallet, by the wind-up, recorded against the invoice; the
+         * settlement heard afterwards returns nothing more. It used to be
+         * kept, "an operator's to refund", with a log line.
+         */
+        $total = $upgrade->fresh()->total_minor;
+        $this->assertGreaterThan(0, $total);
+        $this->assertSame($total, $this->walletOf($customer), 'The upgrade paid for and never delivered went back to the wallet.');
+        $this->assertSame($total, (int) WalletTransaction::query()->where('invoice_id', $upgrade->getKey())->sum('amount_minor'));
+        $this->assertSame(0, WhatAnInvoiceStillHolds::minor($upgrade->fresh()));
+    }
+
+    #[Test]
+    public function an_upgrade_paid_before_an_end_its_wind_up_did_not_see_is_returned_by_the_settlement_heard_after(): void
+    {
+        /*
+         * OA-3, the other order: the end came first and its wind-up did not
+         * see the paid upgrade (here the subscription is ended outside it),
+         * and the settlement is heard after. The settlement suppresses the
+         * resize and returns what the invoice holds to the wallet, once.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+        $this->changePlan($user, $subscription, $this->large, 'paid-then-ended-2')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        Event::fake([InvoicePaid::class]);
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+
+        $subscription->fresh()->forceFill(['status' => SubscriptionStatus::Cancelled])->save();
+
+        $paid = new InvoicePaid(
+            invoiceId: (string) $upgrade->getKey(),
+            customerId: (string) $customer->getKey(),
+            orderId: null,
+            subscriptionId: (string) $subscription->getKey(),
+            paidAt: CarbonImmutable::now(),
+        );
+
+        app(ResizeOnPlanChangeSettlement::class)->handle($paid);
+        // Redelivered.
+        app(ResizeOnPlanChangeSettlement::class)->handle($paid);
+
+        $total = $upgrade->fresh()->total_minor;
+        $this->assertSame(0, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->count());
+        $this->assertSame($total, $this->walletOf($customer), 'Returned, once.');
+        $this->assertSame(1, WalletTransaction::query()->where('invoice_id', $upgrade->getKey())->where('kind', WalletTransactionKind::Topup->value)->count());
+    }
+
+    #[Test]
+    public function an_upgrade_whose_resize_was_queued_before_the_end_is_kept(): void
+    {
+        // The control: heard before the end, the upgrade was delivered (its
+        // resize queued), so the end returns nothing of it.
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+        $this->changePlan($user, $subscription, $this->large, 'paid-then-ended-3')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+        $this->assertSame(1, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->count());
+
+        app(CancelSubscription::class)->execute($subscription->fresh(), immediately: true);
+
+        $this->assertSame(0, $this->walletOf($customer));
+        $this->assertSame(InvoiceStatus::Paid, $upgrade->fresh()?->status);
     }
 
     #[Test]

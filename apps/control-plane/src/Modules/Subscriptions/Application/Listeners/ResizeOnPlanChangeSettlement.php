@@ -16,6 +16,7 @@ use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\QueuePlanChangeAtProvider;
+use Lynomia\Modules\Subscriptions\Application\Actions\ReturnAnUpgradeTheEndPrevented;
 use Lynomia\Modules\Subscriptions\Domain\ValueObjects\PlanResources;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
@@ -107,6 +108,7 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
 
     public function __construct(
         private readonly QueuePlanChangeAtProvider $queueAtProvider,
+        private readonly ReturnAnUpgradeTheEndPrevented $returnAnUpgrade,
     ) {}
 
     public function handle(InvoicePaid $event): void
@@ -168,9 +170,13 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
      * so this is reached by an upgrade paid in the moment before the end,
      * whose settlement is heard after it. The machine it would have grown is
      * being switched off or is already gone; resizing it is work at a
-     * provider for a customer who will not have it. What the upgrade was paid
-     * for the rest of the period is treated as the rest of the period is on an
-     * immediate cancellation: kept, and an operator's to refund.
+     * provider for a customer who will not have it. And the upgrade, paid for
+     * and never delivered, is not kept: what its invoice still holds goes back
+     * to the wallet, recorded against the invoice
+     * ({@see ReturnAnUpgradeTheEndPrevented}, OA-3). The ended subscription's
+     * wind-up asks the same for an upgrade it saw paid; between them it is
+     * credited once. (This used to say the money was "kept, and an
+     * operator's to refund", with only this log line to surface it.)
      */
     private function hasEnded(Subscription $subscription, InvoicePaid $event): bool
     {
@@ -178,10 +184,13 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
             return false;
         }
 
+        $returned = $this->returnAnUpgrade->execute($event->invoiceId);
+
         Log::warning('A plan change was paid for a subscription that has since ended; nothing was resized.', [
             'invoice_id' => $event->invoiceId,
             'subscription_id' => (string) $subscription->getKey(),
             'status' => $subscription->status->value,
+            'returned_to_wallet_minor' => $returned,
         ]);
 
         return true;

@@ -24,7 +24,9 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  *    whose invoice will deliver nothing more: CreditWhatACancelledOrderPaid (a
  *    cancelled order), RenewSubscription (an upgrade that lapsed unpaid) and
  *    WindUpAnEndedSubscription (the open invoices of a subscription that has
- *    ended, which it then voids);
+ *    ended, which it then voids) and ReturnAnUpgradeTheEndPrevented (a paid
+ *    upgrade never delivered because its subscription ended, from the
+ *    wind-up or from the settlement heard after the end - OA-3);
  *  - CompensateUncollectableCapture credits a capture that landed on a
  *    withdrawn invoice, no more than the invoice still holds of it;
  *  - ApplyPlanChange credits a downgrade's unused time to the wallet, drawn on

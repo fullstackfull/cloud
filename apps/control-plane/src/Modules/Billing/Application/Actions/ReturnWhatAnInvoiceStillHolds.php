@@ -19,8 +19,10 @@ use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
  * One implementation for the actions that give an invoice's money back
  * because what it bought will not be delivered: a cancelled order's invoice
  * (CreditWhatACancelledOrderPaid), an upgrade that lapsed unpaid
- * (RenewSubscription), and the open invoices of a subscription that has ended
- * (CancelSubscription, EndTheSubscriptionWithItsService). Each used to carry
+ * (RenewSubscription), the open invoices of a subscription that has ended
+ * (CancelSubscription, EndTheSubscriptionWithItsService), and a paid upgrade
+ * that ending prevented from being delivered (ReturnAnUpgradeTheEndPrevented).
+ * Each used to carry
  * its own arithmetic, and the one in the renewal read the document's own
  * `amount_paid - amount_refunded` - blind to a card refund still pending at
  * the provider, and to a wallet refund whose row had not yet been booked onto

@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Billing\Application\Actions\ReturnWhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Application\Queries\LockAnInvoiceWhileOpen;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Subscriptions\Application\Listeners\EndTheSubscriptionWithItsService;
@@ -40,8 +41,15 @@ use Throwable;
  * (InvoiceNotPayableException::becauseItsSubscriptionHasEnded()), for an
  * invoice this could not void.
  *
- * Paid invoices are left as they are: what they bought was the period, or
- * the part of it, the subscription ran for.
+ * A paid renewal is left as it is: what it bought was the period, or the part
+ * of it, the subscription ran for. A paid upgrade is not always that: one
+ * paid in the moment before the end, whose settlement has not been heard, has
+ * no resize queued and never will (ResizeOnPlanChangeSettlement suppresses it
+ * on an ended subscription), so it bought nothing. That one is returned to
+ * the wallet here, recorded against it ({@see ReturnAnUpgradeTheEndPrevented},
+ * OA-3); an upgrade whose resize was queued before the end was delivered, and
+ * is kept. The settlement heard after the end asks the same question, for an
+ * upgrade this did not see, and the two credit it once between them.
  *
  * ---------------------------------------------------------------------------
  * Locks, and the plan an upgrade is not put back to
@@ -56,6 +64,14 @@ use Throwable;
  * leaves it alone: an ended subscription is not moved back to the plan an
  * unpaid upgrade left, nor audited as a plan change (O-4).
  *
+ * A paid upgrade returned here is locked (by the return) after the
+ * subscription - an invoice lock taken after a subscription, as
+ * ApplyPlanChange takes the paid invoices a credit draws on, and safe for
+ * the same reason: nothing holding a paid invoice's lock waits for a
+ * subscription (WhatAnInvoiceStillHolds). It is not locked with the open
+ * ones before `$end`, which is exactly the hold LockAnInvoiceWhileOpen
+ * exists to avoid.
+ *
  * Each withdrawal runs in its own savepoint and a failure is logged rather
  * than thrown, so one invoice that cannot be voided does not undo the ending
  * or leave the invoices after it payable. What is left open for that reason
@@ -69,6 +85,7 @@ final readonly class WindUpAnEndedSubscription
 {
     public function __construct(
         private ReturnWhatAnInvoiceStillHolds $returnWhatItHolds,
+        private ReturnAnUpgradeTheEndPrevented $returnAnUpgrade,
     ) {}
 
     /**
@@ -120,8 +137,37 @@ final readonly class WindUpAnEndedSubscription
                 $this->withdraw($invoice, (string) $fresh->getKey(), $why);
             }
 
+            $this->returnUpgradesNeverDelivered((string) $fresh->getKey());
+
             return $ended;
         });
+    }
+
+    /**
+     * The paid upgrades of the ended subscription that were never delivered
+     * (ReturnAnUpgradeTheEndPrevented decides which), each in its own
+     * savepoint for the reason a withdrawal is.
+     */
+    private function returnUpgradesNeverDelivered(string $subscriptionId): void
+    {
+        $paidUpgrades = Invoice::query()
+            ->where('subscription_id', $subscriptionId)
+            ->where('status', InvoiceStatus::Paid->value)
+            ->whereHas('items', static fn ($items) => $items->where('kind', InvoiceItemKind::Proration->value))
+            ->orderBy('id')
+            ->pluck('id');
+
+        foreach ($paidUpgrades as $id) {
+            try {
+                DB::transaction(fn (): int => $this->returnAnUpgrade->execute((string) $id));
+            } catch (Throwable $e) {
+                Log::warning('A subscription ended with an upgrade paid for and not delivered, and returning it to the wallet failed; the settlement heard after the end asks again.', [
+                    'subscription_id' => $subscriptionId,
+                    'invoice_id' => (string) $id,
+                    'reason' => $e->getMessage(),
+                ]);
+            }
+        }
     }
 
     private function withdraw(Invoice $invoice, string $subscriptionId, string $why): void
