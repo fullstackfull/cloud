@@ -156,7 +156,7 @@ reproduce. The unnumbered items it found stay unnumbered.
 | Band | Scope | Status | Commit |
 |---|---|---|---|
 | A | F-07 network attachability; system ledger keys a customer's Idempotency-Key can take; renewal/plan-change deadlock; undelivered paid upgrade on wind-up; refund failed after success; wording | fixing | — |
-| B | a customer-surface API token accepted on `/api/admin`; staff-gate oracle blind to `withoutMiddleware`; one-super-admin chain walked | fixing | — |
+| B | a customer-surface API token accepted on `/api/admin`; six route oracles blind to `withoutMiddleware`; domain-queue permission test; one-super-admin chain walked | upheld with reservations; merged `89eab7a`; stale `docs/api.md` counts and the "not present" paragraph corrected at integration | `8a2bd93` |
 | C | F-09 compare-and-set on the attempt; a scalar DirectAdmin `list` read as no accounts; file-restore lock oracle | fixing | — |
 | D | a VPS built with no gateway; a quarantine test red at midnight; capacity left on the node a retry moved away from | fixing | — |
 | E | F-23 per-case entries replace the by-value excuses for `NodeStatus`, `ServerState` and `DomainContactRole`; no whole-enum excuse beside per-case answers (coordinator) | rejected once (DomainContactRole), repaired; upheld with reservations (the pairing check has no dedicated test; the spelled check reads comments; a const-list writer is not seen) | `6568d78`, `8633cdb` |

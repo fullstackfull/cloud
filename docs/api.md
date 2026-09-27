@@ -13,14 +13,15 @@
 >
 > | Surface | Status |
 > |---|---|
-> | `/api/v1` identity, account and API tokens | implemented, 22 operations |
-> | `/api/v1` business — catalogue, orders, billing, wallet, services, VPS, backups, dedicated, hosting, IPAM | implemented, 39 operations |
-> | `/api/admin` — the operator surface | implemented, 12 operations, each gated on its own permission |
+> | `/api/v1` identity, account and API tokens | implemented |
+> | `/api/v1` business — catalogue, orders, billing, wallet, services, VPS, backups, dedicated, hosting, IPAM | implemented |
+> | `/api/admin` — the operator surface | implemented; every route behind the staff gate and its own permission, and reachable only from an operator's portal session (a personal access token is refused) |
 > | `/webhooks/{provider}` | implemented — signature verified before the body is parsed, replays acknowledged without being applied twice |
 >
-> Not present, and absent because it is not implemented rather than because it
-> is undocumented: a support-ticket API, DNS zone management, and restore or
-> delete for backups. See `docs/build-status.md`.
+> Support tickets, DNS zones and records, and backup restore, file restore and
+> deletion are routes like the rest and are listed in `docs/openapi.yaml`. What
+> each has been verified against — a simulator or a real provider — is recorded
+> in `docs/build-status.md`, not here.
 
 ## Two surfaces, one implementation
 
