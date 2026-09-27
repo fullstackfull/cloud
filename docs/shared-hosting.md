@@ -150,6 +150,10 @@ command holds none, so there it is recorded on the node like any other), a state
 refused because the transaction was already aborted, and a failure of the node's stamp
 itself — the database gone.
 
+Two sweeps overlapping on one node do not deadlock each other over its drifts. The
+node's comparison locks the node's row before it records anything, so the second sweep
+waits there and compares once the first has committed.
+
 `hosting:reconcile` prints how many nodes were compared, how many listings were not
 read, and how many nodes failed, and exits non-zero when any node failed, after every
 other node in the batch has been compared. A listing that was refused or not answered
