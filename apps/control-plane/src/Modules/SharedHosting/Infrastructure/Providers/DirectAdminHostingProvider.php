@@ -350,6 +350,17 @@ final class DirectAdminHostingProvider implements HostingProvider
          * used to report every live account on the node missing: Critical
          * drift and an alert, from a body that plainly named one. It is
          * refused, as any other unreadable read is.
+         *
+         * So is a list with an element that is not one account name. One that
+         * is not a string — `list[][]=bob`, `list[0][name]=bob` — used to be
+         * dropped without a word, which made those bodies an empty node; and
+         * one that is two names joined — `list[]=bob,alice`, a newline
+         * between them — was read as a single account nobody has, so both
+         * real ones went missing and a stranger stood in for them. An element
+         * is read as a name only when, once trimmed, it is empty (nothing
+         * there, as `list[]=` says) or passes isAccountName(). Anything else
+         * refuses the whole listing: dropping the element instead is the
+         * silent under-reading this exists to stop.
          */
         $list = $body['list'] ?? null;
 
@@ -362,19 +373,52 @@ final class DirectAdminHostingProvider implements HostingProvider
             );
         }
 
-        /** @var list<string> $names */
-        $names = array_values(array_filter(
-            is_array($list) ? $list : [],
-            static fn (mixed $name): bool => is_string($name) && trim($name) !== '',
-        ));
+        $names = [];
+
+        foreach (is_array($list) ? $list : [] as $element) {
+            $name = is_string($element) ? trim($element) : null;
+
+            if ($name === '') {
+                continue;
+            }
+
+            if ($name === null || ! self::isAccountName($name)) {
+                throw HostingProviderException::unexpectedResponse(
+                    self::NAME,
+                    'list_accounts',
+                    'an element of the account listing is not one account name, so the listing cannot be read as the accounts on the node',
+                    ['node' => $node->hostname, 'command' => 'CMD_API_SHOW_USERS'],
+                );
+            }
+
+            $names[] = $name;
+        }
 
         return array_map(
             static fn (string $name): RemoteAccount => new RemoteAccount(
-                username: trim($name),
+                username: $name,
                 primaryDomain: null,
             ),
             $names,
         );
+    }
+
+    /**
+     * Whether a listed name can be one DirectAdmin account name: lowercase
+     * letters and digits, beginning with a letter, no longer than
+     * HostingPanel::DirectAdmin->maxUsernameLength(). That is the shape the
+     * names this platform generates have (CreateHostingAccountHandler::
+     * usernameFor), and it holds no separator — no comma, whitespace, newline
+     * or punctuation — that could join two names in one. It is not a claim
+     * about every name a panel will ever list; a listing carrying a name
+     * outside it is refused as unreadable rather than guessed at, which costs
+     * a reconciliation pass on that node and never reports an account
+     * missing.
+     */
+    private static function isAccountName(string $name): bool
+    {
+        return strlen($name) <= HostingPanel::DirectAdmin->maxUsernameLength()
+            && preg_match('/\A[a-z][a-z0-9]*\z/', $name) === 1;
     }
 
     public function nodeHealth(HostingNode $node): NodeHealth

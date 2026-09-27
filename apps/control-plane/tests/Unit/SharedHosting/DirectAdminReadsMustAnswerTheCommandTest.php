@@ -133,6 +133,47 @@ final class DirectAdminReadsMustAnswerTheCommandTest extends TestCase
     /**
      * @return iterable<string, array{string}>
      */
+    public static function listingsWhoseElementsAreNotNames(): iterable
+    {
+        yield 'a list nested in the list' => ['list[][]=bob'];
+        yield 'a keyed field nested in the list' => ['list[0][name]=bob'];
+        yield 'a nested element beside a name' => ['list[]=alice&list[][]=bob'];
+        yield 'two names joined by a comma in one element' => ['list[]=bob,alice'];
+        yield 'two names joined by a newline in one element' => ['list[]=bob%0Aalice'];
+        yield 'two names joined by a space in one element' => ['list[]=bob%20alice'];
+        yield 'a name the panel could not have made' => ['list[]=alice&list[]=bob;rm'];
+    }
+
+    /**
+     * An element of the listing is an account only when it is one name. One
+     * that is not a string used to be filtered out without a word — so
+     * `list[][]=bob` was an empty node, and every live account on it missing
+     * to reconciliation — and one that is two names joined by a comma or a
+     * newline was read as a single account whose name no account has, so
+     * both real ones were missing and a stranger was reported in their
+     * place. Either way the listing is not read; it is refused, as any other
+     * unreadable read is.
+     */
+    #[Test]
+    #[DataProvider('listingsWhoseElementsAreNotNames')]
+    public function a_listing_with_an_element_that_is_not_one_account_name_is_refused(string $body): void
+    {
+        $this->fakeBodies(['CMD_API_SHOW_USERS' => $body]);
+
+        try {
+            $result = (new DirectAdminHostingProvider(new SecretRedactor))->listAccounts($this->node());
+        } catch (HostingProviderException $refusal) {
+            $this->assertStringContainsString('is not one account name', $refusal->getMessage());
+
+            return;
+        }
+
+        $this->fail('A listing with an element that is not one account name was read as: '.json_encode($result));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
     public static function emptyListings(): iterable
     {
         yield 'an empty value' => ['list='];
