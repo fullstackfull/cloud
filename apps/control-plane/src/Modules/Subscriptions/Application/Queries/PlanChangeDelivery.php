@@ -289,11 +289,25 @@ final readonly class PlanChangeDelivery
      * measure a change of shape from.
      *
      *  - A VPS with a machine: the machine's row (virtual_machines) - the
-     *    shape the hypervisor confirmed, written by every resize that
+     *    shape the hypervisor last confirmed, written by every resize that
      *    completes (ResizeVpsHandler), and the shape the resize refuses a
      *    disk shrink against. What grows, and whether the node can hold it,
      *    the resize measures from the machine as the hypervisor reports it,
      *    and so does the capacity question here (growthTheNodeCannotHold()).
+     *    The row is behind the machine while a resize the hypervisor
+     *    accepted is unconfirmed: its task still running
+     *    (`vps.resize_in_progress`, the job queued for its next attempt) or
+     *    its read-back failed or fell short (`vps.resize_unverified`, the job
+     *    in review). Neither is measured from here: QuotePlanChange refuses
+     *    every change of plan while a job of the service is queued, running
+     *    or in review (ServiceBusy), and so does the change itself, which
+     *    asks the quote's refusals again. `vps.resize_unverified` used to fail
+     *    the job, which holds nothing, and a downgrade was then quoted from
+     *    the row as no change of shape - credited, with no resize queued,
+     *    and the machine left large (A8-1, the re-audit after round seven).
+     *    What this does not cover: a job in review settled by anything but
+     *    its retry (which looks at the machine and writes the row) settles
+     *    without writing the row.
      *  - Otherwise the service's own recorded allocation where it has one,
      *    and else the plan given (the subscription's, or the one the change
      *    left).

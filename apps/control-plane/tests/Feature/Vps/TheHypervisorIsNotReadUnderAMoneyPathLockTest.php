@@ -21,8 +21,10 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 use Lynomia\Modules\Compute\Application\Actions\ReleaseNodeCapacity;
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
+use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
 use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
+use Lynomia\Modules\Compute\Infrastructure\Providers\FakeComputeProvider;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
@@ -43,6 +45,7 @@ use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Billing\BillingApiTestCase;
 use Tests\Feature\Vps\Concerns\DrivesVpsCreatesThroughTheOperatorPath;
+use Tests\Feature\Vps\Doubles\AnswerLosingComputeProvider;
 
 /**
  * The hypervisor is never read under a lock on the money path (B2, the
@@ -116,6 +119,49 @@ final class TheHypervisorIsNotReadUnderAMoneyPathLockTest extends BillingApiTest
         // Read once for the whole options screen, not once per plan.
         $this->assertSame(1, $reads->count('options'), json_encode($reads->all()));
         $this->assertSame(ProvisioningJobStatus::Queued, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->sole()->status);
+    }
+
+    #[Test]
+    public function the_resize_asks_its_task_and_reads_the_machine_outside_every_transaction(): void
+    {
+        /*
+         * Not a money path, and held to the same rule: the resize asks the
+         * hypervisor about a task an earlier attempt left running
+         * (ComputeProvider::getTask(), D8-1, the re-audit after round seven)
+         * and reads the machine, and none of it under a transaction - its
+         * transactions are MachineCommitment::restate()'s, opened after.
+         */
+        config()->set('compute.fake.task_delay_seconds', 600);
+        $this->hypervisor = new AnswerLosingComputeProvider(new FakeComputeProvider);
+        $this->hypervisor->loseTheAnswerToCreates = false;
+        app(ComputeProviderFactory::class)->swap($this->cluster, $this->hypervisor);
+
+        [$customer] = $this->accountWithOwner();
+        $this->customer = $customer;
+        $small = $this->plan('small', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 40], 9_000);
+        $machine = $this->builtMachineFor($this->paidSubscriptionOn($customer, $small), $small);
+        $resize = ProvisioningJob::factory()->create([
+            'service_id' => $machine->service_id, 'customer_id' => $customer->id, 'kind' => ProvisioningJobKind::Resize,
+            'provider' => 'fake', 'status' => ProvisioningJobStatus::Queued,
+            'payload' => ['virtual_machine_id' => (string) $machine->id, 'vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160],
+        ]);
+
+        $reads = $this->recordEveryRead();
+        $asks = [];
+        $base = DB::transactionLevel();
+        $this->hypervisor->atTheMomentOfTaskAsk = static function () use (&$asks, $base): void {
+            $asks[] = DB::transactionLevel() - $base;
+        };
+
+        $reads->at('resize');
+        $this->runWorker($resize);
+        $this->runWorker($resize);
+        $this->hypervisor->atTheMomentOfLook = null;
+
+        $this->assertSame('vps.resize_in_progress', $resize->refresh()->result['error']['code'] ?? null);
+        $this->assertSame([0], $asks, 'The task was not asked about, or was asked under a transaction.');
+        $this->assertGreaterThanOrEqual(1, $reads->count('resize'));
+        $this->assertSame([], $reads->under(), 'The hypervisor was read under a transaction: '.json_encode($reads->all()));
     }
 
     #[Test]

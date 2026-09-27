@@ -81,6 +81,20 @@ final class AnswerLosingComputeProvider implements ComputeProvider
      */
     public bool $reportNoFigures = false;
 
+    /**
+     * When set, a machine is read back without its disk figure, as the
+     * Proxmox adapter reports a machine whose `maxdisk` it could not read.
+     */
+    public bool $reportNoDisk = false;
+
+    /**
+     * When set, run at every ask about a task, before the fleet is asked: how
+     * a test records when a task was asked about.
+     *
+     * @var ?Closure(string, string): void
+     */
+    public ?Closure $atTheMomentOfTaskAsk = null;
+
     /** When set, every resize fails with this before the fleet is touched. */
     public ?ComputeProviderException $failResizesWith = null;
 
@@ -217,6 +231,10 @@ final class AnswerLosingComputeProvider implements ComputeProvider
 
         $machine = $this->reportNoMachines ? null : $this->fleet->getVm($nodeName, $providerId);
 
+        if ($machine !== null && $this->reportNoDisk) {
+            $machine = $machine->withShape($machine->vcpu, $machine->memoryMib, null);
+        }
+
         if ($machine === null || ! $this->reportNoFigures) {
             return $machine;
         }
@@ -241,6 +259,10 @@ final class AnswerLosingComputeProvider implements ComputeProvider
 
     public function getTask(string $nodeName, string $taskId): RemoteTaskState
     {
+        if ($this->atTheMomentOfTaskAsk !== null) {
+            ($this->atTheMomentOfTaskAsk)($nodeName, $taskId);
+        }
+
         return $this->fleet->getTask($nodeName, $taskId);
     }
 

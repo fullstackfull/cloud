@@ -137,16 +137,24 @@ enum NotificationType: string
      * failure has been charged, and the payment is held for an operator to
      * complete the change or return it: PlanChangeFailedAfterPayment. The one
      * message used to tell both that nothing had been charged.
+     * PlanChangeFailedAfterPayment says nothing of the state the service is
+     * in: it said the service was "still running as it was", which was false
+     * of a resize the hypervisor made and could not confirm - then failed
+     * (A8-1, the re-audit after round seven; such a resize now stops in
+     * review).
      */
     case PlanChangeFailed = 'service.plan_change_failed';
     case PlanChangeFailedAfterPayment = 'service.plan_change_failed_after_payment';
     /*
      * A paid plan change whose provider half stopped in review - a resize
-     * the node could no longer hold, retried to the end, or a package change
-     * that timed out. The build's "needs our attention" says setting the
-     * service up did not finish, which is not what happened: the customer is
-     * told the change is waiting for the team and what they paid for it is
-     * held (NotifyOnProvisioningOutcome).
+     * the node could no longer hold, retried to the end, a resize whose
+     * outcome could not be confirmed, or a package change that timed out.
+     * The build's "needs our attention" says setting the service up did not
+     * finish, which is not what happened: the customer is told the change is
+     * waiting for the team and what they paid for it is held
+     * (NotifyOnProvisioningOutcome). Not that the service runs as it was: a
+     * resize that could not be confirmed may have been made, so the message
+     * says only that the service may not match the new plan yet.
      */
     case PlanChangeNeedsReview = 'service.plan_change_needs_review';
     case ReinstallCompleted = 'service.reinstall_completed';

@@ -139,6 +139,13 @@ final class FakeComputeProvider implements ComputeProvider
     private const string TASK_USER = 'fake@pve!lynomia';
 
     /**
+     * Marks the task id of an operation this simulator finished before it
+     * answered - the prefix the Proxmox adapter gives an operation Proxmox
+     * completes synchronously, so getTask() answers it the same way.
+     */
+    private const string SYNCHRONOUS_TASK_PREFIX = 'sync:';
+
+    /**
      * Machines this instance has created, keyed by node and provider id.
      *
      * @var array<string, array<string, RemoteVmState>>
@@ -151,6 +158,16 @@ final class FakeComputeProvider implements ComputeProvider
      * @var array<string, true>
      */
     private array $destroyed = [];
+
+    /**
+     * Disk growths a resize has started and not yet finished, keyed by node
+     * and provider id: the GiB each adds and the time its task started. A
+     * growth lands on the machine when a read finds its task finished - the
+     * same test getTask() makes of the task's UPID (see resizeVm()).
+     *
+     * @var array<string, array<string, list<array{gib: int, started_at: int}>>>
+     */
+    private array $pendingDiskGrowth = [];
 
     private int $taskDelaySeconds;
 
@@ -326,6 +343,27 @@ final class FakeComputeProvider implements ComputeProvider
         return $this->changePowerState($nodeName, $providerId, 'reset', PowerState::Running);
     }
 
+    /**
+     * Changes a machine's shape, and says honestly whether it has finished.
+     *
+     * vCPU and memory are changed before the answer, as the Proxmox adapter's
+     * config PUT is. A disk growth is the part Proxmox can answer with a
+     * task (the adapter reports a UPID as RemoteTaskStatus::Running), and
+     * this used to apply it at once while answering Running - a simulator in
+     * which "the task has not finished" and "the disk has grown" were always
+     * both true, so a caller that read the machine back while the task ran
+     * could not be caught recording the old disk (D8-1, the re-audit after
+     * round seven; the F-24 shape).
+     *
+     * So, with no task delay configured (the default), the whole change is
+     * made before the answer and the answer is Succeeded, under a
+     * synchronous task id. With a delay, a disk growth is started rather
+     * than made: the answer is Running under a UPID that getTask() reports
+     * running until the delay has passed, and the growth lands on the
+     * machine at the first read at or after that time - read by an instance
+     * whose delay says the task has finished, as getTask() reads the UPID.
+     * A change with no disk growth is finished at the answer either way.
+     */
     public function resizeVm(string $nodeName, string $providerId, ResizeVmRequest $request): VmOperation
     {
         if ($request->isEmpty()) {
@@ -342,21 +380,46 @@ final class FakeComputeProvider implements ComputeProvider
             throw $this->noSuchMachine($nodeName, $providerId, 'resize_vm');
         }
 
+        $startsATask = $request->diskGib !== null && $this->taskDelaySeconds > 0;
+
         $this->machines[$nodeName][$providerId] = $machine->withShape(
             vcpu: $request->vcpu ?? $machine->vcpu,
             memoryMib: $request->memoryMib ?? $machine->memoryMib,
             // A disk request is a growth, never an absolute size, which is the
             // same rule the real adapter enforces.
-            diskGib: $request->diskGib === null ? $machine->diskGib : ($machine->diskGib ?? 0) + $request->diskGib,
+            diskGib: $request->diskGib === null || $startsATask ? $machine->diskGib : ($machine->diskGib ?? 0) + $request->diskGib,
         );
+
+        if (! $startsATask) {
+            $this->writeSharedFleet();
+
+            return new VmOperation(
+                taskId: self::SYNCHRONOUS_TASK_PREFIX.'resize_vm:'.$nodeName.':'.$providerId,
+                nodeName: $nodeName,
+                providerId: $providerId,
+                operation: 'resize_vm',
+                status: RemoteTaskStatus::Succeeded,
+                metadata: array_filter(['disk_gib_added' => $request->diskGib], static fn (?int $gib): bool => $gib !== null),
+            );
+        }
+
+        $taskId = $this->upid($nodeName, 'qmresize', $providerId, false);
+        $this->pendingDiskGrowth[$nodeName][$providerId][] = [
+            'gib' => (int) $request->diskGib,
+            // The start time the UPID carries, so the growth lands exactly
+            // when getTask() first reports the task finished.
+            'started_at' => (int) hexdec(explode(':', $taskId)[4]),
+        ];
 
         $this->writeSharedFleet();
 
         return new VmOperation(
-            taskId: $this->upid($nodeName, 'qmconfig', $providerId, false),
+            taskId: $taskId,
             nodeName: $nodeName,
             providerId: $providerId,
             operation: 'resize_vm',
+            status: RemoteTaskStatus::Running,
+            metadata: ['disk_gib_added' => $request->diskGib],
         );
     }
 
@@ -474,7 +537,7 @@ final class FakeComputeProvider implements ComputeProvider
             ], indeterminate: true);
         }
 
-        unset($this->machines[$nodeName][$providerId]);
+        unset($this->machines[$nodeName][$providerId], $this->pendingDiskGrowth[$nodeName][$providerId]);
 
         /*
          * The tombstone is written now even though the task reports running
@@ -625,6 +688,10 @@ final class FakeComputeProvider implements ComputeProvider
     {
         $this->readSharedFleet();
 
+        foreach (array_keys($this->machines[$nodeName] ?? []) as $providerId) {
+            $this->landFinishedGrowth($nodeName, (string) $providerId);
+        }
+
         $machines = $this->machines[$nodeName] ?? [];
 
         // Sorted so that a test asserting on the second machine is asserting
@@ -636,6 +703,10 @@ final class FakeComputeProvider implements ComputeProvider
 
     public function getTask(string $nodeName, string $taskId): RemoteTaskState
     {
+        if (str_starts_with($taskId, self::SYNCHRONOUS_TASK_PREFIX)) {
+            return new RemoteTaskState($taskId, $nodeName, RemoteTaskStatus::Succeeded, 'OK');
+        }
+
         $parts = explode(':', $taskId);
 
         // UPID:node:pid:pstart:starttime:type:id:user: — eight fields and a
@@ -774,8 +845,48 @@ final class FakeComputeProvider implements ComputeProvider
     private function machine(string $nodeName, string $providerId): ?RemoteVmState
     {
         $this->readSharedFleet();
+        $this->landFinishedGrowth($nodeName, $providerId);
 
         return $this->machines[$nodeName][$providerId] ?? null;
+    }
+
+    /**
+     * Applies to the machine every disk growth whose task this instance
+     * reports finished (resizeVm()), and publishes the fleet when one landed.
+     */
+    private function landFinishedGrowth(string $nodeName, string $providerId): void
+    {
+        $pending = $this->pendingDiskGrowth[$nodeName][$providerId] ?? [];
+        $machine = $this->machines[$nodeName][$providerId] ?? null;
+
+        if ($pending === [] || $machine === null) {
+            return;
+        }
+
+        $landed = 0;
+        $waiting = [];
+
+        foreach ($pending as $growth) {
+            if (time() < $growth['started_at'] + $this->taskDelaySeconds) {
+                $waiting[] = $growth;
+            } else {
+                $landed += $growth['gib'];
+            }
+        }
+
+        if ($landed === 0) {
+            return;
+        }
+
+        $this->machines[$nodeName][$providerId] = $machine->withShape($machine->vcpu, $machine->memoryMib, ($machine->diskGib ?? 0) + $landed);
+
+        if ($waiting === []) {
+            unset($this->pendingDiskGrowth[$nodeName][$providerId]);
+        } else {
+            $this->pendingDiskGrowth[$nodeName][$providerId] = $waiting;
+        }
+
+        $this->writeSharedFleet();
     }
 
     /**
@@ -808,9 +919,12 @@ final class FakeComputeProvider implements ComputeProvider
         $machines = $state['machines'] ?? [];
         /** @var array<string, true> $destroyed */
         $destroyed = $state['destroyed'] ?? [];
+        /** @var array<string, array<string, list<array{gib: int, started_at: int}>>> $pending */
+        $pending = $state['pending_disk_growth'] ?? [];
 
         $this->machines = $machines;
         $this->destroyed = $destroyed;
+        $this->pendingDiskGrowth = $pending;
     }
 
     /**
@@ -821,6 +935,7 @@ final class FakeComputeProvider implements ComputeProvider
         $this->store?->write([
             'machines' => $this->machines,
             'destroyed' => $this->destroyed,
+            'pending_disk_growth' => $this->pendingDiskGrowth,
         ]);
     }
 

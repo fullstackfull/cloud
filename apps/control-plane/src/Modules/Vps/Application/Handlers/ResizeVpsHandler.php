@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Vps\Application\Handlers;
 
+use Lynomia\Modules\Compute\Domain\DTOs\RemoteVmState;
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\VmOperation;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Domain\Exceptions\NodeCapacityExceededException;
 use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
@@ -55,8 +57,14 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  * commitment are settled to what the hypervisor reported. A machine the
  * hypervisor reports no such machine for is not resized and nothing is
  * committed (`vps.machine_not_found`, transient); a read that fails is the
- * same, nothing having been asked. What is not reported (a figure the
- * adapter could not read) is taken from the row.
+ * same, nothing having been asked. A vCPU or memory figure that is not
+ * reported (one the adapter could not read) is taken from the row. A disk
+ * that is not reported is not: a growth measured from the row was applied
+ * again whenever the row was behind the machine, exactly as above (D8-2, the
+ * re-audit after round seven), so a resize that would grow the disk past the
+ * row while the hypervisor reports no disk asks nothing and commits nothing
+ * (`vps.disk_not_reported`, transient). A disk target no larger than the row
+ * grows nothing either way.
  *
  * ---------------------------------------------------------------------------
  * The row moves after the provider does
@@ -66,6 +74,44 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  * confirmed it, and this is the opposite order from the power handler. A power
  * state that is briefly wrong is a display problem; a shape that is wrong is
  * a record that says the customer has what they do not.
+ *
+ * Confirmed means two things. First, the task has finished. The Proxmox
+ * adapter answers a disk growth with the UPID Proxmox gives it as
+ * RemoteTaskStatus::Running (VmOperation::isInFlight()); the machine was read
+ * back at once all the same, reported the disk it had, and the job succeeded
+ * with the old disk recorded while the machine went on to grow (D8-1, the
+ * re-audit after round seven). A resize answered in flight is now not read
+ * back: its task is kept on the job's result (TASK_IN_FLIGHT) and the attempt
+ * ends `vps.resize_in_progress`, transient - the engine's backoff, the way
+ * the platform waits on a task elsewhere by asking again later
+ * (PollProviderTasks) - with the commitment left at the ceiling, because the
+ * machine is one shape or the other. The next attempt asks the task
+ * (ComputeProvider::getTask()) before it looks at the machine: still running
+ * is the same finding again, and an ask that fails is transient as a failed
+ * look is, the task staying on the job - either way nothing is asked or
+ * committed; finished, the task is forgotten and the attempt goes on as any
+ * other, looking at the machine the task left. When the attempts run out
+ * with the task still running the job stops in review with the task on it,
+ * and an operator's retry asks it first too. The task is not the job's
+ * remote_job_id, which RetryProvisioningJob refuses to retry. A task
+ * started by another job is not asked: nothing serialises two resizes of
+ * one machine (below); on the customer's path a plan change is refused while
+ * a job of the service is queued, running or in review (ServiceBusy).
+ *
+ * Second, the machine read back is the shape asked for, in every figure that
+ * was sent (confirms()): the vCPU and the memory, and a disk at least the
+ * target. A figure that was asked for and not reported used to be recorded
+ * as the target; it is not confirmation now, and neither is a figure that
+ * differs, and either settles as an unverified resize (below). What this
+ * cannot establish without a real cluster: the adapter reads the machine
+ * from Proxmox's `status/current`, and whether a vCPU or memory change that
+ * Proxmox holds pending until the guest restarts (no hotplug) is reported
+ * there as the old figure or the new one has not been observed - no real
+ * Proxmox has been read. If it is the old figure, the resize is not
+ * confirmed and stops in review with the commitment at the larger shape; if
+ * it is the new figure, the row and the commitment record the new shape
+ * while the guest runs the old one until it restarts. The simulator makes
+ * vCPU and memory changes at once and cannot tell the two apart.
  *
  * ---------------------------------------------------------------------------
  * The commitment moves before the machine does
@@ -95,15 +141,22 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  *  - a refusal the hypervisor gave (nothing changed) sets it back to the
  *    machine row, read the same way; an outcome that is unknown leaves it
  *    raised, because the machine may have grown and the job goes to a person;
- *  - a resize the hypervisor accepted whose machine then cannot be read back
- *    (`vps.resize_unverified`) is settled to what is known: the machine is
- *    either the shape read just before the resize or the shape the accepted
- *    change makes of it, so the commitment is set to the larger of the two,
- *    per dimension, and any excess the ceiling held above both is given
- *    back. It used to be left at the ceiling, and nothing settled it after
- *    (the failure is permanent). The row is not written - nothing confirmed
- *    the shape - and a retry, which looks at the machine first, settles both
- *    to what the hypervisor then reports.
+ *  - a resize the hypervisor accepted whose machine then cannot be read back,
+ *    or is read back short of what was asked (`vps.resize_unverified`), is
+ *    settled to what is known: the machine is either the shape read just
+ *    before the resize or the shape the accepted change makes of it, so the
+ *    commitment is set to the larger of the two, per dimension (and of any
+ *    figure the read-back did report), and any excess the ceiling held above
+ *    them is given back. It used to be left at the ceiling. The row is not
+ *    written - nothing confirmed the shape. The failure is a timeout, so the
+ *    job stops in review and is never retried by the engine: it was
+ *    permanent, the job failed, a failed job does not hold the service's
+ *    plan changes, and a downgrade was then quoted from the row the resize
+ *    had not written - credited 27.000 KWD with no resize queued, and the
+ *    machine stayed large (A8-1, the re-audit after round seven). In review
+ *    it holds them (QuotePlanChange's ServiceBusy) until a person settles
+ *    it; an operator's retry looks at the machine first and settles the row
+ *    and the commitment to what the hypervisor then reports.
  *
  * Nothing serialises two resizes of one machine, which is why the settling
  * restatements read the row under the lock rather than use the model this
@@ -137,6 +190,21 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  */
 final readonly class ResizeVpsHandler implements ProvisioningHandler
 {
+    /** The job's finding while the hypervisor is still running the resize's task. */
+    public const string IN_PROGRESS = 'vps.resize_in_progress';
+
+    /** The job's finding when a disk growth was asked and the hypervisor reported no disk to measure it from. */
+    public const string DISK_NOT_REPORTED = 'vps.disk_not_reported';
+
+    /** The job's finding when the machine read back after the resize does not confirm it. */
+    public const string UNVERIFIED = 'vps.resize_unverified';
+
+    /**
+     * Where on the job's result the task an attempt left running is kept, so
+     * the next attempt asks about it before it looks at the machine.
+     */
+    public const string TASK_IN_FLIGHT = 'resize_task_in_flight';
+
     public function __construct(
         private ComputeProviderFactory $computeProviders,
         private SecretRedactor $redactor,
@@ -197,10 +265,28 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
         try {
             $provider = $this->computeProviders->for($cluster);
 
+            /*
+             * A resize task an earlier attempt of this job left running is
+             * asked about first (the class docblock): while it runs, the
+             * machine still reports the shape it had, and a growth measured
+             * from that would be applied twice.
+             */
+            $earlier = $this->taskAnEarlierAttemptLeftRunning($job);
+
+            if ($earlier !== null) {
+                if (! $provider->getTask($earlier['node'], $earlier['id'])->isFinished()) {
+                    return $this->stillRunning($machineId, $earlier['id']);
+                }
+
+                // Finished: what it did is on the machine the look below reads.
+                $this->forgetTheTask($job);
+            }
+
             // Looked at before it is changed (the class docblock).
             $actual = $provider->getVm($node->provider_name, (string) $machine->provider_id);
         } catch (ComputeProviderException $e) {
-            // Only a read: nothing was asked of the machine and nothing is committed.
+            // Only reads: nothing was asked of the machine and nothing is
+            // committed. A task not yet asked about stays on the job.
             return ProvisioningResult::failed(
                 FailureClass::Transient,
                 $e->errorCode(),
@@ -215,6 +301,22 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
                 'vps.machine_not_found',
                 'The hypervisor reports no such machine, so nothing was resized.',
                 metadata: ['virtual_machine_id' => $machineId, 'node' => $node->provider_name],
+            );
+        }
+
+        if ($targetDisk !== null && $actual->diskGib === null && $targetDisk > $machine->disk_gib) {
+            /*
+             * A growth is measured from the disk the hypervisor reports, and
+             * it reported none. Measured from the row instead, a growth that
+             * already landed while the row was behind was applied again
+             * (D8-2, the re-audit after round seven): nothing is asked and
+             * nothing is committed until the disk can be read.
+             */
+            return ProvisioningResult::failed(
+                FailureClass::Transient,
+                self::DISK_NOT_REPORTED,
+                'The hypervisor did not report the machine\'s disk, so the growth could not be measured from it and nothing was resized.',
+                metadata: ['virtual_machine_id' => $machineId, 'requested_disk_gib' => $targetDisk],
             );
         }
 
@@ -327,8 +429,24 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
             );
         }
 
-        // Read back rather than assumed. This is the step that makes the
-        // difference between "we asked" and "the machine is that size".
+        if ($operation->isInFlight()) {
+            /*
+             * Accepted as a task that has not finished - Proxmox answers a
+             * disk growth with a UPID (the class docblock). Read now, the
+             * machine reports the disk it had, and that used to be recorded
+             * as the resize's outcome. Kept on the job and asked about by the
+             * next attempt; the commitment stays at the ceiling meanwhile,
+             * because the machine is one shape or the other.
+             */
+            $this->rememberTheTask($job, $operation, $node->provider_name);
+
+            return $this->stillRunning($machineId, $operation->taskId);
+        }
+
+        // Read back rather than assumed, once the task has finished. This is
+        // the step that makes the difference between "we asked" and "the
+        // machine is that size": a figure that was asked for and is not
+        // reported at it is not taken to be so.
         try {
             $state = $provider->getVm($node->provider_name, (string) $machine->provider_id);
             $unread = $state === null ? 'the hypervisor reported no such machine' : null;
@@ -337,26 +455,33 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
             $unread = $this->redactor->redactString($e->getMessage());
         }
 
-        if ($state === null) {
+        if ($state !== null && ! $this->confirms($state, $request, $targetDisk)) {
+            $unread = 'the machine read back is not the shape the resize asked for';
+        }
+
+        if ($state === null || $unread !== null) {
             /*
              * Settled to what is known (the class docblock): the shape read
-             * before the resize or the one the accepted change makes, the
-             * larger per dimension. Not left at the ceiling.
+             * before the resize, the one the accepted change makes, and
+             * whatever the read-back reported, the larger per dimension. Not
+             * left at the ceiling.
              */
             $known = new VmResources(
-                vcpu: max($currentVcpu, $request->vcpu ?? $currentVcpu),
-                memoryMib: max($currentMemory, $request->memoryMib ?? $currentMemory),
-                diskGib: $currentDisk + ($diskGrowth ?? 0),
+                vcpu: max($currentVcpu, $request->vcpu ?? $currentVcpu, $state?->vcpu ?? 0),
+                memoryMib: max($currentMemory, $request->memoryMib ?? $currentMemory, $state?->memoryMib ?? 0),
+                diskGib: max($currentDisk + ($diskGrowth ?? 0), $state?->diskGib ?? 0),
             );
 
             if (! $this->commitment->restate($machine, $node, $known, refuse: false)) {
                 return $this->goneWhileResizing($machineId);
             }
 
+            // A timeout: the machine may be either shape, and only a person
+            // can go and look (the class docblock).
             return ProvisioningResult::failed(
-                FailureClass::Permanent,
-                'vps.resize_unverified',
-                'The machine could not be read back after the resize.',
+                FailureClass::Timeout,
+                self::UNVERIFIED,
+                'The machine could not be read back as the shape the resize asked for.',
                 metadata: [
                     'virtual_machine_id' => $machineId,
                     'reason' => (string) $unread,
@@ -367,9 +492,11 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
             );
         }
 
-        $machine->vcpu = $state->vcpu ?? $targetVcpu ?? $machine->vcpu;
-        $machine->memory_mib = $state->memoryMib ?? $targetMemory ?? $machine->memory_mib;
-        $machine->disk_gib = $state->diskGib ?? $targetDisk ?? $machine->disk_gib;
+        // What the hypervisor reported; a figure it did not report, which
+        // was not asked for (confirms()), stays as the row had it.
+        $machine->vcpu = $state->vcpu ?? $machine->vcpu;
+        $machine->memory_mib = $state->memoryMib ?? $machine->memory_mib;
+        $machine->disk_gib = $state->diskGib ?? $machine->disk_gib;
         $machine->save();
 
         // The commitment is now the machine as the hypervisor confirmed it:
@@ -389,6 +516,73 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
                 'disk_gib' => $machine->disk_gib,
             ],
         );
+    }
+
+    /**
+     * Whether the machine read back is the shape asked for, in every figure
+     * that was asked: the vCPU and memory sent, and a disk at least the
+     * target once a growth was sent. A figure asked for and not reported is
+     * not confirmation.
+     */
+    private function confirms(RemoteVmState $state, ResizeVmRequest $request, ?int $targetDisk): bool
+    {
+        return ($request->vcpu === null || $state->vcpu === $request->vcpu)
+            && ($request->memoryMib === null || $state->memoryMib === $request->memoryMib)
+            && ($request->diskGib === null || ($state->diskGib !== null && $targetDisk !== null && $state->diskGib >= $targetDisk));
+    }
+
+    /**
+     * The hypervisor has not finished the resize's task. Transient, so the
+     * engine asks again after its backoff, and when the attempts run out the
+     * job stops in review with the task still on it, where an operator's
+     * retry asks about it first. Not recorded as the job's remote_job_id:
+     * RetryProvisioningJob refuses a job that holds one, and a resize whose
+     * task outlasted the attempts is exactly the job a retry must be able to
+     * finish.
+     */
+    private function stillRunning(string $machineId, string $taskId): ProvisioningResult
+    {
+        return ProvisioningResult::failed(
+            FailureClass::Transient,
+            self::IN_PROGRESS,
+            'The hypervisor has not finished the resize task; the machine is read back once it has.',
+            metadata: ['virtual_machine_id' => $machineId, 'task_id' => $taskId],
+        );
+    }
+
+    /**
+     * @return array{id: string, node: string}|null
+     */
+    private function taskAnEarlierAttemptLeftRunning(ProvisioningJob $job): ?array
+    {
+        $task = ($job->result ?? [])[self::TASK_IN_FLIGHT] ?? null;
+
+        if (! is_array($task) || ! is_string($task['id'] ?? null) || ! is_string($task['node'] ?? null)) {
+            return null;
+        }
+
+        return ['id' => $task['id'], 'node' => $task['node']];
+    }
+
+    /**
+     * Written the moment the task exists, as a create writes its handle: a
+     * worker that dies before the engine records this attempt leaves it
+     * behind for the next.
+     */
+    private function rememberTheTask(ProvisioningJob $job, VmOperation $operation, string $nodeName): void
+    {
+        $job->forceFill(['result' => [
+            ...($job->result ?? []),
+            self::TASK_IN_FLIGHT => ['id' => $operation->taskId, 'node' => $nodeName],
+        ]])->save();
+    }
+
+    private function forgetTheTask(ProvisioningJob $job): void
+    {
+        $result = $job->result ?? [];
+        unset($result[self::TASK_IN_FLIGHT]);
+
+        $job->forceFill(['result' => $result])->save();
     }
 
     /**
