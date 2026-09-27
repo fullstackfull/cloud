@@ -303,7 +303,10 @@ final readonly class QuotePlanChange
              * often because the last upgrade's invoice is open. A move priced
              * from it would price money that has not arrived: the re-audit
              * flapped small -> large -> small, paid nothing and was credited
-             * 162.000 KWD. Pay, or have it voided, and the change is available.
+             * 162.000 KWD. Pay, or have it voided, and the change is available;
+             * an invoice for an unpaid plan change the customer can withdraw
+             * themselves (WithdrawAnUnpaidPlanChange) - the way out when that
+             * change can no longer be delivered and cannot be paid (N2).
              */
             $refusals[] = PlanChangeRefusal::InvoiceOutstanding;
         }

@@ -30,14 +30,23 @@ use Lynomia\Modules\Billing\Http\Controllers\SubscriptionController;
  * that hands customers a broken file, and nobody would find out until an
  * accountant asked for one.
  *
- * **No customer route edits an invoice.** No PATCH, no void, no refund. An
- * invoice is frozen once issued, and every figure on it is moved by the
- * settlement, void and refund actions on the platform's own side. The one POST
- * on an invoice here is POST {invoice}/wallet-credit, which pays the invoice
- * from the customer's wallet (PayInvoiceFromWallet) - a settlement, through
- * the same action as any other, never a write to what the invoice says it
- * bought. (The other two POSTs in this file are on a subscription: cancel and
- * plan, below.) Paying by card is the Payments module's surface.
+ * **No customer route edits an invoice.** No PATCH, no refund, and no void of
+ * an invoice as such. An invoice is frozen once issued, and every figure on it
+ * is moved by the settlement, void and refund actions on the platform's own
+ * side. Two POSTs on an invoice here go through those actions:
+ * POST {invoice}/wallet-credit pays the invoice from the customer's wallet
+ * (PayInvoiceFromWallet) - a settlement, through the same action as any
+ * other, never a write to what the invoice says it bought; and
+ * POST {invoice}/withdraw-plan-change withdraws the unpaid plan change the
+ * invoice bills (WithdrawAnUnpaidPlanChange): what it holds goes back to the
+ * wallet, the platform's void withdraws it and puts the subscription back on
+ * the plan it came from - what a renewal's lapse does, now without waiting
+ * for the renewal. Refused (409 `invoice.plan_change_not_withdrawable`) for
+ * any other invoice. It exists because a change that can no longer be
+ * delivered cannot be paid, and its open invoice held every other change of
+ * plan until the renewal (N2 / X7-2). (The other two POSTs in this file are
+ * on a subscription: cancel and plan, below.) Paying by card is the Payments
+ * module's surface.
  *
  * **No renewal route.** RenewSubscription is the worker's entry point and
  * refuses anything the due-for-renewal scope excludes.
@@ -114,6 +123,16 @@ Route::prefix('invoices')->as('invoices.')->group(function (): void {
         ->whereUlid('invoice')
         ->middleware('throttle:30,1,wallet-credit:')
         ->name('wallet_credit.pay');
+
+    /*
+     * Withdrawing the unpaid plan change an invoice bills. Limited as a plan
+     * change is: it moves the subscription back and can return money to the
+     * wallet. Safe to repeat - a second call finds nothing open to withdraw.
+     */
+    Route::post('{invoice}/withdraw-plan-change', [InvoiceController::class, 'withdrawPlanChange'])
+        ->whereUlid('invoice')
+        ->middleware('throttle:10,1,plan-change-withdraw:')
+        ->name('plan_change.withdraw');
 });
 
 Route::prefix('subscriptions')->as('subscriptions.')->group(function (): void {

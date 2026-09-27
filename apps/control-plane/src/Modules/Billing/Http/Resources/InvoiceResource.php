@@ -10,6 +10,8 @@ use Lynomia\Http\Concerns\SerialisesMoney;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Subscriptions\Application\Actions\WithdrawAnUnpaidPlanChange;
+use Lynomia\Modules\Subscriptions\Application\Queries\PlanChangeDelivery;
 use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 
 /**
@@ -78,10 +80,22 @@ final class InvoiceResource extends JsonResource
             'amount_refunded' => $this->moneyOfMinor($this->amount_refunded_minor, $this->currency),
             'amount_due' => $this->moneyOfMinor($this->amount_due_minor, $this->currency),
 
-            // Asked of the enum that decides, so a client's "can I pay this?"
-            // cannot drift away from what the platform would actually accept.
-            'is_payable' => $this->status->isCollectible(),
+            // Asked of what decides, so a client's "can I pay this?" cannot
+            // drift away from what the platform would actually accept: the
+            // status, and - for a plan change's invoice - whether the change
+            // can still be delivered, the question both payments ask
+            // (PlanChangeDelivery::refusalForTheInvoice()). This read the
+            // status alone and said `true` of an invoice whose card and
+            // wallet payments were both refused (X7-2).
+            'is_payable' => $this->isPayable(),
             'is_settled' => $this->status->isSettled(),
+
+            // Whether the unpaid plan change this invoice bills can be
+            // withdrawn (POST /invoices/{invoice}/withdraw-plan-change): the
+            // way out of a change that cannot be delivered, and of one the
+            // customer no longer wants.
+            'plan_change_withdrawable' => $this->status->isCollectible()
+                && app(WithdrawAnUnpaidPlanChange::class)->withdrawable($this->resource),
 
             // The customer's own order and subscription, so a client can link
             // the document back to what it bills for. Both are ids within the
@@ -169,5 +183,21 @@ final class InvoiceResource extends JsonResource
         unset($snapshot['customer_id']);
 
         return $snapshot;
+    }
+
+    /**
+     * Whether a payment of this invoice would be taken: it is collectible,
+     * and the plan change it bills (if any) can still be delivered. The
+     * other refusals a payment can make - nothing owed, a capture waiting to
+     * be applied, an ended subscription whose open invoices its wind-up
+     * withdraws - are not read here.
+     */
+    private function isPayable(): bool
+    {
+        if (! $this->status->isCollectible()) {
+            return false;
+        }
+
+        return app(PlanChangeDelivery::class)->refusalForTheInvoice($this->resource) === null;
     }
 }

@@ -13,7 +13,7 @@ import { PageHeader } from '@/components/PageHeader'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate } from '@/lib/format'
-import { useInvoice, usePayment } from '@/lib/queries'
+import { useInvoice, usePayment, useWithdrawPlanChange } from '@/lib/queries'
 import type {
   BillingSnapshot,
   InvoiceItem,
@@ -50,6 +50,8 @@ export function InvoiceDetailPage() {
   const { data: invoice, isPending, error } = useInvoice(id)
   const launch = usePaymentLaunch()
   const launchError = describeError(launch.error)
+  const withdraw = useWithdrawPlanChange()
+  const withdrawError = describeError(withdraw.error)
 
   /*
    * A customer coming back from the provider's page arrives with a payment id
@@ -142,6 +144,22 @@ export function InvoiceDetailPage() {
                 {t('invoices.pay')}
               </Button>
             ) : null}
+            {/*
+             * The way out of an unpaid plan change - above all one that can no
+             * longer be delivered, which cannot be paid and whose open invoice
+             * holds every other change of plan. Offered only where the server
+             * says the change can be withdrawn; what withdrawing does is the
+             * server's (it voids the invoice and puts the plan back).
+             */}
+            {invoice.plan_change_withdrawable === true ? (
+              <Button
+                variant={invoice.is_payable ? 'ghost' : 'primary'}
+                loading={withdraw.isPending}
+                onClick={() => { withdraw.mutate(invoice.id) }}
+              >
+                {t('invoices.withdrawPlanChange')}
+              </Button>
+            ) : null}
           </div>
         }
       />
@@ -150,6 +168,18 @@ export function InvoiceDetailPage() {
         {launchError !== null ? (
           <Alert tone="error" requestId={launchError.requestId}>
             {launchError.message}
+          </Alert>
+        ) : null}
+
+        {withdrawError !== null ? (
+          <Alert tone="error" requestId={withdrawError.requestId}>
+            {withdrawError.message}
+          </Alert>
+        ) : null}
+
+        {invoice.plan_change_withdrawable === true ? (
+          <Alert tone={invoice.is_payable ? 'info' : 'warning'}>
+            {invoice.is_payable ? t('invoices.withdrawPlanChangeHint') : t('invoices.planChangeCannotBePaid')}
           </Alert>
         ) : null}
 
