@@ -337,7 +337,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -564,7 +564,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -950,7 +950,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -2603,7 +2603,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -2887,7 +2887,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -4229,7 +4229,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -4374,7 +4374,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -4729,7 +4729,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -5261,7 +5261,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -5324,7 +5324,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -5461,7 +5461,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -6651,7 +6651,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -6714,7 +6714,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -6991,7 +6991,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -8196,7 +8196,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -8409,7 +8409,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -9466,7 +9466,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -9527,7 +9527,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -9906,7 +9906,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -10297,7 +10297,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -10946,19 +10946,24 @@ paths:
       summary: "Requests to change this account's country or currency"
       description: "The last twenty, newest first, each with its analysis. `meta.currencies` lists the currencies the catalogue prices anything in — the only ones an account can be billed in. Requires `customer.manage`."
       parameters:
-        - "$ref": "#/components/parameters/page"
-        - "$ref": "#/components/parameters/perPage"
         - "$ref": "#/components/parameters/customerId"
       security:
         - sessionCookie: []
         - personalAccessToken: []
       responses:
         200:
-          description: "A page of results."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/CountryCurrencyChangePage"
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/CountryCurrencyChange"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -11183,14 +11188,9 @@ paths:
       summary: "What has happened on this account"
       description: "The account-wide history: builds, power actions, rebuilds, registrar operations, WordPress copies, backups, zone imports, orders, invoices and support requests, newest first. A read over the durable tables that already hold the truth rather than a second copy of them, so it cannot drift and needs no backfill. Cursor-paginated with no total: history grows at the newest end, so page numbers would show one row twice and hide another. Filtering by category chooses which sources are read rather than trimming a page. Separate from notifications, which are read/unread — marking one read does not erase history."
       parameters:
-        - "$ref": "#/components/parameters/page"
-        - "$ref": "#/components/parameters/perPage"
+        - "$ref": "#/components/parameters/cursor"
+        - "$ref": "#/components/parameters/cursorPerPage"
         - name: "category"
-          in: "query"
-          required: false
-          schema:
-            type: "string"
-        - name: "cursor"
           in: "query"
           required: false
           schema:
@@ -11201,11 +11201,11 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "A page of results."
+          description: "A page of results, and the cursor of the next."
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/ActivityItemPage"
+                "$ref": "#/components/schemas/ActivityItemCursorPage"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -11234,6 +11234,12 @@ paths:
           headers:
             Retry-After:
               "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "A query parameter did not validate: a category that is not one of the feed's, a `per_page` outside 1 to 100, or a cursor longer than 512 characters. `validation.failed`, with the failing fields in `error.details`."
           content:
             "application/json":
               schema:
@@ -11725,7 +11731,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -12188,7 +12194,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -12468,7 +12474,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -12675,7 +12681,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -15129,19 +15135,24 @@ paths:
       summary: "Recent sign-in attempts"
       description: "Successes and failures both, because a customer needs to see the failures."
       parameters:
-        - "$ref": "#/components/parameters/page"
-        - "$ref": "#/components/parameters/perPage"
         - "$ref": "#/components/parameters/customerId"
       security:
         - sessionCookie: []
         - personalAccessToken: []
       responses:
         200:
-          description: "A page of results."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/LoginActivityPage"
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/LoginActivity"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -15182,19 +15193,24 @@ paths:
       summary: "Which optional messages this person wants"
       description: "Every category is listed, including the ones that cannot be changed - a screen that omitted them would leave a customer wondering whether they had been switched off silently."
       parameters:
-        - "$ref": "#/components/parameters/page"
-        - "$ref": "#/components/parameters/perPage"
         - "$ref": "#/components/parameters/customerId"
       security:
         - sessionCookie: []
         - personalAccessToken: []
       responses:
         200:
-          description: "A page of results."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/NotificationPreferencePage"
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/NotificationPreference"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -15234,8 +15250,6 @@ paths:
       summary: "Turn an optional category on or off"
       description: "Refuses a change it would not honour. A setting that appears to save and then does nothing is worse than one that says no."
       parameters:
-        - "$ref": "#/components/parameters/page"
-        - "$ref": "#/components/parameters/perPage"
         - "$ref": "#/components/parameters/customerId"
         - "$ref": "#/components/parameters/idempotencyKey"
       requestBody:
@@ -15256,11 +15270,18 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "A page of results."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/NotificationPreferencePage"
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/NotificationPreference"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -15424,19 +15445,24 @@ paths:
         - "Account"
       summary: "Signed-in devices"
       parameters:
-        - "$ref": "#/components/parameters/page"
-        - "$ref": "#/components/parameters/perPage"
         - "$ref": "#/components/parameters/customerId"
       security:
         - sessionCookie: []
         - personalAccessToken: []
       responses:
         200:
-          description: "A page of results."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/SessionPage"
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Session"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -17220,19 +17246,24 @@ paths:
           required: true
           schema:
             type: "string"
-        - "$ref": "#/components/parameters/page"
-        - "$ref": "#/components/parameters/perPage"
         - "$ref": "#/components/parameters/customerId"
       security:
         - sessionCookie: []
         - personalAccessToken: []
       responses:
         200:
-          description: "A page of results."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/PlanChangeQuotePage"
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/PlanChangeQuote"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -17331,7 +17362,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -17653,7 +17684,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -17904,7 +17935,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -18084,7 +18115,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -18610,19 +18641,24 @@ paths:
           required: true
           schema:
             type: "string"
-        - "$ref": "#/components/parameters/page"
-        - "$ref": "#/components/parameters/perPage"
         - "$ref": "#/components/parameters/customerId"
       security:
         - sessionCookie: []
         - personalAccessToken: []
       responses:
         200:
-          description: "A page of results."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/BackupFileRestorePage"
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/BackupFileRestore"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -19246,7 +19282,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -19304,7 +19340,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -19413,7 +19449,7 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "Every result, unpaged."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
@@ -19672,19 +19708,24 @@ paths:
           required: true
           schema:
             type: "string"
-        - "$ref": "#/components/parameters/page"
-        - "$ref": "#/components/parameters/perPage"
         - "$ref": "#/components/parameters/customerId"
       security:
         - sessionCookie: []
         - personalAccessToken: []
       responses:
         200:
-          description: "A page of results."
+          description: "The results, in one response: not paged."
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/WordPressSiteOperationPage"
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/WordPressSiteOperation"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -20001,6 +20042,24 @@ components:
         type: "integer"
         minimum: 1
         default: 25
+    cursor:
+      name: "cursor"
+      in: "query"
+      required: false
+      description: "The `next_cursor` of the page before. Opaque. One the server cannot read is answered with the newest page rather than refused; one longer than 512 characters is refused with `validation.failed`."
+      schema:
+        type: "string"
+        maxLength: 512
+    cursorPerPage:
+      name: "per_page"
+      in: "query"
+      required: false
+      description: "Refused with `validation.failed` outside 1 to 100, rather than clamped."
+      schema:
+        type: "integer"
+        minimum: 1
+        maximum: 100
+        default: 25
     customerId:
       name: "X-Customer-Id"
       in: "header"
@@ -20144,18 +20203,19 @@ components:
             - "string"
             - "null"
           description: "Something the customer can quote to support — an invoice number, a ticket reference. Never an internal id chosen for uniqueness alone."
-    ActivityItemPage:
+    ActivityItemCursorPage:
       type: "object"
       required:
         - "data"
         - "meta"
+      additionalProperties: false
       properties:
         data:
           type: "array"
           items:
             "$ref": "#/components/schemas/ActivityItem"
         meta:
-          "$ref": "#/components/schemas/PaginationMeta"
+          "$ref": "#/components/schemas/CursorPaginationMeta"
     AdminAdoptedAddress:
       type: "object"
       additionalProperties: false
@@ -22335,18 +22395,6 @@ components:
           type:
             - "string"
             - "null"
-    BackupFileRestorePage:
-      type: "object"
-      required:
-        - "data"
-        - "meta"
-      properties:
-        data:
-          type: "array"
-          items:
-            "$ref": "#/components/schemas/BackupFileRestore"
-        meta:
-          "$ref": "#/components/schemas/PaginationMeta"
     BackupFileRestoreResponse:
       type: "object"
       required:
@@ -22587,18 +22635,6 @@ components:
           "$ref": "#/components/schemas/Timestamp"
         created_at:
           "$ref": "#/components/schemas/Timestamp"
-    CountryCurrencyChangePage:
-      type: "object"
-      required:
-        - "data"
-        - "meta"
-      properties:
-        data:
-          type: "array"
-          items:
-            "$ref": "#/components/schemas/CountryCurrencyChange"
-        meta:
-          "$ref": "#/components/schemas/PaginationMeta"
     CountryCurrencyChangeResponse:
       type: "object"
       required:
@@ -22710,6 +22746,29 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/Credential"
+    CursorPaginationMeta:
+      type: "object"
+      description: |-
+        The meta of a collection walked by an opaque cursor: the activity feed.
+
+        `next_cursor` is passed back as `cursor` to read the next page, and is
+        null on the last one; there is no other way to tell that more exists.
+        There is no page number and no total. The feed grows at its newest end
+        while it is read, so numbered pages would show one row twice and skip
+        another, and counting every source to print a total would double the cost
+        of each page. `per_page` is the size asked for, or the default.
+      required:
+        - "next_cursor"
+        - "per_page"
+      additionalProperties: false
+      properties:
+        next_cursor:
+          type:
+            - "string"
+            - "null"
+        per_page:
+          type: "integer"
+          minimum: 1
     Customer:
       type: "object"
       additionalProperties: false
@@ -24381,18 +24440,6 @@ components:
             - "null"
         created_at:
           "$ref": "#/components/schemas/Timestamp"
-    LoginActivityPage:
-      type: "object"
-      required:
-        - "data"
-        - "meta"
-      properties:
-        data:
-          type: "array"
-          items:
-            "$ref": "#/components/schemas/LoginActivity"
-        meta:
-          "$ref": "#/components/schemas/PaginationMeta"
     Money:
       type: "object"
       description: |-
@@ -24493,18 +24540,6 @@ components:
           type: "boolean"
         changeable:
           type: "boolean"
-    NotificationPreferencePage:
-      type: "object"
-      required:
-        - "data"
-        - "meta"
-      properties:
-        data:
-          type: "array"
-          items:
-            "$ref": "#/components/schemas/NotificationPreference"
-        meta:
-          "$ref": "#/components/schemas/PaginationMeta"
     NotificationResponse:
       type: "object"
       required:
@@ -25045,7 +25080,9 @@ components:
     PaginationMeta:
       type: "object"
       description: |-
-        The same envelope on every collection this API returns.
+        The meta of a collection paged by number (`page` and `per_page`). A
+        collection returned whole is not described by it, and the activity feed is
+        paged by cursor instead (`CursorPaginationMeta`).
 
         `per_page` is what was served, not what was asked for: a request beyond
         `max_per_page` is clamped and served rather than refused, so a client that
@@ -25258,18 +25295,6 @@ components:
           additionalProperties: true
         changes_infrastructure:
           type: "boolean"
-    PlanChangeQuotePage:
-      type: "object"
-      required:
-        - "data"
-        - "meta"
-      properties:
-        data:
-          type: "array"
-          items:
-            "$ref": "#/components/schemas/PlanChangeQuote"
-        meta:
-          "$ref": "#/components/schemas/PaginationMeta"
     PlanChangeResize:
       type:
         - "object"
@@ -26540,18 +26565,6 @@ components:
           "$ref": "#/components/schemas/Timestamp"
         created_at:
           "$ref": "#/components/schemas/Timestamp"
-    SessionPage:
-      type: "object"
-      required:
-        - "data"
-        - "meta"
-      properties:
-        data:
-          type: "array"
-          items:
-            "$ref": "#/components/schemas/Session"
-        meta:
-          "$ref": "#/components/schemas/PaginationMeta"
     SoftwareComponent:
       type: "object"
       additionalProperties: false
@@ -27448,18 +27461,6 @@ components:
           "$ref": "#/components/schemas/Timestamp"
         created_at:
           "$ref": "#/components/schemas/Timestamp"
-    WordPressSiteOperationPage:
-      type: "object"
-      required:
-        - "data"
-        - "meta"
-      properties:
-        data:
-          type: "array"
-          items:
-            "$ref": "#/components/schemas/WordPressSiteOperation"
-        meta:
-          "$ref": "#/components/schemas/PaginationMeta"
     WordPressSiteOperationResponse:
       type: "object"
       required:

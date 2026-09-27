@@ -43,7 +43,7 @@ function serve(pages: Record<string, { data: ActivityItem[]; meta: unknown }>) {
     asked.push(url)
 
     const match = Object.keys(pages).find((candidate) => url.includes(candidate))
-    const body = match === undefined ? { data: [], meta: { per_page: 25, next_cursor: null, has_more: false } } : pages[match]
+    const body = match === undefined ? { data: [], meta: { per_page: 25, next_cursor: null } } : pages[match]
 
     return Promise.resolve({
       ok: true,
@@ -91,7 +91,7 @@ describe('what happened to this account', () => {
               message_code: 'activity.vps.stopped',
             }),
           ],
-          meta: { per_page: 25, next_cursor: null, has_more: false },
+          meta: { per_page: 25, next_cursor: null },
         },
       }),
     )
@@ -116,7 +116,7 @@ describe('what happened to this account', () => {
       serve({
         '/activity': {
           data: [item()],
-          meta: { per_page: 25, next_cursor: null, has_more: false },
+          meta: { per_page: 25, next_cursor: null },
         },
       }),
     )
@@ -144,11 +144,11 @@ describe('what happened to this account', () => {
       serve({
         'cursor=': {
           data: [item({ id: 'provisioning_job:04JJOB', message_code: 'activity.vps.created' })],
-          meta: { per_page: 25, next_cursor: null, has_more: false },
+          meta: { per_page: 25, next_cursor: null },
         },
         '/activity': {
           data: [item()],
-          meta: { per_page: 25, next_cursor: 'b3BhcXVl', has_more: true },
+          meta: { per_page: 25, next_cursor: 'b3BhcXVl' },
         },
       }),
     )
@@ -184,7 +184,7 @@ describe('what happened to this account', () => {
             }),
             item(),
           ],
-          meta: { per_page: 25, next_cursor: null, has_more: false },
+          meta: { per_page: 25, next_cursor: null },
         },
       }),
     )
@@ -213,7 +213,7 @@ describe('what happened to this account', () => {
       serve({
         '/activity': {
           data: [item()],
-          meta: { per_page: 25, next_cursor: null, has_more: false },
+          meta: { per_page: 25, next_cursor: null },
         },
       }),
     )

@@ -32,11 +32,12 @@ use Tests\TestCase;
  * Once is also once among the names the generator writes beside it.
  * GenerateOpenApiSpec starts from the schemas in
  * resources/openapi/components.php, writes each schemas.php entry over it by
- * name, and after each entry X writes the envelopes X.'Page' and
- * X.'Response' when a path references them - each assignment replacing
- * whatever held the name, again without a word. So a schemas.php key must
- * not be a components.php schema or any schemas.php entry's envelope name,
- * and a components.php schema must not be an envelope name either. The
+ * name, and after each entry X writes the envelopes X.'Page',
+ * X.'CursorPage' and X.'Response' when a path references them - each
+ * assignment replacing whatever held the name, again without a word. So a
+ * schemas.php key must not be a components.php schema or any schemas.php
+ * entry's envelope name, and a components.php schema must not be an
+ * envelope name either. The
  * envelope suffixes are read from the generator's source (every
  * `$allSchemas[$schemaName.'Suffix']` it assigns), not listed here; the
  * schema names are the keys of the two arrays as PHP loads them. The
@@ -78,7 +79,7 @@ final class EverySchemaIsDefinedOnceTest extends TestCase
     #[Test]
     public function the_collision_check_refuses_each_kind_of_collision(): void
     {
-        $this->assertSame(['Page', 'Response'], self::envelopeSuffixes());
+        $this->assertSame(['Page', 'CursorPage', 'Response'], self::envelopeSuffixes());
 
         $this->assertSame([], self::collisions(['Money' => []], ['Invoice' => [], 'Invoices' => []]), 'The positive control: distinct names collide with nothing.');
         $this->assertSame(

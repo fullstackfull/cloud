@@ -11,9 +11,10 @@ declare(strict_types=1);
  * does not exist — so the document cannot describe an endpoint the platform
  * does not serve, and cannot omit one it does.
  *
- * `page` and `single` name the response envelope; `schema` names the resource
- * inside it. `status` overrides the default success code. `body` is the
- * request schema for a mutation. `query` adds parameters beyond paging.
+ * `envelope` names the response envelope (`page`, `cursor`, `list`,
+ * `single`, `redirect` or `none`); `schema` names the resource inside it.
+ * `status` overrides the default success code. `body` is the request schema
+ * for a mutation. `query` adds parameters beyond paging.
  */
 
 /** A resource returned inside `{"data": …}`. */
@@ -23,6 +24,9 @@ $one = static fn (string $schema, int $status = 200): array => [
 
 /** A paginated collection: `{"data": […], "meta": {…}}`. */
 $many = static fn (string $schema): array => ['envelope' => 'page', 'schema' => $schema];
+
+/** A collection walked by cursor: `{"data": […], "meta": {"next_cursor", "per_page"}}`. */
+$walked = static fn (string $schema): array => ['envelope' => 'cursor', 'schema' => $schema];
 
 /** A response with no body at all. */
 $empty = static fn (int $status = 204): array => ['envelope' => 'none', 'status' => $status];
@@ -142,7 +146,7 @@ return [
         'body' => ['current_password', 'password', 'password_confirmation'],
         'response' => $empty(),
     ],
-    'api.v1.me.sessions' => ['tag' => 'Account', 'summary' => 'Signed-in devices', 'response' => $many('Session')],
+    'api.v1.me.sessions' => ['tag' => 'Account', 'summary' => 'Signed-in devices', 'response' => ['envelope' => 'list', 'schema' => 'Session']],
     'api.v1.me.sessions.destroy' => ['tag' => 'Account', 'summary' => 'Sign one device out', 'response' => $empty()],
     'api.v1.me.sessions.destroy_others' => [
         'tag' => 'Account',
@@ -155,7 +159,7 @@ return [
         'tag' => 'Account',
         'summary' => 'Recent sign-in attempts',
         'description' => 'Successes and failures both, because a customer needs to see the failures.',
-        'response' => $many('LoginActivity'),
+        'response' => ['envelope' => 'list', 'schema' => 'LoginActivity'],
     ],
     'api.v1.me.2fa.enable' => [
         'tag' => 'Account',
@@ -518,7 +522,7 @@ return [
         'tag' => 'WordPress',
         'summary' => 'Copies and pushes involving a site',
         'description' => 'The last fifty, newest first, whether the site was the source or the target.',
-        'response' => $many('WordPressSiteOperation'),
+        'response' => ['envelope' => 'list', 'schema' => 'WordPressSiteOperation'],
     ],
 
     /* ---------------------------------------------------------------------
@@ -649,7 +653,7 @@ return [
         'tag' => 'Account',
         'summary' => 'Requests to change this account\'s country or currency',
         'description' => 'The last twenty, newest first, each with its analysis. `meta.currencies` lists the currencies the catalogue prices anything in — the only ones an account can be billed in. Requires `customer.manage`.',
-        'response' => $many('CountryCurrencyChange'),
+        'response' => ['envelope' => 'list', 'schema' => 'CountryCurrencyChange'],
     ],
     'api.v1.account.country_currency_changes.store' => [
         'tag' => 'Account',
@@ -675,27 +679,30 @@ return [
         'tag' => 'Account',
         'summary' => 'Which optional messages this person wants',
         'description' => 'Every category is listed, including the ones that cannot be changed - a screen that omitted them would leave a customer wondering whether they had been switched off silently.',
-        'response' => $many('NotificationPreference'),
+        'response' => ['envelope' => 'list', 'schema' => 'NotificationPreference'],
     ],
     'api.v1.me.notification_preferences.update' => [
         'tag' => 'Account',
         'summary' => 'Turn an optional category on or off',
         'description' => 'Refuses a change it would not honour. A setting that appears to save and then does nothing is worse than one that says no.',
         'body' => ['category', 'channel', 'enabled'],
-        'response' => $many('NotificationPreference'),
+        'response' => ['envelope' => 'list', 'schema' => 'NotificationPreference'],
     ],
     'api.v1.subscriptions.plan_options' => [
         'tag' => 'Billing',
         'summary' => 'What each plan would cost this subscription',
         'description' => 'Priced by the platform, through the same proration the confirmation performs. Plans that cannot be taken are listed with their reasons and without their prices — a smaller disk is refused outright, because shrinking one destroys data.',
-        'response' => $many('PlanChangeQuote'),
+        'response' => ['envelope' => 'list', 'schema' => 'PlanChangeQuote'],
     ],
     'api.v1.activity.index' => [
         'tag' => 'Activity',
         'summary' => 'What has happened on this account',
         'description' => 'The account-wide history: builds, power actions, rebuilds, registrar operations, WordPress copies, backups, zone imports, orders, invoices and support requests, newest first. A read over the durable tables that already hold the truth rather than a second copy of them, so it cannot drift and needs no backfill. Cursor-paginated with no total: history grows at the newest end, so page numbers would show one row twice and hide another. Filtering by category chooses which sources are read rather than trimming a page. Separate from notifications, which are read/unread — marking one read does not erase history.',
-        'query' => ['category', 'cursor'],
-        'response' => $many('ActivityItem'),
+        'query' => ['category'],
+        'response' => $walked('ActivityItem'),
+        'errors' => [
+            422 => 'A query parameter did not validate: a category that is not one of the feed\'s, a `per_page` outside 1 to 100, or a cursor longer than 512 characters. `validation.failed`, with the failing fields in `error.details`.',
+        ],
     ],
     'api.v1.operations.show' => [
         'tag' => 'Activity',
@@ -807,7 +814,7 @@ return [
         'tag' => 'Backups',
         'summary' => 'File restores from this backup',
         'description' => 'The last fifty, newest first.',
-        'response' => $many('BackupFileRestore'),
+        'response' => ['envelope' => 'list', 'schema' => 'BackupFileRestore'],
     ],
 
     /* ---------------------------------------------------------------------

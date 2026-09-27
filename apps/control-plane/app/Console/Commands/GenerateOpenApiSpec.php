@@ -13,15 +13,17 @@ use RuntimeException;
 /**
  * Writes docs/openapi.yaml from the routes the application actually registers.
  *
- * The structure — which paths exist, which methods, which path parameters,
- * whether a route is authenticated, which permission an operator route needs —
+ * The structure — which paths exist, which methods, which path parameters —
  * is read from the route table rather than typed, because a hand-maintained
  * list of endpoints diverges from the application the first week nobody
  * remembers to update it.
  *
- * The meaning — what an endpoint is for, what its body looks like, why a 409
- * means what it means — is hand-written in resources/openapi/operations.php,
- * because none of it is derivable from a route table.
+ * The meaning — what an endpoint is for, what its body looks like, which
+ * envelope its response comes in, why a 409 means what it means — is
+ * hand-written in resources/openapi/operations.php. So are whether a route is
+ * authenticated (`auth`) and the permission an operator route is described as
+ * needing (`permission`): this command does not read either from the route's
+ * middleware, and nothing here compares them with it.
  *
  * The command refuses to write a document while any registered route has no
  * entry, and while any entry names a route that does not exist. That is the
@@ -176,6 +178,8 @@ final class GenerateOpenApiSpec extends Command
 
         /** @var callable(string): array<string, mixed> $page */
         $page = $components['page'];
+        /** @var callable(string): array<string, mixed> $cursorPage */
+        $cursorPage = $components['cursorPage'];
         /** @var callable(string): array<string, mixed> $single */
         $single = $components['single'];
 
@@ -194,6 +198,10 @@ final class GenerateOpenApiSpec extends Command
 
             if (isset($referenced[$schemaName.'Page'])) {
                 $allSchemas[$schemaName.'Page'] = $page($schemaName);
+            }
+
+            if (isset($referenced[$schemaName.'CursorPage'])) {
+                $allSchemas[$schemaName.'CursorPage'] = $cursorPage($schemaName);
             }
 
             if (isset($referenced[$schemaName.'Response'])) {
@@ -412,6 +420,11 @@ final class GenerateOpenApiSpec extends Command
             $parameters[] = ['$ref' => '#/components/parameters/perPage'];
         }
 
+        if ($envelope === 'cursor') {
+            $parameters[] = ['$ref' => '#/components/parameters/cursor'];
+            $parameters[] = ['$ref' => '#/components/parameters/cursorPerPage'];
+        }
+
         /** @var list<string> $query */
         $query = $operation['query'] ?? [];
 
@@ -480,8 +493,9 @@ final class GenerateOpenApiSpec extends Command
 
         $success = match ($envelope) {
             'page' => ['description' => 'A page of results.', 'content' => self::json($schema.'Page')],
+            'cursor' => ['description' => 'A page of results, and the cursor of the next.', 'content' => self::json($schema.'CursorPage')],
             'single' => ['description' => 'The resource.', 'content' => self::json($schema.'Response')],
-            'list' => ['description' => 'Every result, unpaged.', 'content' => [
+            'list' => ['description' => 'The results, in one response: not paged.', 'content' => [
                 'application/json' => ['schema' => [
                     'type' => 'object',
                     'required' => ['data'],
