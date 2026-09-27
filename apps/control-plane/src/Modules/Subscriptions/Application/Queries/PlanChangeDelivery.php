@@ -294,11 +294,18 @@ final readonly class PlanChangeDelivery
      * ended the paid upgrade was taken as superseded by the unpaid one and
      * kept (X1). Refused while it lasts (PlanChangeRefusal::PreviousChangePending).
      *
-     * Only changes made in the current period are read. `delivered_at` was
-     * added without a back-fill, and a change settled before it existed that
-     * queued nothing (nothing to resize) looks undelivered for ever; bounded
-     * to the period, such a row cannot hold a subscription's plan changes
-     * past its next renewal.
+     * Only changes made in the current period and the one before it are
+     * read. `delivered_at` was added without a back-fill, and a change
+     * settled before it existed that queued nothing (nothing to resize) looks
+     * undelivered for ever; bounded, such a row cannot hold a subscription's
+     * plan changes past its second renewal. The period before is read
+     * because a renewal can come between a capture and its settlement: a
+     * change paid in the last minutes of a period and settled after the
+     * renewal was not read at all, the next change was accepted, and when it
+     * was a downgrade (settled at once) the paid upgrade's settlement found
+     * itself superseded and built nothing - paid for and never delivered
+     * (the re-audit after round six could not establish it; this round did,
+     * AChangePaidBeforeTheRenewalAndSettledAfterItIsStillAwaitedTest).
      */
     public function aPaidChangeAwaitsDelivery(Subscription $subscription): bool
     {
@@ -308,7 +315,7 @@ final readonly class PlanChangeDelivery
             ->whereNull('delivered_at')
             ->whereNull('returned_at')
             ->whereNotNull('proration_invoice_id')
-            ->where('changed_at', '>=', $subscription->current_period_start)
+            ->where('changed_at', '>=', $subscription->billing_period->retreat($subscription->current_period_start))
             ->whereExists(static fn ($invoice) => $invoice
                 ->selectRaw('1')
                 ->from('invoices')

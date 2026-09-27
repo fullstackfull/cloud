@@ -104,8 +104,8 @@ enum PlanChangeRefusal: string
      * The last change was paid for and has not been delivered: its invoice
      * is paid and its settlement has not been heard
      * (PlanChangeDelivery::aPaidChangeAwaitsDelivery()) - normally minutes,
-     * but for ever, within the period, when the settlement's listener
-     * exhausts its retries. A change made in that window used to be
+     * but until the period after the change's own has ended when the
+     * settlement's listener exhausts its retries. A change made in that window used to be
      * accepted, and made the paid one look superseded when the subscription
      * ended (X1).
      */
