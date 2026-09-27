@@ -75,6 +75,10 @@ return [
             'title' => 'سداد :service متأخر',
             'body' => 'سداد :service متأخر. تستمر خدمتك حتى :grace_ends ثم تُعلَّق.',
         ],
+        'plan_change_returned' => [
+            'title' => 'لم يُنفَّذ تغيير خطة :service',
+            'body' => 'تعذّر تنفيذ تغيير خطة :service عند وصول دفعتك. أُعيد مبلغ :amount إلى محفظتك، ويبقى :service على خطته الحالية.',
+        ],
         'cancellation_scheduled' => [
             'title' => 'من المقرر إنهاء :service',
             'body' => 'سينتهي :service في :date. ستحتفظ باستخدامه الكامل حتى ذلك التاريخ. وتُحفظ بياناتك :retention_days يومًا بعد ذلك ثم تُحذف بانقضائها.',

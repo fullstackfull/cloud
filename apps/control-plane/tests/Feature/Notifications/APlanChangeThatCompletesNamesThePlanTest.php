@@ -60,4 +60,28 @@ final class APlanChangeThatCompletesNamesThePlanTest extends TestCase
         $this->assertStringNotContainsString(':plan', $arabic);
         $this->assertStringNotContainsString('Large', $arabic, 'The Arabic reader was given the English name.');
     }
+
+    #[Test]
+    public function a_name_the_catalogue_keeps_in_one_language_is_read_in_the_fallback_language(): void
+    {
+        Queue::fake([DeliverNotification::class]);
+
+        $customer = Customer::factory()->create();
+        $service = Service::factory()->create(['customer_id' => $customer->id, 'kind' => 'vps', 'label' => 'web-01']);
+        $plan = Plan::factory()->create(['name' => ['en' => 'Large']]);
+        $job = ProvisioningJob::factory()->create([
+            'service_id' => $service->id,
+            'customer_id' => $customer->id,
+            'kind' => ProvisioningJobKind::Resize,
+            'provider' => 'fake',
+            'status' => ProvisioningJobStatus::Succeeded,
+            'payload' => ['plan_id' => (string) $plan->id],
+        ]);
+
+        app(NotifyOnProvisioningOutcome::class)->succeeded(new ProvisioningJobSucceeded((string) $job->id, ProvisioningJobKind::Resize, (string) $service->id, null));
+
+        $arabic = app(RenderNotification::class)->execute(Notification::query()->where('customer_id', $customer->id)->sole(), 'ar')->title;
+        $this->assertStringContainsString('Large', $arabic, 'A name with no Arabic entry was not read in the fallback language.');
+        $this->assertStringNotContainsString(':plan', $arabic);
+    }
 }

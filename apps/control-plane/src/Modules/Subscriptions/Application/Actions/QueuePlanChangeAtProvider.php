@@ -119,11 +119,15 @@ final readonly class QueuePlanChangeAtProvider
      * it calls this: a change refused there is returned, not queued
      * (ReturnAPlanChangeNoLongerDeliverable). This used to accept the change,
      * take the money and queue nothing. What still reaches here refused is a
-     * package changed between that last question and this read, or a
+     * package changed between that last question and this read; a
      * proration invoice issued before plan changes were recorded (the
-     * settlement's fallback, which asks nothing); every refusal is logged
-     * with the resolver's reason, because then the customer has paid, the
-     * subscription has moved and the quota has not.
+     * settlement's fallback, which asks nothing); and a settlement redelivered
+     * for a change already recorded delivered, after its package was
+     * withdrawn - the settlement does not ask again of a delivered change, and
+     * whatever its first delivery queued stands, so nothing new is owed.
+     * Every refusal is logged with the resolver's reason; in the first
+     * two the customer has paid, the subscription has moved and the quota has
+     * not.
      */
     private function queuePackageChange(
         Subscription $subscription,

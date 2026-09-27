@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Subscriptions\Application\Actions;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Billing\Application\Actions\ReturnWhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
+use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
 use Lynomia\Modules\Subscriptions\Application\Queries\PlanChangeDelivery;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
@@ -19,7 +24,11 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * Returns a paid plan change that can no longer be delivered, instead of
  * delivering nothing and keeping the money.
  *
- * The rule: a plan change is delivered, or what was paid for it goes back.
+ * The rule: a paid plan change its settlement finds can no longer be
+ * delivered goes back. Only that: a change that fails after its settlement
+ * (a resize or package change that fails outright or stops in review), or
+ * whose settlement is never heard, is not returned here - its money is held
+ * for an operator to complete the change or return it (docs/billing.md).
  * The payment of a proration invoice asks whether the change can still be
  * delivered (PlanChangeDelivery::refusalForTheInvoice()) when the payment is
  * opened, but a card payment is captured later, at the provider, and an
@@ -54,6 +63,9 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *  - An operator sees it: a `subscription.plan_changed` audit entry with the
  *    reason `plan_change_not_deliverable_at_settlement`, naming the invoice,
  *    the change, the refusal and what was returned, beside the log warning.
+ *  - The customer is told (`billing.plan_change_returned`), once the
+ *    transaction commits: the change was not made, what was returned to the
+ *    wallet, and that the service stays on its current plan.
  */
 final readonly class ReturnAPlanChangeNoLongerDeliverable
 {
@@ -63,6 +75,7 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
         private ReturnWhatAnInvoiceStillHolds $returnWhatItHolds,
         private RecordAuditEntry $audit,
         private PlanCapacity $capacity,
+        private NotifyCustomer $notify,
     ) {}
 
     /**
@@ -111,7 +124,35 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
             'returned_to_wallet_minor' => $credited,
         ]);
 
+        $this->tellTheCustomerOnceCommitted($locked, $change, $invoice, $credited);
+
         return $credited;
+    }
+
+    /**
+     * After the commit, as an invoice is announced (IssueInvoice): a message
+     * about a return that rolled back would tell the customer of money that
+     * never moved.
+     */
+    private function tellTheCustomerOnceCommitted(Subscription $subscription, PlanChange $change, Invoice $invoice, int $credited): void
+    {
+        $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
+        $label = $service?->label;
+        $name = $service === null
+            ? ['en' => 'your service', 'ar' => 'خدمتك']
+            : (is_string($label) && $label !== '' ? $label : (string) $service->getKey());
+        $amount = Money::ofMinor($credited, (string) $invoice->currency)->format();
+
+        DB::afterCommit(function () use ($subscription, $change, $name, $amount): void {
+            $this->notify->execute(
+                customerId: (string) $subscription->customer_id,
+                type: NotificationType::PlanChangeReturned,
+                idempotencyKey: 'plan-change-returned:'.$change->getKey(),
+                subject: $subscription,
+                data: ['service' => $name, 'amount' => $amount],
+                link: '/subscriptions',
+            );
+        });
     }
 
     /**

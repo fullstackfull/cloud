@@ -255,6 +255,12 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
      * QueuePlanChangeAtProvider); a change that owed nothing is queued when
      * it is made, under `...:change:<id>`. Read off the job, because the
      * failure event does not carry it.
+     *
+     * It reads the key shapes written since U-1. A job queued before that
+     * fix ended in the customer's raw Idempotency-Key, and is read as paid
+     * only when that key happened to be spelled `invoice:<26 characters>`;
+     * any other is read as a change that owed nothing, and its failure is
+     * told that nothing was charged.
      */
     private function wasPaidFor(string $provisioningJobId): bool
     {

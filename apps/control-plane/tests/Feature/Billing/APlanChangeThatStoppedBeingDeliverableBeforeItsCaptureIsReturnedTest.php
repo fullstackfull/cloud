@@ -18,6 +18,8 @@ use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Notifications\Application\Actions\RenderNotification;
+use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
@@ -148,6 +150,13 @@ final class APlanChangeThatStoppedBeingDeliverableBeforeItsCaptureIsReturnedTest
             ->sole();
         $this->assertSame((string) $invoice->getKey(), $entry->context['proration_invoice_id'] ?? null);
         $this->assertSame($invoice->total_minor, $entry->context['returned_to_wallet_minor'] ?? null);
+
+        // The customer is told, in their language, where the money went.
+        $notice = Notification::query()->where('customer_id', $this->customer->getKey())->where('type', 'billing.plan_change_returned')->sole();
+        $amount = Money::ofMinor($invoice->total_minor, 'KWD')->format();
+        $english = app(RenderNotification::class)->execute($notice, 'en')->body;
+        $this->assertStringContainsString($amount.' has been returned to your wallet', $english);
+        $this->assertStringContainsString($amount, app(RenderNotification::class)->execute($notice, 'ar')->body);
 
         // And the customer is free to change plans again: nothing awaits delivery.
         $options = $this->actingAs($this->user)

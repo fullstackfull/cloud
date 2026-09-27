@@ -232,6 +232,44 @@ final class AnAdoptionMovesTheCommitmentToWhereTheMachineIsTest extends TestCase
     }
 
     #[Test]
+    public function a_build_released_twice_is_committed_again_from_its_last_commitment(): void
+    {
+        /*
+         * Failed on pve-01 (released), retried by an operator onto pve-02
+         * at a larger shape and failed again there (released), then adopted
+         * with a hypervisor that cannot be asked. The commitment taken again
+         * is the build's last: pve-02, at the shape it last held - not the
+         * first row the key ever had.
+         */
+        $other = $this->addNode('pve-02');
+        $job = $this->createJob(attributes: ['status' => ProvisioningJobStatus::Failed, 'failure_class' => FailureClass::Permanent]);
+
+        NodeCapacityReservation::query()->create([
+            'reservation_key' => $job->idempotency_key, 'node_id' => $this->node->id, 'service_id' => $job->service_id,
+            'customer_id' => $job->customer_id, 'vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 40,
+            'released_at' => now()->subHour(),
+        ]);
+        NodeCapacityReservation::query()->create([
+            'reservation_key' => $job->idempotency_key, 'node_id' => $other->id, 'service_id' => $job->service_id,
+            'customer_id' => $job->customer_id, 'vcpu' => 4, 'memory_mib' => 8192, 'disk_gib' => 80,
+            'released_at' => now()->subMinute(),
+        ]);
+
+        $cluster = (string) $this->cluster->id;
+        $this->hypervisor->atTheMomentOfLook = static function () use ($cluster): void {
+            throw ClusterNotConfiguredException::missingCredentials($cluster, 'pve-kw');
+        };
+
+        $this->adoptAsOperator($job, '4242')->assertOk();
+
+        $live = $this->liveReservation();
+        $this->assertSame((string) $other->id, $live->node_id, 'The commitment was taken again from the first release, not the last.');
+        $this->assertSame([4, 8192, 80], [$live->vcpu, $live->memory_mib, $live->disk_gib]);
+        $this->assertCommitted($other, vms: 1, memoryMib: 8192, diskGib: 80);
+        $this->assertCommitted($this->node, vms: 0, memoryMib: 0, diskGib: 0);
+    }
+
+    #[Test]
     public function a_database_error_in_the_lookup_is_not_taken_for_a_hypervisor_that_cannot_be_asked(): void
     {
         /*

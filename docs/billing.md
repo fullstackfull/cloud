@@ -77,7 +77,7 @@ a yearly plan share one rule. Both the unused-time credit and the new charge use
 divisor, which is what makes an upgrade followed by an immediate downgrade net to exactly
 zero rather than leaking a fils on each change.
 
-### A paid plan change is delivered, or what was paid for it goes back
+### A paid plan change that can no longer be delivered at its settlement goes back
 
 An upgrade is invoiced and delivered when its proration invoice is paid. Whether it can
 still be delivered (the hosting plan resolves to one package on sale; the VPS has a
@@ -89,7 +89,16 @@ what the invoice holds is credited to the customer's wallet against the invoice,
 subscription goes back to the plan and the recurring amount it came from, the change is
 recorded `returned_at` with its `return_reason`, and a `subscription.plan_changed` audit
 entry with the reason `plan_change_not_deliverable_at_settlement` names the invoice, the
-refusal and the amount returned (`ReturnAPlanChangeNoLongerDeliverable`).
+refusal and the amount returned (`ReturnAPlanChangeNoLongerDeliverable`), and the customer
+is told (`billing.plan_change_returned`: the amount returned to the wallet, and that the
+service stays on its current plan). A returned change counts afterwards as having bought
+nothing: it does not reprice the period's discount, supersede an earlier paid change, or
+hold the subscription's next change.
+
+That is the only automatic return. A paid change is **not** returned automatically when
+its failure comes after the settlement - a resize or package change that fails outright
+or stops in review - nor when its settlement's listener exhausts its retries: the money is
+held for an operator to complete the change or return it.
 
 What the settlement cannot see is a room that goes after it: a resize the node can no
 longer hold is retried and then stops in review, never failed, with the money held for an

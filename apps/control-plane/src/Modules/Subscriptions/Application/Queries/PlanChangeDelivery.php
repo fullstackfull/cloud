@@ -289,12 +289,17 @@ final readonly class PlanChangeDelivery
      * Whether a plan change recorded after this one has been settled - it
      * owed nothing, or its invoice was paid - and so decided the machine's
      * shape itself. A later change still waiting on its invoice (or whose
-     * invoice was voided) has not.
+     * invoice was voided) has not, and nor has one paid and then returned at
+     * its settlement (`returned_at`): it delivered nothing and its money went
+     * back, so an earlier paid change it would have superseded is still
+     * undelivered - built by its settlement, or returned when the
+     * subscription ends (ReturnAnUpgradeTheEndPrevented).
      */
     public function aLaterChangeWasSettled(PlanChange $change): bool
     {
         return PlanChange::query()
             ->where('subscription_id', $change->subscription_id)
+            ->whereNull('returned_at')
             ->where(static fn ($later) => $later
                 ->where('changed_at', '>', $change->changed_at)
                 ->orWhere(static fn ($same) => $same

@@ -69,6 +69,13 @@ enum NotificationType: string
     case RenewalSucceeded = 'billing.renewal_succeeded';
     case GracePeriodStarted = 'billing.grace_period_started';
     case CancellationScheduled = 'billing.cancellation_scheduled';
+    /*
+     * A paid plan change its settlement found could no longer be delivered,
+     * returned: the payment to the wallet, the subscription to the plan it
+     * came from (ReturnAPlanChangeNoLongerDeliverable). The customer paid for
+     * a change and did not get it, and is told where the money went.
+     */
+    case PlanChangeReturned = 'billing.plan_change_returned';
 
     /*
      * The account's country or currency, decided. Applied says from when
@@ -240,6 +247,7 @@ enum NotificationType: string
             self::RenewalSucceeded,
             self::GracePeriodStarted,
             self::CancellationScheduled,
+            self::PlanChangeReturned,
             self::CountryCurrencyChangeApplied,
             self::CountryCurrencyChangeRejected,
             self::CountryCurrencyChangeNeedsReview => NotificationCategory::Billing,
@@ -264,7 +272,7 @@ enum NotificationType: string
         $emailed = [
             self::PasswordChanged, self::TwoFactorEnabled, self::TwoFactorDisabled, self::NewSignIn,
             self::InvoiceIssued, self::PaymentFailed, self::RefundIssued,
-            self::GracePeriodStarted, self::CancellationScheduled,
+            self::GracePeriodStarted, self::CancellationScheduled, self::PlanChangeReturned,
             self::CountryCurrencyChangeApplied, self::CountryCurrencyChangeRejected,
             self::ServiceReady, self::ServiceProvisioningFailed,
             self::ServiceSuspended, self::ServiceRestored, self::ServiceReactivationFailed,

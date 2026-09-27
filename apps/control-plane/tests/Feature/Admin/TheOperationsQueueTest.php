@@ -245,10 +245,28 @@ final class TheOperationsQueueTest extends TestCase
         // rebuild names no service, so the server is called "your server" in
         // English and in Arabic in Arabic, never English inside Arabic.
         $render = app(RenderNotification::class);
-        $this->assertSame('your server has been reinstalled and is running again.', $render->execute($notification, 'en')->body);
+        $this->assertSame('The reinstall of your server is complete, and it is running again.', $render->execute($notification, 'en')->body);
         $arabic = $render->execute($notification, 'ar');
         $this->assertStringContainsString('خادمك', $arabic->title.$arabic->body);
         $this->assertStringNotContainsString('your server', $arabic->title.$arabic->body, 'An English phrase was read inside the Arabic sentence.');
+    }
+
+    #[Test]
+    public function a_service_with_no_label_is_named_by_its_id(): void
+    {
+        $operation = $this->aVpsRebuild(ReinstallState::Indeterminate, destroyed: true);
+        $service = Service::factory()->create(['customer_id' => $operation->customer_id, 'kind' => 'vps', 'label' => '']);
+        $operation->forceFill(['service_id' => $service->getKey()])->save();
+
+        $this->actingAs($this->operator())
+            ->postJson('/api/admin/operations/reinstalls/vps_reinstall/'.$operation->id.'/resolve', [
+                'verdict' => 'completed',
+                'evidence' => 'VM 910 on pve-kw-03 is running and answering on port 22.',
+            ])
+            ->assertOk();
+
+        $notification = Notification::query()->where('customer_id', $operation->customer_id)->sole();
+        $this->assertSame('Reinstall of '.$service->getKey().' is complete', app(RenderNotification::class)->execute($notification, 'en')->title);
     }
 
     #[Test]
