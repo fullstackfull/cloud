@@ -516,6 +516,26 @@ final class AnOperationIsTimedFromWhenItStartedTest extends VpsApiTestCase
     }
 
     #[Test]
+    public function a_verdict_that_names_no_review_is_refused(): void
+    {
+        // Without the token a verdict would settle whatever review the row
+        // holds when it arrives, which is the thing the token exists to stop.
+        [$customer, $user, $machine, $old] = $this->restoreStartedOnAnOldArchive();
+        $this->travel(13)->hours();
+        app(ReconcileRunningBackups::class)->execute();
+        $audited = AuditEntry::query()->count();
+
+        $this->actingAs($this->operator())
+            ->postJson('/api/admin/backups/'.$old->id.'/resolve', ['verdict' => 'completed', 'evidence' => 'TASK OK'])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'validation.failed')
+            ->assertJsonStructure(['error' => ['details' => ['fields' => ['review']]]]);
+
+        $this->assertSame(BackupState::NeedsReview, $old->refresh()->state);
+        $this->assertSame($audited, AuditEntry::query()->count());
+    }
+
+    #[Test]
     public function each_handle_less_restore_attempt_is_its_own_message(): void
     {
         /*

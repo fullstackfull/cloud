@@ -152,6 +152,44 @@ final class ARaceIsARefusalNotAnAbortTest extends VpsApiTestCase
         $this->assertNull($row->failure_reason, 'A sentence about a verification that was never attempted.');
     }
 
+    /**
+     * Two sweeps that overlap both read the row waiting, under the lock one
+     * after the other. The count each writes is compared with the count it
+     * read, so the second finds the first's attempt already counted and
+     * leaves the row alone: the datastore is asked once, and the attempt is
+     * counted once. Without that comparison, a datastore that refuses was
+     * asked twice and the archive spent two of its attempts on one run.
+     */
+    #[Test]
+    public function two_overlapping_verify_sweeps_ask_once_and_count_once(): void
+    {
+        [$customer] = $this->accountWithOwner();
+        $machine = $this->machineFor($customer);
+        $archive = $this->archive($customer, $machine);
+        $datastore = $this->interleaving($machine);
+        $datastore->refuseVerification = true;
+
+        // The second sweep runs after the first has read the row and before
+        // it has counted its attempt.
+        $fired = false;
+        ComputeCluster::retrieved(function () use (&$fired): void {
+            if ($fired) {
+                return;
+            }
+            $fired = true;
+            app(VerifyStoredArchives::class)->execute();
+        });
+
+        app(VerifyStoredArchives::class)->execute();
+
+        $this->assertTrue($fired);
+        $this->assertSame(1, $datastore->verificationsStarted, 'Two overlapping sweeps asked twice.');
+
+        $row = $archive->refresh();
+        $this->assertSame(BackupState::Succeeded, $row->state);
+        $this->assertSame(1, $row->verification_attempts, 'One run, one attempt.');
+    }
+
     #[Test]
     public function a_refused_verification_writes_its_reason_only_onto_a_row_still_waiting_for_one(): void
     {
