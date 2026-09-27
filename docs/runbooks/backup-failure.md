@@ -52,8 +52,9 @@ not the problem; the platform's knowledge is.
 
    A restore can be in review with no task id: `restore_task_id` is null. That is a
    restore whose start call never gave the platform a handle. Either the call ended
-   without an answer (a timeout, a lost response), and `failure_reason` is the
-   provider's message; or no handle had arrived `backups.max_poll_hours` after
+   without an answer (a timeout, a lost response), and `failure_reason` is the message
+   of the error the backup adapter raised, with anything that looks like a secret
+   redacted; or no handle had arrived `backups.max_poll_hours` after
    `restore_started_at` (the call still waiting, or its process gone), and
    `failure_reason` says the platform stopped tracking it. Either way the restore may
    have started. If the handle arrives after the row went to review,

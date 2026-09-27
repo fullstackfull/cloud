@@ -10,11 +10,13 @@ use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Backups\Application\Actions\ReconcileRunningBackups;
 use Lynomia\Modules\Backups\Application\Actions\RestoreServiceBackup;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
+use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
 use Lynomia\Modules\Backups\Infrastructure\Providers\FakeBackupProvider;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
+use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use Monolog\Handler\TestHandler;
 use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\Test;
@@ -63,8 +65,11 @@ final class ARestoreInReviewWithoutAHandleIsFoundByItsLogLineTest extends VpsApi
         $this->assertSame('restoring', $row['interrupted_operation']);
         $this->assertNull($row['restore_task_id']);
         $this->assertNotNull($row['restore_started_at']);
-        $this->assertIsString($row['failure_reason']);
-        $this->assertNotSame('', $row['failure_reason']);
+        // The message of the error the backup adapter raised, redacted.
+        $this->assertSame(
+            (new SecretRedactor)->redactString(BackupProviderException::timedOut(FakeBackupProvider::NAME, 'start_restore')->getMessage()),
+            $row['failure_reason'],
+        );
     }
 
     #[Test]
