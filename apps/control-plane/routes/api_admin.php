@@ -52,7 +52,8 @@ use Lynomia\Modules\Support\Http\Controllers\OperatorTicketController;
 |
 | The prefix is not the control. `auth:sanctum` here is the same guard the
 | customer API uses, so authentication alone would let any verified customer
-| through. Two things separate the surfaces:
+| through. Two things separate the surfaces, and a third keeps an unproved
+| address out:
 |
 |  - `staff` (EnsureTheCallerIsStaff): a login that holds no staff role is
 |    refused, whatever permissions it holds. This used not to exist, and the
@@ -67,13 +68,24 @@ use Lynomia\Modules\Support\Http\Controllers\OperatorTicketController;
 |    the portal session, and before that check an infrastructure admin's own
 |    customer token, or a customer's token after promotion, opened it (OB5-1).
 |  - every route below names the permission it requires.
+|  - `verified` (EnsureEmailIsVerified): a login whose address has not been
+|    proved is refused (403 `auth.email_unverified`), whatever roles it
+|    holds. An operator invitation can promote an existing login whose
+|    mailbox nobody proved — registration asks for no proof — and until its
+|    owner completes the reset link the invitation mails, this is what keeps
+|    that login off this surface (B2, re-audit after round five: nothing
+|    held it, and dropping it from the support group left the suite green).
 |
-| Both are enforced by tests rather than by convention —
+| All three are enforced by tests rather than by convention —
 | tests/Feature/Rbac/AdminRoutesRequireAPermissionTest.php fails the build if
 | a route is added here without a permission, if it names a permission that
-| does not exist, or if it carries the tenant scope, and
+| does not exist, or if it carries the tenant scope,
 | TheCustomerRoleIsNotAWayIntoTheAdminSurfaceTest fails it if a route lacks
-| the staff gate after `auth:sanctum`. It is the only way a rule like this
+| the staff gate after `auth:sanctum`, and
+| tests/Architecture/EveryAdminRouteRequiresAVerifiedAddressTest fails it if
+| a route does not run `verified` after authentication — each reading what
+| the router runs, so `->withoutMiddleware()` does not slip past it. It is
+| the only way a rule like this
 | survives contact with a deadline.
 |
 | Deliberately NOT the acting-customer middleware: an administrator acts on the
