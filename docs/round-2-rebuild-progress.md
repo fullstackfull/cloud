@@ -183,4 +183,4 @@ reproduce; the confirmed unnumbered items are listed there.
 | B | an operator invite promoting a squatted account with its password; `verified` unpinned on `/api/admin`; the throttle oracle's guard spelling | fixing | — |
 | C | DirectAdmin nested lists; indeterminate-poll pin; attempt-bound handle writes; browse/download tests; review verdicts bound to the review seen | fixing | — |
 | D | resize moves capacity; a retry placed on its own node; adoption moves capacity; inventory sync lock order | fixing | — |
-| E | spelled checks read code, not comments (coordinator) | awaiting verifier | `037156e` |
+| E | spelled checks read code, not comments (coordinator) | upheld with reservations (a string, heredoc or attribute still satisfies the text search; none in the tree); the owed filter oracle added | `037156e` |
