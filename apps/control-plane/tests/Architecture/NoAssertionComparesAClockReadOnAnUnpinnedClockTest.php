@@ -56,8 +56,9 @@ use Tests\Support\UnpinnedClockAssertions;
  * `assertTrue`/`assertFalse` of an equality, or a hand comparison (an `if`
  * on an equality with a `fail()` in a branch) — whose compared value is made
  * from a clock read where the clock is not pinned. PHP's own clock
- * (`time()`, `date()`, `new DateTime()`) is reported pinned or not, because
- * freezing does not reach it.
+ * (`time()`, `date()`, `new DateTime()`, and since round seven Symfony's
+ * `Cookie::getMaxAge()`, which is `expire - time()`) is reported pinned or
+ * not, because freezing does not reach it.
  *
  * A `Carbon::setTestNow()` given a closure pins only when every value the
  * closure returns is a fixed time; any other callable replaces a pin rather
@@ -79,6 +80,18 @@ use Tests\Support\UnpinnedClockAssertions;
  * bound comparison with a tolerance (`assertLessThanOrEqual`,
  * `assertEqualsWithDelta`, `->lessThan(now())`) is not the shape either: it
  * does not change its answer when a second or a day turns over.
+ *
+ * Nor does it follow a clock read out of a closure. Measured at `bf36e3f`:
+ * the full suite was red once in
+ * `AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest::
+ * only_a_super_admin_is_told_whether_an_existing_login_was_promoted`,
+ * 7199 against 7200, because each response's cookies were compared by
+ * `getMaxAge()` read inside the closure given to `array_map()`, into a
+ * variable later compared. Listing `getMaxAge` in
+ * {@see UnpinnedClockAssertions::NATIVE_METHODS} makes a direct comparison
+ * of it a finding; that test's shape is still not reported (its control,
+ * `clean_a_native_method_in_a_closure_into_a_variable`, holds that
+ * disclosure), and the test was fixed by hand.
  *
  * ===========================================================================
  * WHAT HOLDS THE GATE ITSELF
@@ -269,6 +282,10 @@ final class NoAssertionComparesAClockReadOnAnUnpinnedClockTest extends TestCase
         'found_a_test_now_closure_from_callable' => 'Closure::fromCallable() given to a test-now setter does not pin',
         'clean_a_test_now_closure_returned_by_a_method_pins' => 'a closure returned by a call is not seen (disclosed): it pins',
         'clean_a_test_now_closure_whose_nested_closure_returns_anything' => 'the returns of a closure nested in a test-now closure are not its returns',
+        'clean_a_cookie_lifetime_against_a_frozen_clock' => 'a cookie\'s expiry less a frozen now() is not PHP\'s own clock',
+        'clean_a_native_method_given_an_argument' => 'a native method reads the clock only given nothing',
+        'clean_is_cleared_is_a_bound' => 'Cookie::isCleared() is a bound, not listed',
+        'clean_a_native_method_in_a_closure_into_a_variable' => 'the bf36e3f shape: a read in a closure argument, into a variable, is not seen (disclosed)',
     ];
 
     private static ?UnpinnedClockAssertions $suite = null;

@@ -181,8 +181,14 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  *
  * **PHP's own clock**, which freezing does not reach and which is therefore a
  * finding pinned or not: `f(…)` for `f` in {@see self::NATIVE_FUNCTIONS} with
- * the argument count that list gives (`null`: any), and `new C()` for `C` in
- * {@see self::NATIVE_CONSTRUCTORS} with nothing or a relative literal first.
+ * the argument count that list gives (`null`: any), `new C()` for `C` in
+ * {@see self::NATIVE_CONSTRUCTORS} with nothing or a relative literal first,
+ * and `$x->m()` with no argument, on any receiver, for `m` in
+ * {@see self::NATIVE_METHODS} (Symfony's `Cookie::getMaxAge()`, which is
+ * `expire - time()`; matched by name, so Symfony's `Response::getMaxAge()`,
+ * which reads `time()` only for an unreadable `Expires` header, is read as
+ * one too). Symfony's `Cookie::isCleared()` (`expire < time()`) is not
+ * listed: it is a bound, like `isPast()`, and bounds are not this shape.
  *
  * A **relative literal** is a plain string literal ({@see self::isRelative()})
  * whose meaning depends on the moment it is read: resolved with PHP's
@@ -259,7 +265,23 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  *    constraint built with `new` (`new IsIdentical(now())`) is not read.
  *  - **Clock reads spelled any other way**: `Carbon::parse(null)`, a static
  *    reader called through a variable class or an alias, a Carbon macro, a
- *    clock read through `app('clock')` or a service.
+ *    clock read through `app('clock')` or a service. Of PHP's own clock
+ *    behind a vendor method, only {@see self::NATIVE_METHODS} is read:
+ *    Symfony's `Response::getAge()` and `getTtl()` (`time()` less the Date
+ *    header), and a Symfony `Cookie` turned into a string (`(string)
+ *    $cookie`, the `set-cookie` lines of `$response->headers->all()`), whose
+ *    `Max-Age` is `getMaxAge()`, are not.
+ *  - **A native method read inside a closure into a variable.** The
+ *    compared value of the bf36e3f version of
+ *    `AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest::
+ *    only_a_super_admin_is_told_whether_an_existing_login_was_promoted`
+ *    was `$seen`, built from `array_map(static fn (Cookie $cookie) =>
+ *    …$cookie->getMaxAge()…, …)` assigned to `$headers['cookies']`: a read
+ *    inside a closure argument, which does not flow (above), held in a
+ *    variable, which is not followed. The walk reports nothing there,
+ *    before or after `getMaxAge` was listed; the test was red once in the
+ *    full suite at bf36e3f (7199 against 7200) and was fixed by hand, not
+ *    held by this gate.
  *  - **Code outside the set**: a pin or an assertion in a vendor trait or base
  *    class, a helper reached through a variable (`$helper->check()`) or a
  *    dynamic name, a data provider's values.
@@ -400,6 +422,14 @@ final class UnpinnedClockAssertions
     /** PHP's own clock: classes whose constructor reads it given nothing or a relative literal. */
     public const array NATIVE_CONSTRUCTORS = ['DateTime', 'DateTimeImmutable'];
 
+    /**
+     * PHP's own clock: methods, on any receiver, that read it when given no
+     * argument. Symfony's `Cookie::getMaxAge()` is `max(0, expire - time())`
+     * (symfony/http-foundation/Cookie.php), so a cookie's lifetime read
+     * this way moves when a second turns, frozen or not.
+     */
+    public const array NATIVE_METHODS = ['getMaxAge'];
+
     /** Nodes whose receiver (`var`) flows into their value. */
     public const array RECEIVER_FLOWS = [
         MethodCall::class, NullsafeMethodCall::class, PropertyFetch::class, NullsafePropertyFetch::class,
@@ -534,6 +564,7 @@ final class UnpinnedClockAssertions
         'COMBINE_PREFIXES' => ['found', 'combine_prefix'],
         'NATIVE_FUNCTIONS' => ['found', 'native_function'],
         'NATIVE_CONSTRUCTORS' => ['found', 'native_constructor'],
+        'NATIVE_METHODS' => ['found', 'native_method'],
         'RECEIVER_FLOWS' => ['found', 'receiver_flow'],
         'FLOW_NODES' => ['found', 'flow_node'],
         'PIN_METHODS' => ['clean', 'pin_method'],
@@ -773,6 +804,9 @@ final class UnpinnedClockAssertions
             }
             $method = $expr->name->toString();
             $args = $expr->getArgs();
+            if ($args === [] && in_array($method, self::NATIVE_METHODS, true)) {
+                return true;
+            }
             if (! $nativeOnly && $args === [] && self::named($method, self::IMPLICIT_METHODS, self::IMPLICIT_PREFIXES)) {
                 return true;
             }
