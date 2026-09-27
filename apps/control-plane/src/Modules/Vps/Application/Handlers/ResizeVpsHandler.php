@@ -85,10 +85,15 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  * and when the attempts run out the job stops in review, never failed: the
  * upgrade stays on the operator's list and on lynomia_plan_change_total until
  * a person grows the machine or returns the money. It is never reported done
- * and never grown onto room the node does not have. The plan-change quote
- * asks the same refusal before the money moves (PlanChangeDelivery, through
- * MachineCommitment::whyTheGrowthWouldNotFit()), so this is reached only when
- * the room went between the quote and the resize.
+ * and never grown onto room the node does not have; the customer is told the
+ * change is waiting for the team and what they paid is held
+ * (NotifyOnProvisioningOutcome, plan_change_needs_review). The plan-change
+ * quote asks the same refusal before the money moves (PlanChangeDelivery,
+ * through MachineCommitment::whyTheGrowthWouldNotFit()), the payment asks it
+ * again when it is opened, and the settlement once more when the capture is
+ * heard - returning a change it refuses (ReturnAPlanChangeNoLongerDeliverable)
+ * - so this is reached only when the room went between the settlement and the
+ * resize.
  */
 final readonly class ResizeVpsHandler implements ProvisioningHandler
 {

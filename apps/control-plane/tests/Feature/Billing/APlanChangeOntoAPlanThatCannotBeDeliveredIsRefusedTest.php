@@ -257,6 +257,74 @@ final class APlanChangeOntoAPlanThatCannotBeDeliveredIsRefusedTest extends TestC
         $this->changePlan($subscription, (string) $large->getKey(), $this->priceOf($large), 'vps-resize')->assertOk();
     }
 
+    #[Test]
+    public function a_dedicated_change_of_shape_is_refused_because_nothing_resizes_one(): void
+    {
+        /*
+         * A dedicated server is not resized: nothing queues a change of shape
+         * for it (QueuePlanChangeAtProvider), so a paid change of shape would
+         * deliver nothing. Refused on the options screen and on the change;
+         * a move between dedicated plans of the same shape is not.
+         */
+        $product = Product::factory()->create(['kind' => 'dedicated']);
+        $small = $this->vpsPlan($product, 'dedicated-small', ['vcpu' => 8, 'memory_mib' => 32_768, 'disk_gib' => 500], 30_000);
+        $large = $this->vpsPlan($product, 'dedicated-large', ['vcpu' => 16, 'memory_mib' => 65_536, 'disk_gib' => 1_000], 60_000);
+        $same = $this->vpsPlan($product, 'dedicated-same', ['vcpu' => 8, 'memory_mib' => 32_768, 'disk_gib' => 500], 30_000);
+
+        $subscription = Subscription::factory()
+            ->startingOn(CarbonImmutable::now()->subDays(10))
+            ->create([
+                'customer_id' => $this->customer->getKey(),
+                'plan_id' => $small->getKey(),
+                'currency' => 'KWD',
+                'billing_period' => BillingPeriod::Monthly,
+                'recurring_amount_minor' => 30_000,
+            ]);
+        Service::factory()->active()->create([
+            'customer_id' => $this->customer->getKey(),
+            'kind' => 'dedicated',
+            'subscription_id' => $subscription->getKey(),
+            'resources' => ['vcpu' => 8, 'memory_mib' => 32_768, 'disk_gib' => 500],
+        ]);
+
+        $this->assertContains('not_deliverable', $this->optionFor($subscription, (string) $large->getKey())['refusals']);
+        $this->assertNotContains('not_deliverable', $this->optionFor($subscription, (string) $same->getKey())['refusals']);
+
+        $this->changePlan($subscription, (string) $large->getKey(), $this->priceOf($large), 'dedicated-shape')
+            ->assertStatus(409)
+            ->assertJsonPath('error.details.refusals', 'not_deliverable');
+
+        $this->assertSame((string) $small->getKey(), (string) $subscription->fresh()?->plan_id);
+        $this->assertSame(0, Invoice::query()->where('subscription_id', $subscription->getKey())->count(), 'A dedicated change of shape nothing can deliver was invoiced.');
+    }
+
+    #[Test]
+    public function a_vps_upgrade_whose_node_filled_after_it_was_accepted_cannot_be_paid(): void
+    {
+        /*
+         * The payment asks the change's own question again, measured from what
+         * the service ran before the change - not from the subscription's
+         * plan, which the change already moved onto the target, and against
+         * which the growth reads as none. Accepted with room; the node fills;
+         * the payment is refused before any money moves.
+         */
+        [$subscription, $large, $node] = $this->vpsSubscriptionOnANode();
+
+        $this->changePlan($subscription, (string) $large->getKey(), $this->priceOf($large), 'vps-then-full')->assertOk();
+        /** @var Invoice $invoice */
+        $invoice = Invoice::query()->where('subscription_id', $subscription->getKey())->sole();
+
+        $node->refresh()->forceFill(['allocated_memory_mib' => app(NodeCapacityPolicy::class)->schedulableMemoryMib($node) - 1_024])->save();
+
+        $this->actingAs($this->user)
+            ->postJson('/api/v1/invoices/'.$invoice->getKey().'/payments', [])
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'invoice.plan_change_not_deliverable');
+
+        $this->assertSame(0, PaymentAttempt::query()->where('invoice_id', $invoice->getKey())->count());
+        $this->assertSame(InvoiceStatus::Open, $invoice->fresh()?->status);
+    }
+
     // -----------------------------------------------------------------
 
     private function assertRefusedEverywhere(Subscription $subscription, string $planId, string $priceId): void

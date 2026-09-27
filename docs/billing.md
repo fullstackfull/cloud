@@ -77,6 +77,26 @@ a yearly plan share one rule. Both the unused-time credit and the new charge use
 divisor, which is what makes an upgrade followed by an immediate downgrade net to exactly
 zero rather than leaking a fils on each change.
 
+### A paid plan change is delivered, or what was paid for it goes back
+
+An upgrade is invoiced and delivered when its proration invoice is paid. Whether it can
+still be delivered (the hosting plan resolves to one package on sale; the VPS has a
+machine whose node and pool can hold the growth) is asked by the quote, again when the
+payment is opened, and again when the payment's settlement is heard - a card payment is
+captured after it was opened, and an operator can withdraw the package or fill the node
+in between. A change the settlement refuses is **returned**, not delivered as nothing:
+what the invoice holds is credited to the customer's wallet against the invoice, the
+subscription goes back to the plan and the recurring amount it came from, the change is
+recorded `returned_at` with its `return_reason`, and a `subscription.plan_changed` audit
+entry with the reason `plan_change_not_deliverable_at_settlement` names the invoice, the
+refusal and the amount returned (`ReturnAPlanChangeNoLongerDeliverable`).
+
+What the settlement cannot see is a room that goes after it: a resize the node can no
+longer hold is retried and then stops in review, never failed, with the money held for an
+operator to grow the machine or return it. The customer is told the plan change is
+waiting for the team and that what they paid for it is held
+(`service.plan_change_needs_review`).
+
 ## Invoice numbering
 
 Numbers come from a PostgreSQL sequence, not from `MAX(number) + 1`.

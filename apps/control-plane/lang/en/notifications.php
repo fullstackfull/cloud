@@ -125,6 +125,10 @@ return [
             'title' => 'Could not change the plan for :service',
             'body' => 'The plan change for :service did not complete and has been left as it was. Nothing has been charged for the change.',
         ],
+        'plan_change_needs_review' => [
+            'title' => 'The plan change for :service is waiting for our team',
+            'body' => 'The plan change for :service could not be applied automatically, and a person is looking at it. What you paid for the change is held until it is applied, or returned if it cannot be. :service keeps running as it was in the meantime.',
+        ],
         'reinstall_completed' => [
             'title' => ':service has been reinstalled',
             'body' => ':service has been reinstalled with :image and is running again.',

@@ -143,10 +143,17 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
          * and specifically not told the machine failed — the platform does not
          * know that, and telling somebody their server was not built when it
          * may exist is worse than saying nothing precise.
+         *
+         * The provider half of a paid plan change says so: the change is
+         * waiting for the team and what was paid for it is held. A resize the
+         * node can no longer hold ends here after its retries, with the money
+         * held for an operator to grow the machine or return it
+         * (ResizeVpsHandler), and the build's message - setting the service up
+         * did not finish - told the customer nothing about either.
          */
         $this->notify->execute(
             customerId: (string) $service->customer_id,
-            type: NotificationType::ServiceNeedsReview,
+            type: $this->isAPlanChange($event->kind) ? NotificationType::PlanChangeNeedsReview : NotificationType::ServiceNeedsReview,
             idempotencyKey: 'provisioning-review:'.$event->provisioningJobId,
             subject: $service,
             data: ['service' => $this->label($service)],

@@ -26,7 +26,9 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  *    WindUpAnEndedSubscription (the open invoices of a subscription that has
  *    ended, which it then voids) and ReturnAnUpgradeTheEndPrevented (a paid
  *    upgrade never delivered because its subscription ended, from the
- *    wind-up or from the settlement heard after the end - OA-3);
+ *    wind-up or from the settlement heard after the end - OA-3) and
+ *    ReturnAPlanChangeNoLongerDeliverable (a paid plan change its settlement
+ *    found could no longer be delivered);
  *  - CompensateUncollectableCapture credits a capture that landed on a
  *    withdrawn invoice, no more than the invoice still holds of it;
  *  - ApplyPlanChange credits a downgrade's unused time to the wallet, drawn on
@@ -104,7 +106,9 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  * subscription's wind-up (its open invoices, the subscription, its paid
  * upgrades, then the wallet - every invoice it touches before the wallet);
  * ResizeOnPlanChangeSettlement (the subscription, then - returning an
- * upgrade the end prevented - the paid invoice and the wallet);
+ * upgrade the end prevented, or a change no longer deliverable at its
+ * capture - the paid invoice and the wallet, and for the latter then the plan
+ * the subscription goes back to);
  * ApplyPlanChange (the subscription, its orders, then the paid invoices a
  * credit draws on, then - for a downgrade - the wallet, then the plan it
  * moves onto).

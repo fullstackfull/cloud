@@ -119,6 +119,15 @@ enum NotificationType: string
     case DataRetentionEnding = 'service.data_retention_ending';
     case PlanChangeCompleted = 'service.plan_change_completed';
     case PlanChangeFailed = 'service.plan_change_failed';
+    /*
+     * A paid plan change whose provider half stopped in review - a resize
+     * the node could no longer hold, retried to the end, or a package change
+     * that timed out. The build's "needs our attention" says setting the
+     * service up did not finish, which is not what happened: the customer is
+     * told the change is waiting for the team and what they paid for it is
+     * held (NotifyOnProvisioningOutcome).
+     */
+    case PlanChangeNeedsReview = 'service.plan_change_needs_review';
     case ReinstallCompleted = 'service.reinstall_completed';
     case ReinstallFailed = 'service.reinstall_failed';
     case BackupCompleted = 'service.backup_completed';
@@ -259,7 +268,7 @@ enum NotificationType: string
              * away from the portal, for the same reason the other two are.
              */
             self::RestoreCompleted, self::RestoreFailed, self::RestoreNeedsReview,
-            self::PlanChangeCompleted, self::PlanChangeFailed,
+            self::PlanChangeCompleted, self::PlanChangeFailed, self::PlanChangeNeedsReview,
         ];
 
         return in_array($this, $emailed, strict: true)
@@ -282,6 +291,7 @@ enum NotificationType: string
             self::ServiceNeedsReview,
             self::ServiceReactivationFailed,
             self::PlanChangeFailed,
+            self::PlanChangeNeedsReview,
             self::ReinstallFailed,
             self::BackupFailed,
             self::BackupNeedsReview,

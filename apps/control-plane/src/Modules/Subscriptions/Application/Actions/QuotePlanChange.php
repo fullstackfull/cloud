@@ -313,7 +313,13 @@ final readonly class QuotePlanChange
              * The last upgrade is paid and its settlement not yet heard. A
              * change made now was accepted, and if the subscription then
              * ended the paid upgrade was kept as though the unpaid one had
-             * superseded it (X1). Wait for the settlement; it is minutes.
+             * superseded it (X1). The settlement is normally heard within
+             * minutes of the payment, and the refusal ends with it; a
+             * settlement whose listener exhausts its retries is never heard,
+             * and the refusal then lasts until the period renews (the bound
+             * aPaidChangeAwaitsDelivery() states), which is why the
+             * customer's sentence sends them to support rather than
+             * promising minutes.
              */
             $refusals[] = PlanChangeRefusal::PreviousChangePending;
         }

@@ -114,13 +114,16 @@ final readonly class QueuePlanChangeAtProvider
      *
      * A plan the resolver refuses is refused before any money moves: the
      * quote refuses the change (PlanChangeRefusal::NotDeliverable, asked of
-     * PlanChangeDelivery), and the payment of an accepted change's invoice
-     * asks again (F-07). This used to accept the change, take the money and
-     * queue nothing. What reaches here refused is a plan whose packages an
-     * operator changed after the money started moving - the window checkout
-     * leaves for an order too - and every refusal is logged with the
-     * resolver's reason, because the customer has paid, the subscription has
-     * moved and the quota has not.
+     * PlanChangeDelivery), the payment of an accepted change's invoice asks
+     * again (F-07), and so does the settlement of that payment, just before
+     * it calls this: a change refused there is returned, not queued
+     * (ReturnAPlanChangeNoLongerDeliverable). This used to accept the change,
+     * take the money and queue nothing. What still reaches here refused is a
+     * package changed between that last question and this read, or a
+     * proration invoice issued before plan changes were recorded (the
+     * settlement's fallback, which asks nothing); every refusal is logged
+     * with the resolver's reason, because then the customer has paid, the
+     * subscription has moved and the quota has not.
      */
     private function queuePackageChange(
         Subscription $subscription,

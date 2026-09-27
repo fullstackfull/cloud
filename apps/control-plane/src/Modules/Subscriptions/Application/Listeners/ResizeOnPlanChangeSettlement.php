@@ -18,6 +18,7 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\QueuePlanChangeAtProvider;
 use Lynomia\Modules\Subscriptions\Application\Actions\ReturnAnUpgradeTheEndPrevented;
+use Lynomia\Modules\Subscriptions\Application\Actions\ReturnAPlanChangeNoLongerDeliverable;
 use Lynomia\Modules\Subscriptions\Application\Queries\PlanChangeDelivery;
 use Lynomia\Modules\Subscriptions\Domain\ValueObjects\PlanResources;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
@@ -85,6 +86,24 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * found, the subscription's plan is built only if no later proration invoice
  * exists - otherwise nothing is built, and the log says why, for an operator.
  *
+ * ---------------------------------------------------------------------------
+ * A change that stopped being deliverable before its capture
+ * ---------------------------------------------------------------------------
+ *
+ * The payment asks whether the change can still be delivered when it is
+ * opened (PlanChangeDelivery::refusalForTheInvoice()); a card payment is
+ * captured afterwards, at the provider. So the settlement asks again
+ * (PlanChangeDelivery::refusalForTheChange()), and a change it refuses is not
+ * delivered as nothing and kept: what the invoice holds goes back to the
+ * wallet, the subscription goes back to the plan it came from, and the
+ * change's record, the audit trail and the log say so
+ * ({@see ReturnAPlanChangeNoLongerDeliverable}). It used to be recorded
+ * delivered with nothing queued and the money kept, a log warning the only
+ * trace. What this cannot see is a change that becomes undeliverable after
+ * the settlement: a resize the node refuses at the build stops in review with
+ * the money held for an operator, and the customer is told the change is
+ * waiting (NotifyOnProvisioningOutcome).
+ *
  * Queued on payments beside the other settlement work, and idempotent twice
  * over: the provisioning job is keyed on the invoice that paid for it, so a
  * redelivered settlement finds the job the first delivery made instead of
@@ -112,6 +131,7 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
         private readonly QueuePlanChangeAtProvider $queueAtProvider,
         private readonly ReturnAnUpgradeTheEndPrevented $returnAnUpgrade,
         private readonly PlanChangeDelivery $delivery,
+        private readonly ReturnAPlanChangeNoLongerDeliverable $returnIt,
     ) {}
 
     public function handle(InvoicePaid $event): void
@@ -167,11 +187,48 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
                 return;
             }
 
+            /** @var PlanChange $recorded */
+            $recorded = PlanChange::query()->findOrFail($change->getKey());
+
+            if ($recorded->returned_at !== null) {
+                // Returned by an earlier delivery of this settlement.
+                return;
+            }
+
+            $superseded = $this->delivery->aLaterChangeWasSettled($recorded);
+
+            /*
+             * Still deliverable? Asked when the payment was opened, and asked
+             * again here, because a card payment is captured later and an
+             * operator can withdraw the package, fill the node or remove the
+             * machine in between. A change that can no longer be delivered is
+             * returned - the money to the wallet against the invoice, the
+             * subscription to the plan it came from - rather than recorded
+             * delivered with nothing queued and the money kept
+             * (ReturnAPlanChangeNoLongerDeliverable, which states the rule).
+             * Not asked of a change already recorded delivered (a redelivered
+             * settlement), nor of one a later settled change superseded: that
+             * change decided the machine, and this one builds nothing either
+             * way.
+             */
+            $refusal = $recorded->delivered_at !== null || $superseded
+                ? null
+                : $this->delivery->refusalForTheChange($recorded);
+
+            if ($refusal !== null) {
+                /** @var Invoice $invoice */
+                $invoice = Invoice::query()->findOrFail($event->invoiceId);
+                $this->returnIt->execute($subscription, $recorded, $invoice, $refusal);
+
+                return;
+            }
+
             /*
              * Delivered: the settlement was heard while the subscription was
-             * live, whatever it queues below - a resize, nothing because a
-             * later change already decided the machine, or nothing because
-             * there was nothing to resize. What the end does not return
+             * live and the change could still be delivered, whatever it
+             * queues below - a resize, nothing because a later change already
+             * decided the machine, or nothing because there was nothing to
+             * resize. What the end does not return
              * (ReturnAnUpgradeTheEndPrevented).
              */
             PlanChange::query()
@@ -179,7 +236,7 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
                 ->whereNull('delivered_at')
                 ->update(['delivered_at' => now()]);
 
-            if ($this->delivery->aLaterChangeWasSettled($change)) {
+            if ($superseded) {
                 return;
             }
 

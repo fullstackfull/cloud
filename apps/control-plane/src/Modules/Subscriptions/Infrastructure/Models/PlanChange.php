@@ -13,8 +13,12 @@ use Illuminate\Database\Eloquent\Model;
  * onto, the money on each side, and the invoice it left behind when it owed
  * something.
  *
- * Written once by ApplyPlanChange, inside the transaction that moved the plan,
- * and never updated. The settlement listener reads it to build the machine to
+ * Written by ApplyPlanChange, inside the transaction that moved the plan; the
+ * settlement listener then stamps at most one of `delivered_at` (heard while
+ * the subscription was live) or `returned_at` with `return_reason` (the change
+ * could no longer be delivered when its payment was captured, and the money
+ * went back to the wallet), and nothing else on it is ever updated. The
+ * settlement listener reads it to build the machine to
  * what a paid invoice bought, and the period's credit ceiling reads
  * `wallet_credit_minor` to know what earlier changes already gave back.
  *
@@ -33,6 +37,8 @@ use Illuminate\Database\Eloquent\Model;
  * @property ?string $changed_by_user_id
  * @property CarbonImmutable $changed_at
  * @property ?CarbonImmutable $delivered_at when its settlement was heard while the subscription was live
+ * @property ?CarbonImmutable $returned_at when its settlement returned it undelivered, because it could no longer be delivered
+ * @property ?string $return_reason why, in an operator's words (PlanChangeDelivery::refusal())
  */
 final class PlanChange extends Model
 {
@@ -56,6 +62,7 @@ final class PlanChange extends Model
             'resources' => 'array',
             'changed_at' => 'immutable_datetime',
             'delivered_at' => 'immutable_datetime',
+            'returned_at' => 'immutable_datetime',
         ];
     }
 }
