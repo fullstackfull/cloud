@@ -333,6 +333,20 @@ final class UnpinnedClockAssertions
         'assertDontSee' => [0],
         'assertSessionHas' => [1],
         'assertThat' => [0, 1],
+        // Since round eight. Each compares the argument with a value of the
+        // response or string by equality (or containment, as
+        // assertStringContainsString does). Not the header or cookie name:
+        // assertHeader($name, $value) compares $value with the header
+        // (assertEqualsIgnoringCase), assertCookie($name, $value) $value with
+        // the cookie (assertEquals); assertRedirect($uri) compares the
+        // Location with $uri (assertLocation); assertViewHas compares $value
+        // with the view's datum (assertEquals), and an array at position 0 is
+        // key => value pairs compared the same way (assertViewHasAll).
+        'assertStringContainsStringIgnoringCase' => [0, 1],
+        'assertHeader' => [1],
+        'assertRedirect' => [0],
+        'assertCookie' => [1],
+        'assertViewHas' => [0, 1],
     ];
 
     /** Assertions whose one argument is a condition. */

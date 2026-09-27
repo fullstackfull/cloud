@@ -61,9 +61,14 @@ use Tests\Support\UnpinnedClockAssertions;
  * not, because freezing does not reach it.
  *
  * A `Carbon::setTestNow()` given a closure pins only when every value the
- * closure returns is a fixed time; any other callable replaces a pin rather
- * than being one. Until round seven any closure counted as a pin, and one in
- * a shared `setUp()` hid every test of its class from the walk.
+ * closure returns is a fixed time. Any other callable written at the call — a
+ * closure or arrow function that returns anything else, a first-class
+ * callable, `Closure::fromCallable(…)` — replaces a pin rather than being
+ * one. A callable the walk cannot see as one, held in a variable
+ * (`setTestNow($clock)`) or returned by a call, is read as a value, and pins
+ * (the control `clean_a_test_now_variable_pins` holds that disclosed limit).
+ * Until round seven any closure counted as a pin, and one in a shared
+ * `setUp()` hid every test of its class from the walk.
  *
  * It does **not** follow a clock read through a variable, whatever the
  * variable holds, other than a helper's parameter the read was handed as
