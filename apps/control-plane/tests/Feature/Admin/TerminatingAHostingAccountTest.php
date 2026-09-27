@@ -21,6 +21,7 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Providers\FakeHostingProvider;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\StaffHoldingExactly;
 use Tests\TestCase;
 
 /**
@@ -47,6 +48,7 @@ use Tests\TestCase;
 final class TerminatingAHostingAccountTest extends TestCase
 {
     use RefreshDatabase;
+    use StaffHoldingExactly;
 
     private HostingNode $node;
 
@@ -234,11 +236,13 @@ final class TerminatingAHostingAccountTest extends TestCase
     {
         /*
          * Granted directly rather than through a seeded role. In the default
-         * seed the only role holding either permission holds both, so the
-         * escalation needs a custom role — and custom roles are creatable.
+         * seed the only role holding either permission holds both, and an
+         * operator may edit any staff role's permissions, so the split is
+         * reachable. The login holds a staff role emptied for the test
+         * (StaffHoldingExactly), or the /api/admin staff gate refuses it
+         * before either permission is read.
          */
-        $user = User::factory()->create();
-        $user->givePermissionTo(array_map(static fn (Permission $p): string => $p->value, $permissions));
+        $user = $this->staffHoldingExactly(array_values($permissions));
 
         return $user->fresh() ?? $user;
     }

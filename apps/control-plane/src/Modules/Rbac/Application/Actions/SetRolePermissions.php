@@ -27,6 +27,14 @@ use Spatie\Permission\PermissionRegistrar;
  * changing something that does not decide anything — and would reasonably
  * believe they had restricted it.
  *
+ * Customer is refused too, for anybody, super admin included: every customer
+ * login holds it, so its list is a grant to the whole customer base. The
+ * re-audit of round three (OB-1) measured a delegate (support + role.manage +
+ * catalog.view) giving it its own permissions — 200 — after which every
+ * customer login read /api/admin/operators and /api/admin/customers. Its
+ * permissions are fixed by Role::defaultPermissions() and the seeder; the
+ * /api/admin staff gate (EnsureTheCallerIsStaff) is the second layer.
+ *
  * A delegate (an operator holding `role.manage` without Super Admin) may
  * neither add nor remove a permission they do not hold. The list is replaced
  * as a whole, so checking only the new list let a support operator empty
@@ -49,6 +57,10 @@ final readonly class SetRolePermissions
     {
         if ($role->name === RoleEnum::SuperAdmin->value) {
             throw RoleChangeRefusedException::becauseTheRoleIsProtected($role->name);
+        }
+
+        if ($role->name === RoleEnum::Customer->value) {
+            throw RoleChangeRefusedException::becauseItIsTheCustomerBaseline($role->name);
         }
 
         /*

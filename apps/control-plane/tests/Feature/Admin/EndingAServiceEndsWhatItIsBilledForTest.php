@@ -41,6 +41,7 @@ use Mockery;
 use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
 use Tests\Support\BuysSharedHosting;
+use Tests\Support\StaffHoldingExactly;
 use Tests\TestCase;
 
 /**
@@ -68,6 +69,7 @@ final class EndingAServiceEndsWhatItIsBilledForTest extends TestCase
 {
     use BuysSharedHosting;
     use RefreshDatabase;
+    use StaffHoldingExactly;
 
     protected function setUp(): void
     {
@@ -291,8 +293,7 @@ final class EndingAServiceEndsWhatItIsBilledForTest extends TestCase
         [$account, $service, , $subscription] = $this->liveHosting();
         $account->forceFill(['status' => HostingAccountStatus::Terminated])->save();
 
-        $manager = User::factory()->create();
-        $manager->givePermissionTo([Permission::HostingAccountManage->value]);
+        $manager = $this->staffHoldingExactly([Permission::HostingAccountManage]);
 
         $this->actingAs($manager->fresh() ?? $manager)
             ->deleteJson('/api/admin/hosting-accounts/'.$account->getKey(), ['reason' => 'Tidying terminated accounts.'])
@@ -418,8 +419,7 @@ final class EndingAServiceEndsWhatItIsBilledForTest extends TestCase
         app(TransitionSubscription::class)->execute($subscription->refresh(), SubscriptionStatus::Suspended);
         $this->travel(31)->days();
 
-        $manager = User::factory()->create();
-        $manager->givePermissionTo([Permission::HostingAccountManage->value]);
+        $manager = $this->staffHoldingExactly([Permission::HostingAccountManage]);
 
         $this->actingAs($manager->fresh() ?? $manager)
             ->deleteJson('/api/admin/hosting-accounts/'.$account->getKey(), ['reason' => 'Window elapsed, clearing out.'])
@@ -507,8 +507,7 @@ final class EndingAServiceEndsWhatItIsBilledForTest extends TestCase
 
     private function operator(): User
     {
-        $user = User::factory()->create();
-        $user->givePermissionTo([Permission::ServiceTerminate->value, Permission::HostingAccountManage->value]);
+        $user = $this->staffHoldingExactly([Permission::ServiceTerminate, Permission::HostingAccountManage]);
 
         return $user->fresh() ?? $user;
     }

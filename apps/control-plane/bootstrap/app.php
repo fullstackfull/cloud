@@ -20,6 +20,7 @@ use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 use Lynomia\Http\Middleware\AssignRequestId;
 use Lynomia\Http\Middleware\EnsureEmailIsVerified;
+use Lynomia\Http\Middleware\EnsureTheCallerIsStaff;
 use Lynomia\Http\Middleware\ResolveActingCustomer;
 use Lynomia\Http\Middleware\SecurityHeaders;
 use Lynomia\Http\Middleware\SetRequestLocale;
@@ -112,6 +113,12 @@ $app = Application::configure(basePath: dirname(__DIR__))
              */
             'verified' => EnsureEmailIsVerified::class,
             'role' => RoleMiddleware::class,
+
+            /*
+             * The /api/admin staff gate: a login holding no staff role is
+             * refused before any permission is read. See the class.
+             */
+            'staff' => EnsureTheCallerIsStaff::class,
 
             // Resolves the one customer account a request acts for. Every
             // customer-scoped route carries it, and every customer-scoped

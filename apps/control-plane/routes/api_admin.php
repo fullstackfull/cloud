@@ -51,13 +51,25 @@ use Lynomia\Modules\Support\Http\Controllers\OperatorTicketController;
 | session.
 |
 | The prefix is not the control. `auth:sanctum` here is the same guard the
-| customer API uses, so the group alone would let any verified customer
-| through: what actually separates the two surfaces is that every route below
-| names the permission it requires. That is enforced by a test rather than by
-| convention — tests/Feature/Rbac/AdminRoutesRequireAPermissionTest.php fails
-| the build if a route is added here without one, if it names a permission that
-| does not exist, or if it carries the tenant scope. It is the only way a rule
-| like this survives contact with a deadline.
+| customer API uses, so authentication alone would let any verified customer
+| through. Two things separate the surfaces:
+|
+|  - `staff` (EnsureTheCallerIsStaff): a login that holds no staff role is
+|    refused, whatever permissions it holds. This used not to exist, and the
+|    per-route permission was the only separation — so when a delegate gave
+|    the customer role its own permissions (OB-1, re-audit of round three),
+|    every customer login read the operator list. The customer role's
+|    permissions are no longer editable, and this gate means a customer role
+|    that came to hold an operator permission some other way opens nothing.
+|  - every route below names the permission it requires.
+|
+| Both are enforced by tests rather than by convention —
+| tests/Feature/Rbac/AdminRoutesRequireAPermissionTest.php fails the build if
+| a route is added here without a permission, if it names a permission that
+| does not exist, or if it carries the tenant scope, and
+| TheCustomerRoleIsNotAWayIntoTheAdminSurfaceTest fails it if a route lacks
+| the staff gate after `auth:sanctum`. It is the only way a rule like this
+| survives contact with a deadline.
 |
 | Deliberately NOT the acting-customer middleware: an administrator acts on the
 | platform, not on behalf of one account, and giving them a tenant scope would
@@ -68,7 +80,7 @@ use Lynomia\Modules\Support\Http\Controllers\OperatorTicketController;
 |
 */
 
-Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function (): void {
+Route::middleware(['auth:sanctum', 'verified', 'staff', 'throttle:api'])->group(function (): void {
     Route::get('customers', [CustomerController::class, 'index'])
         ->middleware('permission:'.Permission::CustomerViewAny->value)
         ->name('customers.index');
@@ -1027,7 +1039,7 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
 | Every route sits in the same authenticated group as the rest of this file
 | and names its permission, which the route test enforces.
 */
-Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function (): void {
+Route::middleware(['auth:sanctum', 'verified', 'staff', 'throttle:api'])->group(function (): void {
     Route::get('support/tickets', [OperatorTicketController::class, 'index'])
         ->middleware('permission:'.Permission::TicketViewAny->value)
         ->name('support.tickets');

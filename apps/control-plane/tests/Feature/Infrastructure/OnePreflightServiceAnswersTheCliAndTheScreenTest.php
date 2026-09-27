@@ -18,6 +18,7 @@ use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\StaffHoldingExactly;
 use Tests\TestCase;
 
 /**
@@ -41,6 +42,7 @@ use Tests\TestCase;
 final class OnePreflightServiceAnswersTheCliAndTheScreenTest extends TestCase
 {
     use RefreshDatabase;
+    use StaffHoldingExactly;
 
     private const string VARIABLE = 'LYNOMIA_TEST_PREFLIGHT_API_SECRET';
 
@@ -172,7 +174,8 @@ final class OnePreflightServiceAnswersTheCliAndTheScreenTest extends TestCase
     public function a_customer_cannot_run_a_preflight(): void
     {
         // A user with no operator role, which is what a customer is on this
-        // surface: the admin API is reached by permission, not by audience.
+        // surface: refused by the /api/admin staff gate before any permission
+        // is read.
         $user = User::factory()->create();
 
         $this->actingAs($user)
@@ -205,8 +208,7 @@ final class OnePreflightServiceAnswersTheCliAndTheScreenTest extends TestCase
          * role, so the assertion is about the split itself and cannot be
          * skipped into meaninglessness by a role gaining a permission later.
          */
-        $viewer = User::factory()->create();
-        $viewer->givePermissionTo(Permission::InfrastructureView->value);
+        $viewer = $this->staffHoldingExactly([Permission::InfrastructureView]);
         $viewer = $viewer->fresh() ?? $viewer;
 
         $this->assertTrue($viewer->can(Permission::InfrastructureView->value));

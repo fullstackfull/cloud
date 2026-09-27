@@ -7,9 +7,11 @@ namespace Lynomia\Modules\Rbac\Domain\Enums;
 /**
  * The roles the platform ships with.
  *
- * These are seeded defaults, not a closed set: operators may create additional
- * roles, and may edit the permission set of any role except Super Admin.
- * Nothing in the codebase branches on a role name.
+ * These are seeded defaults. Operators may edit the permission set of any role
+ * except Super Admin and Customer (see permissionsAreEditable()); there is no
+ * route that creates a role. Authorization decisions are made on permissions,
+ * with one exception by role kind rather than by name: /api/admin admits only
+ * a login holding a staff role (staffRoleNames()).
  */
 enum Role: string
 {
@@ -43,6 +45,47 @@ enum Role: string
     public function isStaffRole(): bool
     {
         return $this !== self::Customer;
+    }
+
+    /**
+     * The names of every staff role: what a login must hold at least one of
+     * to reach /api/admin at all (EnsureTheCallerIsStaff), whatever
+     * permissions it holds.
+     *
+     * From the enum rather than the roles table. A row in that table that this
+     * enum does not declare — none can be created through the application,
+     * which has no route that creates a role — is not staff, and neither is
+     * `customer`.
+     *
+     * @return list<string>
+     */
+    public static function staffRoleNames(): array
+    {
+        return array_values(array_map(
+            static fn (self $role): string => $role->value,
+            array_filter(self::cases(), static fn (self $role): bool => $role->isStaffRole()),
+        ));
+    }
+
+    /**
+     * Whether an operator may edit this role's permission list through the
+     * role routes. Two may not, for different reasons:
+     *
+     *  - Super Admin: its authority comes from the Gate::before bypass, so
+     *    its rows decide nothing and editing them would only look like a
+     *    restriction.
+     *  - Customer: every customer login holds it, including every one
+     *    registered after the change. Widening it grants a permission to the
+     *    whole customer base at once (OB-1: a delegate gave it its own
+     *    permissions and every customer read /api/admin/operators); narrowing
+     *    it takes `catalog.view` from every customer and breaks the
+     *    storefront. Its list is fixed by defaultPermissions() and the seeder
+     *    — a release, reviewed like code — and by nobody at runtime, super
+     *    admin included.
+     */
+    public function permissionsAreEditable(): bool
+    {
+        return $this !== self::SuperAdmin && $this !== self::Customer;
     }
 
     /**

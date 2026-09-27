@@ -106,7 +106,19 @@ final class SettleTheApplicationEnvironment
         return false;
     }
 
-    private static function nothingWasConfigured(Application $app): bool
+    /**
+     * Whether nothing configured this process: no APP_ENV, no cached
+     * configuration, no environment file. Then `production` is only Laravel's
+     * default for the absent value.
+     *
+     * Public because the provider guard asks the same question
+     * (ProviderRegistryServiceProvider::productionIsAnUnconfiguredDefault) and
+     * must get the same answer. It used to ask its own copy without the cache
+     * clause, so a host running from a cached production configuration and no
+     * environment file settled as production here and had its boot-time
+     * provider checks stand down there (OB-3, re-audit of round three).
+     */
+    public static function nothingWasConfigured(Application $app): bool
     {
         return ! self::appEnvWasNamed()
             && ! $app->configurationIsCached()

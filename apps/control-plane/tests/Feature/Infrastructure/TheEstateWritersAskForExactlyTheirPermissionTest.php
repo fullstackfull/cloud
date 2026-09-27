@@ -8,10 +8,10 @@ use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\OsInstallProfile;
-use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\StaffHoldingExactly;
 use Tests\TestCase;
 
 /**
@@ -28,6 +28,7 @@ use Tests\TestCase;
 final class TheEstateWritersAskForExactlyTheirPermissionTest extends TestCase
 {
     use RefreshDatabase;
+    use StaffHoldingExactly;
 
     /**
      * @return array<string, array{string, string, Permission}>
@@ -48,11 +49,11 @@ final class TheEstateWritersAskForExactlyTheirPermissionTest extends TestCase
     {
         $this->seed(RolePermissionSeeder::class);
 
-        $user = User::factory()->create();
-        $user->givePermissionTo(array_values(array_map(
-            static fn (Permission $permission): string => $permission->value,
+        // A staff login (StaffHoldingExactly), so the refusal is the
+        // permission's and not the /api/admin staff gate's.
+        $user = $this->staffHoldingExactly(array_values(
             array_filter(Permission::cases(), static fn (Permission $permission): bool => $permission !== $intended),
-        )));
+        ));
 
         $this->actingAs($user)->json($method, $this->resolved($uri), $this->body($uri))->assertForbidden();
     }
@@ -63,8 +64,7 @@ final class TheEstateWritersAskForExactlyTheirPermissionTest extends TestCase
     {
         $this->seed(RolePermissionSeeder::class);
 
-        $user = User::factory()->create();
-        $user->givePermissionTo($intended->value);
+        $user = $this->staffHoldingExactly([$intended]);
 
         $status = $this->actingAs($user)->json($method, $this->resolved($uri), $this->body($uri))->status();
 

@@ -41,7 +41,7 @@ const OPERATORS = [
 const ROLES = [
   { name: 'super-admin', label: 'Super Admin', is_staff_role: true, permissions_are_editable: false, grants_everything: true, permissions: [], operators: 1 },
   { name: 'noc', label: 'NOC', is_staff_role: true, permissions_are_editable: true, grants_everything: false, permissions: ['infrastructure.view', 'monitoring.view'], operators: 1 },
-  { name: 'customer', label: 'Customer', is_staff_role: false, permissions_are_editable: true, grants_everything: false, permissions: ['catalog.view'], operators: 0 },
+  { name: 'customer', label: 'Customer', is_staff_role: false, permissions_are_editable: false, grants_everything: false, permissions: ['catalog.view'], operators: 0 },
 ]
 
 const META = { page: 1, per_page: 25, total: 2, last_page: 1, max_per_page: 100 }
@@ -129,6 +129,19 @@ describe('OperatorsPage', () => {
     // And a role whose list does decide something says how long it is.
     const noc = await screen.findByRole('listitem', { name: /^NOC$/i })
     expect(within(noc).getByText(/2 permissions/i)).toBeInTheDocument()
+  })
+
+  it('offers no permission editor for the baseline customer role', async () => {
+    vi.stubGlobal('fetch', stubFetch())
+    renderPage()
+
+    // Every customer login holds it, so the platform refuses to edit it and
+    // says so in the flag; the screen follows the flag.
+    const customer = await screen.findByRole('listitem', { name: /^Customer$/i })
+    expect(within(customer).queryByRole('button', { name: /edit permissions/i })).not.toBeInTheDocument()
+
+    const noc = await screen.findByRole('listitem', { name: /^NOC$/i })
+    expect(within(noc).getByRole('button', { name: /edit permissions/i })).toBeInTheDocument()
   })
 
   it('offers only staff roles when changing what somebody may do', async () => {
