@@ -171,10 +171,16 @@ independent re-audit after round five follows.
 
 ### Round six — fixing what the re-audit after round five finds
 
-The re-audit after round five is running against `00a6e68` (five bands and "what
-round five introduced", with skeptics). Findings so far are recorded here as they
-are fixed.
+The re-audit after round five against `00a6e68` is recorded in
+`docs/independent-re-audit-after-round-5.md`: F-07 partially reproduces (a
+no-package hosting plan sold through a plan change); every other finding does not
+reproduce; the confirmed unnumbered items are listed there.
 
 | Band | Scope | Status | Commit |
 |---|---|---|---|
 | E | F-23 `Role` answered per case where roles are chosen (its by-value site was a read); the Registrant spelling names the write (coordinator) | upheld with reservations (one shared `Role::cases()` spelling does not tell six staff cases apart; the spelled check is a substring match) | `b350894` |
+| A | F-07 plan change onto an undeliverable plan; customer key reuse suppressing a resize; an undelivered upgrade kept beside a later unpaid change; wind-up retry wording | fixing | — |
+| B | an operator invite promoting a squatted account with its password; `verified` unpinned on `/api/admin`; the throttle oracle's guard spelling | fixing | — |
+| C | DirectAdmin nested lists; indeterminate-poll pin; attempt-bound handle writes; browse/download tests; review verdicts bound to the review seen | fixing | — |
+| D | resize moves capacity; a retry placed on its own node; adoption moves capacity; inventory sync lock order | fixing | — |
+| E | spelled checks read code, not comments (coordinator) | awaiting verifier | `037156e` |
