@@ -10,6 +10,7 @@ use Lynomia\Modules\Backups\Application\Actions\ReconcileRunningBackups;
 use Lynomia\Modules\Backups\Application\Actions\RequestBackupDeletion;
 use Lynomia\Modules\Backups\Application\Actions\RestoreServiceBackup;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
+use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
 use Lynomia\Modules\Backups\Domain\Exceptions\IllegalBackupTransitionException;
 use Lynomia\Modules\Backups\Domain\Exceptions\RestoreRefusedException;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
@@ -22,6 +23,7 @@ use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
 use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
+use Tests\Feature\Backups\Doubles\InterleavingDatastore;
 use Tests\Feature\Vps\VpsApiTestCase;
 use Tests\Support\ARestoreCallWithAWindow;
 
@@ -146,6 +148,55 @@ final class ASweepSettlesOnlyTheAttemptItPolledTest extends VpsApiTestCase
         $this->assertSame(BackupState::Restoring, $row->state, 'A restore that started a moment ago is not overdue.');
         $this->assertNotNull($row->restore_task_id);
         $this->assertNull($row->failure_reason);
+    }
+
+    /**
+     * The indeterminate branch has its own call to `recordPoll()`: a poll
+     * that got no answer is still a poll, and is recorded — on the attempt
+     * this copy read, or not at all. Written as a plain save, it would land
+     * on whatever attempt the row holds now: the second restore would carry
+     * the stale sweep's count and a `last_polled_at` it was never polled at,
+     * and lose its place at the front of the next sweep.
+     */
+    #[Test]
+    public function an_unanswered_poll_of_an_earlier_restore_is_not_recorded_on_a_later_one(): void
+    {
+        $this->freezeTime();
+        [, $machine, $archive] = $this->anArchive();
+        // The simulator answers every poll of a task it knows; a poll that
+        // gets no answer is the interleaving double's, as elsewhere here.
+        $datastore = new InterleavingDatastore;
+        app(BackupProviderFactory::class)->swap($machine->cluster()->firstOrFail(), $datastore);
+        $unanswered = static function (): void {
+            throw BackupProviderException::timedOut('fake', 'backup_task_status');
+        };
+        $datastore->whileTaskIsAsked = $unanswered;
+
+        $archive->transitionTo(BackupState::Restoring, ['restore_task_id' => 'UPID:fake-restore:first', 'restore_started_at' => now()]);
+        $stale = Backup::query()->findOrFail($archive->id);
+
+        $fresh = Backup::query()->findOrFail($archive->id);
+        $fresh->transitionTo(BackupState::Restored, ['restored_at' => now()]);
+        $fresh->transitionTo(BackupState::Restoring, ['restore_task_id' => 'UPID:fake-restore:second', 'restore_started_at' => now(), 'restored_at' => null]);
+        $before = $archive->refresh()->only(['poll_count', 'last_polled_at']);
+
+        $this->travel(5)->minutes();
+        app(ReconcileBackup::class)->execute($stale);
+
+        $row = $archive->refresh();
+        $this->assertSame(BackupState::Restoring, $row->state);
+        $this->assertSame('UPID:fake-restore:second', $row->restore_task_id);
+        $this->assertEquals($before, $row->only(['poll_count', 'last_polled_at']), 'The stale sweep\'s unanswered poll of the first restore is not a poll of the second.');
+
+        // The positive control: the same unanswered poll, by a copy of the
+        // attempt the row holds, is recorded.
+        $datastore->whileTaskIsAsked = $unanswered;
+        app(ReconcileBackup::class)->execute(Backup::query()->findOrFail($archive->id));
+
+        $row = $archive->refresh();
+        $this->assertSame($before['poll_count'] + 1, $row->poll_count);
+        $this->assertSame(now()->getTimestamp(), $row->last_polled_at?->getTimestamp());
+        $this->assertSame(BackupState::Restoring, $row->state, 'Not knowing is not overdue.');
     }
 
     #[Test]
