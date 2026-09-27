@@ -82,6 +82,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use ReflectionClassConstant;
 use RuntimeException;
+use Tests\Feature\Rbac\EveryStaffRoleCanBeGivenToAnOperatorTest;
 use Tests\Support\EnumCaseReferences;
 
 /**
@@ -124,16 +125,22 @@ use Tests\Support\EnumCaseReferences;
  *    value — a request field, an operator's form, the reference topology, a
  *    configuration key — and are built with `Enum::from()` or
  *    `Enum::tryFrom()`. The entry names the file where that happens, and the
- *    file must construct the enum (read by the classifier, not by a string
- *    search). This is a weaker claim than a producer: the gate cannot say
- *    which values arrive, so a case added to such an enum is not noticed —
- *    except where the site restricts the values with a literal `in:` rule
- *    over the enum's values ({@see casesTheSiteCannotAccept()} says exactly
- *    what it reads): then a case with no producer that the rule refuses must
- *    answer for itself in CASES, as `CustomerStatus::Closed` does beside
- *    `CustomerController`'s `in:active,suspended`. A
- *    `from()` in a list filter or over a stored column is a read, and does
- *    not qualify: the file named is the one where the value is chosen.
+ *    file must construct the enum from a value (read by the classifier, not
+ *    by a string search). This is a weaker claim than a producer: the gate
+ *    cannot say which values arrive, so a case added to such an enum is not
+ *    noticed — except where the site restricts the values with a literal
+ *    `in:` rule or a `Rule::in()` of quoted strings over the enum's values
+ *    ({@see casesTheSiteCannotAccept()} says exactly what it reads): then a
+ *    case with no producer that the rule refuses must answer for itself in
+ *    CASES, as `CustomerStatus::Closed` does beside `CustomerController`'s
+ *    `in:active,suspended`. A `from()` that is a read does not qualify: the
+ *    file named is the one where the value is chosen. The classifier records
+ *    three shapes of construction as reads — inside a body declared to
+ *    return `bool` (a list filter's predicate), over a lone property fetch
+ *    (a stored column), and one a method is called on at once —
+ *    ({@see EnumCaseReferences}, **Construction from a value**, says exactly
+ *    which), and a site whose only constructions of the enum are reads fails
+ *    the excuse. A read of any other shape is not told from a value.
  *  - **`vocabulary`**, for a whole enum: its cases are names code asks about
  *    or walks — a permission, a capability, a naming rule — not values a row
  *    takes. The entry names a file and the spelling there that walks or asks,
@@ -143,7 +150,14 @@ use Tests\Support\EnumCaseReferences;
  *    concatenated into SQL, a ternary branch. The entry names the file and the
  *    spelling, and the file's code (its comments left out) must still contain
  *    it. The search is for the text, so a read that spells the case the same
- *    way also satisfies it; the spelling is chosen to name the write.
+ *    way also satisfies it; the spelling is chosen to name the write. Where
+ *    no spelling names the case — the six staff `Role` cases are granted
+ *    through one walk of `Role::cases()`, and share that spelling — the
+ *    entry also names, as `held`, the data provider of a behavioural test
+ *    that exercises the write for each case, and the provider must still
+ *    yield the case ({@see EveryStaffRoleCanBeGivenToAnOperatorTest} invites
+ *    an operator with each staff role and grants it by a role change). The
+ *    spelling cannot tell one of those cases from another; the test can.
  *  - **`unwritten`**, for one case: nothing produces it. The entry names the
  *    module that owns the decision — build the writer, delete the case, or
  *    declare it prepared. These, with the sibling gate's `UNPRODUCED`, are the
@@ -152,7 +166,11 @@ use Tests\Support\EnumCaseReferences;
  *
  * An enum a state machine governs cannot be excused `by value` or as a
  * `vocabulary`: its cases are the states rows are in, and each is answered
- * for one at a time.
+ * for one at a time. A whole-enum excuse beside CASES entries for the same
+ * enum stands only for the cases its site refuses
+ * ({@see casesPairedWithAWholeEnumExcuse()}), and an enum answered case by
+ * case is listed in CASE_BY_CASE, so that it cannot go back to a whole-enum
+ * excuse by deleting its per-case lines alone.
  *
  * These entries were written by reading each site at the time; "nothing
  * writes it" means nothing under `src/` or `app/` names it in a writing
@@ -209,7 +227,7 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
      * Single cases: produced by a spelling the classifier does not read, or
      * produced by nothing.
      *
-     * @var array<string, array{kind: 'spelled', site: string, spelling: string, why: string}|array{kind: 'unwritten', owner: string, why: string}>
+     * @var array<string, array{kind: 'spelled', site: string, spelling: string, held?: string, why: string}|array{kind: 'unwritten', owner: string, why: string}>
      */
     public const array CASES = [
         ActivityCategory::class.'::Domains' => ['kind' => 'spelled', 'site' => 'src/Modules/Activity/Application/Queries/ActivitySources.php', 'spelling' => 'ActivityCategory::Domains->value', 'why' => 'The activity feed selects it as an SQL literal, DB::raw("\'".X->value."\' as category").'],
@@ -244,12 +262,12 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
         DomainContactRole::class.'::Administrative' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'The order and contact-update requests accept a registrant only, and DomainController passes only that role to OrderDomainRegistration and UpdateDomainContacts, the only writers of domain contacts.'],
         DomainContactRole::class.'::Technical' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'The order and contact-update requests accept a registrant only; nothing writes a technical contact.'],
         DomainContactRole::class.'::Billing' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'The order and contact-update requests accept a registrant only; nothing writes a billing contact.'],
-        Role::class.'::InfrastructureAdmin' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (an infrastructure admin).'],
-        Role::class.'::BillingAdmin' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (a billing admin).'],
-        Role::class.'::Support' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (support).'],
-        Role::class.'::NetworkEngineer' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (a network engineer).'],
-        Role::class.'::Noc' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (the NOC).'],
-        Role::class.'::Finance' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (finance).'],
+        Role::class.'::InfrastructureAdmin' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (an infrastructure admin). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
+        Role::class.'::BillingAdmin' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (a billing admin). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
+        Role::class.'::Support' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (support). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
+        Role::class.'::NetworkEngineer' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (a network engineer). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
+        Role::class.'::Noc' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (the NOC). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
+        Role::class.'::Finance' => ['kind' => 'spelled', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'spelling' => 'Role::cases()', 'held' => EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::staffRoles', 'why' => 'Assigned by name: assignable() walks every staff case into the roles an operator may be invited with or given, and syncRoles writes the name (finance). No production spelling names this case where it is granted, so the six staff roles share this one; the behavioural test named in held invites an operator with it and grants it by a role change.'],
         Role::class.'::Customer' => ['kind' => 'spelled', 'site' => 'src/Modules/Identity/Application/Actions/RegisterCustomer.php', 'spelling' => 'assignRole(Role::Customer->value)', 'why' => 'Registration assigns the customer role by its name.'],
         NodeStatus::class.'::Active' => ['kind' => 'spelled', 'site' => 'src/Modules/Infrastructure/Application/Actions/ChangeComputeNodeStatus.php', 'spelling' => 'NodeStatus::Active', 'why' => 'An operator puts a node into service: ComputeNodeController builds the status by value from the SETTABLE list this names.'],
         NodeStatus::class.'::Draining' => ['kind' => 'spelled', 'site' => 'src/Modules/Infrastructure/Application/Actions/ChangeComputeNodeStatus.php', 'spelling' => 'NodeStatus::Draining', 'why' => 'An operator drains a node: built by value from the same SETTABLE list.'],
@@ -303,6 +321,65 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
         WalletTransactionKind::class.'::Promotional' => ['kind' => 'unwritten', 'owner' => 'Wallet', 'why' => 'Nothing grants promotional credit.'],
     ];
 
+    /**
+     * The enums whose cases are answered for one at a time in CASES, with no
+     * whole-enum excuse: every enum any CASES entry names, except one also in
+     * WHOLE_ENUMS (whose entries there are the cases its site refuses).
+     *
+     * Kept as a list so that turning one of these back into a whole-enum
+     * excuse is an edit to this list too, not only the deletion of its
+     * per-case lines: {@see the_enums_answered_case_by_case_are_the_ones_listed()}
+     * holds the list equal to what CASES and WHOLE_ENUMS say, so a listed
+     * enum given a WHOLE_ENUMS entry, or one whose CASES lines are deleted,
+     * goes red until it is taken off. `Role` and `NodeStatus` are here
+     * because each was once excused whole by a site that did not choose every
+     * value (a read of a stored role name; a status list that refuses
+     * offline).
+     *
+     * @var list<class-string>
+     */
+    public const array CASE_BY_CASE = [
+        ActivityCategory::class,
+        ActorType::class,
+        GpuAllocationState::class,
+        VerificationLevel::class,
+        ReadinessAnswer::class,
+        LicenceState::class,
+        WordPressSiteKind::class,
+        AttentionSeverity::class,
+        BackupTrigger::class,
+        InvoiceItemKind::class,
+        DiscountType::class,
+        ComponentKind::class,
+        InstallerKind::class,
+        RegistrarCapability::class,
+        DomainContactRole::class,
+        Role::class,
+        NodeStatus::class,
+        ServerState::class,
+        DomainState::class,
+        CountryCurrencyChangeState::class,
+        LoginOutcome::class,
+        DeploymentState::class,
+        FactSource::class,
+        PlanRisk::class,
+        ReleaseReason::class,
+        NotificationChannel::class,
+        PaymentAttemptStatus::class,
+        PaymentMethodKind::class,
+        TransactionKind::class,
+        CapabilityState::class,
+        ConnectionState::class,
+        CredentialState::class,
+        ReadinessState::class,
+        CompensationAction::class,
+        PlacementRejectionReason::class,
+        SslStatus::class,
+        WordPressSiteState::class,
+        MessageAuthorKind::class,
+        WalletTransactionKind::class,
+    ];
+
     #[Test]
     public function every_case_of_every_enum_is_produced_or_excused(): void
     {
@@ -343,12 +420,65 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
     #[Test]
     public function no_excuse_outlives_what_it_excuses(): void
     {
+        $stale = self::staleExcuses(self::WHOLE_ENUMS, self::CASES);
+
+        $this->assertSame([], $stale, sprintf(
+            "These excuses no longer hold:\n  %s\n\nRemove or correct the entry.",
+            implode("\n  ", $stale),
+        ));
+    }
+
+    /**
+     * Three of the excuse checks on tables written here, each a variant of
+     * the committed ones that the check exists to refuse.
+     */
+    #[Test]
+    public function the_excuse_checks_refuse_the_variants_they_exist_for(): void
+    {
+        $reports = static fn (array $stale, string $prefix): bool => array_filter($stale, static fn (string $message): bool => str_starts_with($message, $prefix)) !== [];
+        $invite = 'src/Modules/Rbac/Application/Actions/InviteOperator.php';
+
+        // Role's round-five shape: excused whole at a site that only reads it.
+        $this->assertTrue($reports(
+            self::staleExcuses(
+                [...self::WHOLE_ENUMS, Role::class => ['kind' => 'by value', 'site' => $invite, 'why' => 'fixture']],
+                array_filter(self::CASES, static fn (string $case): bool => self::enumOf($case) !== Role::class, ARRAY_FILTER_USE_KEY),
+            ),
+            Role::class." — {$invite} does not build it from a value",
+        ), 'A by-value excuse naming a site whose only construction is a read stood.');
+
+        // A case answered beside a whole-enum excuse whose site accepts it.
+        $this->assertTrue($reports(
+            self::staleExcuses(self::WHOLE_ENUMS, [...self::CASES, DriftStatus::class.'::Resolved' => ['kind' => 'unwritten', 'owner' => 'Admin', 'why' => 'fixture']]),
+            DriftStatus::class.'::Resolved — answered for in CASES beside',
+        ), 'The gate does not run the pairing check.');
+
+        // A held case whose provider does not yield it, or does not exist.
+        foreach ([self::class.'::tablesAndConditions', EveryStaffRoleCanBeGivenToAnOperatorTest::class.'::noSuchProvider'] as $held) {
+            $cases = self::CASES;
+            $cases[Role::class.'::BillingAdmin']['held'] = $held;
+
+            $this->assertTrue($reports(self::staleExcuses(self::WHOLE_ENUMS, $cases), Role::class."::BillingAdmin — {$held} no longer yields it"), "A held entry naming {$held} stood.");
+        }
+    }
+
+    /**
+     * What {@see no_excuse_outlives_what_it_excuses()} reports, for any pair
+     * of tables shaped as WHOLE_ENUMS and CASES, so that the checks can be
+     * held on tables written in a test as well as on the committed ones.
+     *
+     * @param  array<class-string, array{kind: string, site: string, spelling?: string, why: string}>  $wholeEnums
+     * @param  array<string, array<string, string>>  $caseExcuses
+     * @return list<string>
+     */
+    private static function staleExcuses(array $wholeEnums, array $caseExcuses): array
+    {
         $subjects = self::subjects();
         $governed = EnumCaseReferences::governedEnums();
         $constructions = EnumCaseReferences::constructions();
         $stale = [];
 
-        foreach (self::CASES as $case => $excuse) {
+        foreach ($caseExcuses as $case => $excuse) {
             if (! array_key_exists($case, $subjects)) {
                 $stale[] = "{$case} — no longer a case, or now a state a machine can enter (excuse it there)";
 
@@ -362,9 +492,15 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
             if ($excuse['kind'] === 'spelled' && ! self::fileSays($excuse['site'], $excuse['spelling'])) {
                 $stale[] = "{$case} — {$excuse['site']} no longer contains {$excuse['spelling']}";
             }
+
+            if (isset($excuse['held']) && ! in_array(constant($case), self::heldCases($excuse['held']), true)) {
+                $stale[] = "{$case} — {$excuse['held']} no longer yields it, so the behavioural test named as holding it does not ask about it";
+            }
         }
 
-        foreach (self::WHOLE_ENUMS as $enum => $excuse) {
+        array_push($stale, ...self::casesPairedWithAWholeEnumExcuse($wholeEnums, $caseExcuses));
+
+        foreach ($wholeEnums as $enum => $excuse) {
             $cases = array_filter($subjects, static fn (string $case): bool => self::enumOf($case) === $enum, ARRAY_FILTER_USE_KEY);
 
             if ($cases === []) {
@@ -377,31 +513,22 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
                 $stale[] = "{$enum} — every case now has a producer";
             }
 
-            // A case answered for in CASES beside a whole-enum excuse is one
-            // the excuse's own site refuses by a literal `in:` rule (as
-            // CustomerStatus::Closed beside the operator's active/suspended
-            // choice). Any other pairing means the enum's cases are being
-            // answered for one at a time, and the whole-enum excuse would
-            // hide whichever of them nobody named.
-            $accepted = $excuse['kind'] === 'by value' ? self::valuesTheSiteAccepts($enum, $excuse['site']) : null;
-
-            foreach (array_keys(self::CASES) as $answered) {
-                $value = self::enumOf($answered) === $enum ? constant($answered) : null;
-
-                if ($value !== null && ($accepted === null || ! $value instanceof BackedEnum || in_array((string) $value->value, $accepted, true))) {
-                    $stale[] = "{$answered} — answered for in CASES beside {$enum}'s whole-enum excuse, whose site does not refuse it; answer for every case of the enum in CASES instead";
-                }
-            }
-
             if (isset($governed[$enum])) {
                 $stale[] = "{$enum} — governed by a state machine, so its cases are answered for one at a time";
             }
 
             if ($excuse['kind'] === 'by value') {
-                $sites = array_column($constructions[$enum] ?? [], 0);
+                $sites = self::valueConstructionSites($constructions[$enum] ?? []);
 
                 if (! in_array($excuse['site'], $sites, true)) {
-                    $stale[] = "{$enum} — {$excuse['site']} does not build it with from() or tryFrom() (it is built in: ".implode(', ', array_unique($sites)).')';
+                    $reads = array_map(
+                        static fn (array $built): string => "line {$built[1]}, {$built[2]}",
+                        array_filter($constructions[$enum] ?? [], static fn (array $built): bool => $built[0] === $excuse['site']),
+                    );
+
+                    $stale[] = "{$enum} — {$excuse['site']} does not build it from a value with from() or tryFrom()"
+                        .($reads === [] ? '' : ' (it only reads it there: '.implode('; ', $reads).')')
+                        .' (it is built from a value in: '.implode(', ', array_unique($sites)).')';
                 }
 
                 foreach (self::casesTheSiteCannotAccept($enum, $excuse['site'], $cases) as $case => $rules) {
@@ -412,10 +539,7 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
             }
         }
 
-        $this->assertSame([], $stale, sprintf(
-            "These excuses no longer hold:\n  %s\n\nRemove or correct the entry.",
-            implode("\n  ", $stale),
-        ));
+        return $stale;
     }
 
     /**
@@ -526,6 +650,147 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
     }
 
     /**
+     * `Rule::in()` of quoted strings is read as the literal `in:` rule is, on
+     * fixtures: three spellings read, and seven that are not (a comment, a
+     * variable, a value outside the enum, an enum case's `->value`, a call,
+     * a second argument after the list, another class, another method).
+     */
+    #[Test]
+    public function a_by_value_site_is_held_to_the_values_its_rule_in_of_quoted_strings_accepts(): void
+    {
+        $urgent = [TicketPriority::class.'::Urgent' => []];
+
+        $this->assertSame(
+            [TicketPriority::class.'::Urgent' => [
+                "Rule::in(['low', 'normal', 'high'])",
+                "\\Illuminate\\Validation\\Rule::in(['low', 'normal', 'high'])",
+                "rule::in(['low', 'normal'])",
+            ]],
+            self::casesTheSiteCannotAccept(TicketPriority::class, 'tests/Architecture/Fixtures/rule-in/read.php.txt', $urgent),
+        );
+
+        $this->assertSame(
+            [],
+            self::casesTheSiteCannotAccept(TicketPriority::class, 'tests/Architecture/Fixtures/rule-in/not-read.php.txt', $urgent),
+            'None of these restricts TicketPriority as a rule this reads.',
+        );
+
+        $this->assertSame(
+            [],
+            self::casesTheSiteCannotAccept(TicketPriority::class, 'src/Modules/Support/Http/Controllers/OperatorTicketController.php', $urgent),
+            'The operator\'s priority rule accepts urgent today.',
+        );
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function constructionsAndTheirUse(): iterable
+    {
+        $probe = static fn (string $body): string => "<?php\nnamespace App\\Probe;\nuse Tests\\Architecture\\Fixture;\nfinal class Probe\n{\n{$body}\n}\n";
+        $method = static fn (string $body, string $type = 'mixed'): string => $probe("    public function run(mixed \$a, object \$row): {$type}\n    {\n        {$body}\n    }");
+
+        yield 'from a request value' => [$method('return Fixture::from($a->string(\'x\')->value());'), 'value'];
+        yield 'from a validated array cast to string' => [$method('return Fixture::from((string) $a[\'x\']);'), 'value'];
+        yield 'inside a closure that does not return bool' => [$method('return $a->run(fn () => $row->set(Fixture::from($a)));'), 'value'];
+        yield 'inside a method declared ?bool' => [$method('return Fixture::from($a) === Fixture::B;', '?bool'), 'value'];
+        yield 'with ->value read off it' => [$method('return Fixture::from($a)->value;'), 'value'];
+        yield 'after a bool arrow function has ended' => [$method('return [array_filter($a, static fn ($x): bool => true), Fixture::from($a)];'), 'value'];
+
+        yield 'inside a list filter\'s bool predicate' => [$method('return $a->contains(static fn (string $r): bool => Fixture::tryFrom($r) !== null);'), EnumCaseReferences::READ_IN_A_BOOL_BODY];
+        yield 'inside a bool closure with use' => [$method('return array_filter($a, function (string $r) use ($row): bool { return Fixture::from($r) === $row; });'), EnumCaseReferences::READ_IN_A_BOOL_BODY];
+        yield 'inside a method declared bool' => [$method('return Fixture::from($a) === Fixture::B;', 'bool'), EnumCaseReferences::READ_IN_A_BOOL_BODY];
+        yield 'over a stored column' => [$method('return Fixture::from($row->status);'), EnumCaseReferences::READ_OVER_A_PROPERTY];
+        yield 'over a stored column cast to string' => [$method('return Fixture::tryFrom((string) $row?->status);'), EnumCaseReferences::READ_OVER_A_PROPERTY];
+        yield 'a method called on it at once' => [$method('return Fixture::tryFrom($a)?->label();'), EnumCaseReferences::READ_ASKED_A_QUESTION];
+    }
+
+    /**
+     * The three shapes of construction the classifier records as reads, on
+     * sources written here, and the lines each must not cross.
+     */
+    #[Test]
+    #[DataProvider('constructionsAndTheirUse')]
+    public function the_classifier_tells_a_construction_that_reads_from_one_that_takes_a_value(string $source, string $expected): void
+    {
+        [, $built] = EnumCaseReferences::classifySource($source, ['Tests\\Architecture\\Fixture' => ['A' => true, 'B' => true]]);
+
+        $this->assertCount(1, $built, 'The probe builds Fixture once; the classifier must find it.');
+        $this->assertSame($expected, $built[0][2]);
+    }
+
+    /**
+     * `Role`'s round-five whole-enum excuse named `InviteOperator`, whose one
+     * construction is `Role::tryFrom($role)?->isStaffRole()` inside a list
+     * filter's bool predicate: a read. It does not stand as a by-value site;
+     * `CustomerController`'s `CustomerStatus::from($validated['status'])`
+     * does.
+     */
+    #[Test]
+    public function a_by_value_site_whose_only_construction_is_a_read_does_not_hold_the_excuse(): void
+    {
+        $constructions = EnumCaseReferences::constructions();
+        $invite = 'src/Modules/Rbac/Application/Actions/InviteOperator.php';
+
+        $this->assertContains($invite, array_column($constructions[Role::class] ?? [], 0), 'The positive control: InviteOperator does construct Role.');
+        $this->assertNotContains($invite, self::valueConstructionSites($constructions[Role::class] ?? []));
+        $this->assertContains('src/Modules/Admin/Http/Controllers/CustomerController.php', self::valueConstructionSites($constructions[CustomerStatus::class] ?? []));
+    }
+
+    /**
+     * The pairing check on tables written here: a case in CASES beside a
+     * whole-enum excuse stands only where the excuse's site refuses it.
+     */
+    #[Test]
+    public function a_case_answered_beside_a_whole_enum_excuse_stands_only_where_the_site_refuses_it(): void
+    {
+        $drift = [DriftStatus::class => ['kind' => 'by value', 'site' => 'src/Modules/Admin/Http/Controllers/DriftController.php', 'why' => 'fixture']];
+        $unwritten = ['kind' => 'unwritten', 'owner' => 'Admin', 'why' => 'fixture'];
+
+        $this->assertSame([], self::casesPairedWithAWholeEnumExcuse(self::WHOLE_ENUMS, self::CASES), 'The committed tables pair nothing.');
+        $this->assertSame([], self::casesPairedWithAWholeEnumExcuse($drift, [DriftStatus::class.'::Open' => $unwritten]), 'The site\'s in:acknowledged,resolved refuses open.');
+
+        $this->assertCount(1, self::casesPairedWithAWholeEnumExcuse($drift, [DriftStatus::class.'::Resolved' => $unwritten]), 'The site accepts resolved.');
+        $this->assertCount(1, self::casesPairedWithAWholeEnumExcuse(
+            [BillingPeriod::class => ['kind' => 'by value', 'site' => 'src/Modules/Catalog/Http/Controllers/OperatorCatalogueController.php', 'why' => 'fixture']],
+            [BillingPeriod::class.'::Hourly' => $unwritten],
+        ), 'A site with no rule this reads refuses nothing.');
+        $this->assertCount(1, self::casesPairedWithAWholeEnumExcuse(
+            [CustomerCapability::class => ['kind' => 'vocabulary', 'site' => 'src/Modules/Identity/Http/Resources/TeamRoleResource.php', 'spelling' => 'CustomerCapability::cases()', 'why' => 'fixture']],
+            [CustomerCapability::class.'::'.CustomerCapability::cases()[0]->name => $unwritten],
+        ), 'A vocabulary refuses nothing.');
+
+        $roleCases = array_filter(self::CASES, static fn (string $case): bool => self::enumOf($case) === Role::class, ARRAY_FILTER_USE_KEY);
+
+        $this->assertCount(count($roleCases), self::casesPairedWithAWholeEnumExcuse(
+            [Role::class => ['kind' => 'by value', 'site' => 'src/Modules/Rbac/Http/Requests/ChangeOperatorRolesRequest.php', 'why' => 'fixture']],
+            $roleCases,
+        ), 'A whole-enum Role excuse beside its per-case entries pairs every one of them.');
+    }
+
+    #[Test]
+    public function the_enums_answered_case_by_case_are_the_ones_listed(): void
+    {
+        $answered = [];
+
+        foreach (array_keys(self::CASES) as $case) {
+            if (! isset(self::WHOLE_ENUMS[self::enumOf($case)])) {
+                $answered[self::enumOf($case)] = true;
+            }
+        }
+
+        $listed = self::CASE_BY_CASE;
+        $derived = array_keys($answered);
+        sort($listed);
+        sort($derived);
+
+        $this->assertSame($derived, $listed, 'CASE_BY_CASE is not the set of enums CASES answers for with no whole-enum excuse. An enum taken off it or given a whole-enum excuse must be a decision, not a deletion of its per-case lines.');
+        $this->assertSame([], array_values(array_filter(self::CASE_BY_CASE, static fn (string $enum): bool => isset(self::WHOLE_ENUMS[$enum]))));
+        $this->assertContains(Role::class, self::CASE_BY_CASE);
+        $this->assertContains(NodeStatus::class, self::CASE_BY_CASE);
+    }
+
+    /**
      * Every subject case with its producer sites. The states a machine can
      * enter are left out: the sibling gate answers for them.
      *
@@ -559,22 +824,35 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
     }
 
     /**
-     * The cases a by-value excuse covers that its site's literal `in:` rules
-     * refuse, each with the rules that refuse it.
+     * The cases a by-value excuse covers that its site's literal rules — an
+     * `in:` string or a `Rule::in()` of quoted strings — refuse, each with
+     * the rules that refuse it.
      *
-     * What is read: every single- or double-quoted string literal in the site
-     * file (tokenised, so comments are not read), split on `|`; each segment
-     * beginning `in:` is a rule, its values read as Laravel reads them
-     * (`str_getcsv`). A rule restricts this enum when every value it lists is
-     * one of the enum's values. When at least one does, a case with no
-     * producer and no entry of its own in CASES must be listed by one of
-     * them: the site cannot build a value its validation refuses. A site with
-     * no such rule is not held to anything here. Not read: `Rule::in(...)`,
-     * `Rule::enum(...)`, `new In(...)`, an `in:` rule built by concatenation
-     * or held in a heredoc, and which request field a rule belongs to.
+     * What is read, in the site file tokenised (so comments are not read):
+     *
+     *  - every single- or double-quoted string literal, split on `|`; each
+     *    segment beginning `in:` is a rule, its values read as Laravel reads
+     *    them (`str_getcsv`);
+     *  - every call `Rule::in(` — `Rule` being any name whose last segment
+     *    is `Rule`, however qualified, and `in` in any case — whose arguments
+     *    are nothing but quoted strings: one array literal of them (`[...]`
+     *    or `array(...)`) or the strings themselves as the arguments, a
+     *    trailing comma allowed. The values are the strings between their
+     *    quotes, escapes not interpreted.
+     *
+     * A rule restricts this enum when every value it lists is one of the
+     * enum's values. When at least one does, a case with no producer and no
+     * entry of its own in CASES must be listed by one of them: the site
+     * cannot build a value its validation refuses. A site with no such rule
+     * is not held to anything here. Not read: a `Rule::in(...)` with any
+     * argument that is not a quoted string (a variable, a constant, a call,
+     * an enum case's `->value`, as `ChangeOperatorRolesRequest::assignable()`
+     * and `ComputeNodeController`'s `SETTABLE` list are), `Rule::enum(...)`,
+     * `new In(...)`, an `in:` rule built by concatenation or held in a
+     * heredoc, and which request field a rule belongs to.
      *
      * @param  array<string, list<array{string, int, string}>>  $cases  "Enum::Case" → producers
-     * @return array<string, list<string>> "Enum::Case" → the refusing rules, quoted
+     * @return array<string, list<string>> "Enum::Case" → the refusing rules: an `in:` string quoted, a `Rule::in()` as `Name::in(['a', 'b'])` with the name as written
      */
     public static function casesTheSiteCannotAccept(string $enum, string $site, array $cases): array
     {
@@ -603,8 +881,8 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
     }
 
     /**
-     * The values a by-value site's literal `in:` rules accept, or null when it
-     * has none (then it is read as accepting every case).
+     * The values a by-value site's literal rules ({@see casesTheSiteCannotAccept()})
+     * accept, or null when it has none (then it is read as accepting every case).
      *
      * @param  class-string  $enum
      * @return list<string>|null
@@ -617,7 +895,8 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
     }
 
     /**
-     * The literal `in:` rules in the site whose every value is a value of the enum.
+     * The literal rules in the site ({@see casesTheSiteCannotAccept()} says
+     * which are read) whose every value is a value of the enum.
      *
      * @param  class-string  $enum
      * @return array<string, list<string>>
@@ -627,8 +906,22 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
         $values = array_map(static fn (BackedEnum $case): string => (string) $case->value, is_subclass_of($enum, BackedEnum::class) ? $enum::cases() : []);
         $path = EnumCaseReferences::ROOT.'/'.$site;
         $restricting = [];
+        $tokens = array_values(array_filter(
+            is_file($path) ? PhpToken::tokenize((string) file_get_contents($path)) : [],
+            static fn (PhpToken $token): bool => ! $token->is([T_WHITESPACE, T_COMMENT, T_DOC_COMMENT]),
+        ));
 
-        foreach (is_file($path) ? PhpToken::tokenize((string) file_get_contents($path)) : [] as $token) {
+        foreach ($tokens as $i => $token) {
+            if (self::namesRule($token)
+                && ($tokens[$i + 1] ?? null)?->is(T_DOUBLE_COLON)
+                && strtolower(($tokens[$i + 2] ?? null)?->text ?? '') === 'in'
+                && ($tokens[$i + 3] ?? null)?->text === '('
+                && ($listed = self::literalRuleInValues($tokens, $i + 4)) !== null
+                && $listed !== []
+                && array_diff($listed, $values) === []) {
+                $restricting[$token->text."::in(['".implode("', '", $listed)."'])"] = $listed;
+            }
+
             if (! $token->is(T_CONSTANT_ENCAPSED_STRING)) {
                 continue;
             }
@@ -647,6 +940,138 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
         }
 
         return $restricting;
+    }
+
+    /** A name whose last segment is `Rule`: `Rule`, `Validation\Rule`, `\Illuminate\Validation\Rule`. */
+    private static function namesRule(PhpToken $token): bool
+    {
+        return $token->is([T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED])
+            && strcasecmp(substr($token->text, (int) strrpos('\\'.$token->text, '\\')), 'Rule') === 0;
+    }
+
+    /**
+     * The values of `Rule::in(` read from just after its `(`: a single array
+     * literal of quoted strings, `[...]` or `array(...)`, or quoted strings
+     * as the arguments themselves, each list allowing a trailing comma and
+     * nothing else before the call's `)`. Anything else — a variable, a
+     * constant, a call, an enum case's `->value`, a concatenation — and the
+     * answer is null: not read.
+     *
+     * @param  list<PhpToken>  $tokens  without whitespace or comments
+     * @return list<string>|null
+     */
+    private static function literalRuleInValues(array $tokens, int $k): ?array
+    {
+        $close = ')';
+
+        if (($tokens[$k] ?? null)?->text === '[') {
+            $close = ']';
+            $k++;
+        } elseif (($tokens[$k] ?? null)?->is(T_ARRAY) && ($tokens[$k + 1] ?? null)?->text === '(') {
+            $k += 2;
+        } else {
+            $close = null;
+        }
+
+        $values = [];
+
+        while (($tokens[$k] ?? null)?->is(T_CONSTANT_ENCAPSED_STRING)) {
+            $values[] = substr($tokens[$k]->text, 1, -1);
+            $k++;
+
+            if (($tokens[$k] ?? null)?->text !== ',') {
+                break;
+            }
+
+            $k++;
+        }
+
+        if ($close !== null) {
+            if (($tokens[$k] ?? null)?->text !== $close) {
+                return null;
+            }
+
+            $k++;
+        }
+
+        return ($tokens[$k] ?? null)?->text === ')' ? $values : null;
+    }
+
+    /**
+     * The cases answered for in CASES beside a whole-enum excuse whose site
+     * does not refuse them, each with the message the gate reports.
+     *
+     * A case answered for in CASES beside a whole-enum excuse is one the
+     * excuse's own site refuses by a literal rule {@see restrictingRules()}
+     * reads (as `CustomerStatus::Closed` beside the operator's
+     * active/suspended choice). Any other pairing means the enum's cases are
+     * being answered for one at a time, and the whole-enum excuse would hide
+     * whichever of them nobody named. A `vocabulary` excuse refuses nothing,
+     * so any case of its enum in CASES pairs with it.
+     *
+     * @param  array<class-string, array{kind: string, site: string, spelling?: string, why: string}>  $wholeEnums
+     * @param  array<string, array<string, string>>  $cases  "Enum::Case" → its excuse
+     * @return list<string>
+     */
+    public static function casesPairedWithAWholeEnumExcuse(array $wholeEnums, array $cases): array
+    {
+        $paired = [];
+
+        foreach ($wholeEnums as $enum => $excuse) {
+            $accepted = $excuse['kind'] === 'by value' ? self::valuesTheSiteAccepts($enum, $excuse['site']) : null;
+
+            foreach (array_keys($cases) as $answered) {
+                $value = self::enumOf($answered) === $enum ? constant($answered) : null;
+
+                if ($value !== null && ($accepted === null || ! $value instanceof BackedEnum || in_array((string) $value->value, $accepted, true))) {
+                    $paired[] = "{$answered} — answered for in CASES beside {$enum}'s whole-enum excuse, whose site does not refuse it; answer for every case of the enum in CASES instead";
+                }
+            }
+        }
+
+        return $paired;
+    }
+
+    /**
+     * The files that build an enum from a value: its constructions whose use
+     * {@see EnumCaseReferences} records as `value`, not as one of the reads.
+     *
+     * @param  list<array{string, int, string}>  $constructions  [file, line, use]
+     * @return list<string>
+     */
+    public static function valueConstructionSites(array $constructions): array
+    {
+        return array_values(array_column(
+            array_filter($constructions, static fn (array $built): bool => $built[2] === 'value'),
+            0,
+        ));
+    }
+
+    /**
+     * The cases a `held` entry's data provider yields as the first argument
+     * of a data set. `held` is "Class::method", a public static method that
+     * returns an iterable of data sets.
+     *
+     * @return list<mixed>
+     */
+    private static function heldCases(string $held): array
+    {
+        [$class, $method] = explode('::', $held, 2) + [1 => ''];
+
+        if (! method_exists($class, $method)) {
+            return [];
+        }
+
+        $yielded = [];
+
+        /** @var iterable<array<int, mixed>> $sets */
+        $sets = $class::$method();
+
+        foreach ($sets as $set) {
+            $yielded[] = $set[0] ?? null;
+        }
+
+        return $yielded;
     }
 
     private static function enumOf(string $case): string
