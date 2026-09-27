@@ -32,9 +32,14 @@ use Tests\TestCase;
  * removed, sorted into the kernel's priority), not what the route declares:
  * Route::gatherMiddleware() kept `throttle:api` on a route that
  * `->withoutMiddleware('throttle:api')` had taken it off (the OB5-2 class,
- * re-audit of round four). Authentication is an entry `Authenticate:sanctum`;
- * a throttle is an entry whose class is ThrottleRequests (or a subclass) or
- * ThrottleAfterAccountResolution.
+ * re-audit of round four). Authentication is an entry whose class is
+ * Illuminate's Authenticate (or a subclass), whatever guard list follows it —
+ * `auth:sanctum`, `auth:sanctum,web` — or none, as the bare `auth` alias
+ * resolves. It used to be exactly `Authenticate:sanctum`, so a route declared
+ * `auth:sanctum,web` with no throttle passed (X2, re-audit after round five);
+ * the positive control below registers such routes and requires them
+ * reported. A throttle is an entry whose class is ThrottleRequests (or a
+ * subclass) or ThrottleAfterAccountResolution.
  */
 final class EveryAuthenticatedRouteIsThrottledTest extends TestCase
 {
@@ -52,6 +57,43 @@ final class EveryAuthenticatedRouteIsThrottledTest extends TestCase
     #[Test]
     public function every_authenticated_api_route_carries_a_throttle(): void
     {
+        $unthrottled = $this->unthrottledAuthenticatedApiRoutes();
+
+        $this->assertSame(
+            [],
+            $unthrottled,
+            'Authenticated API routes reachable at unlimited rate: '.implode(', ', $unthrottled),
+        );
+    }
+
+    /**
+     * The oracle's positive control: unthrottled API routes authenticated by
+     * `auth:sanctum,web` and by the bare `auth` alias, registered at runtime
+     * beside the real ones, are what it reports — and the same route with a
+     * throttle is not.
+     */
+    #[Test]
+    public function an_unthrottled_route_is_reported_whatever_guards_authenticate_it(): void
+    {
+        Route::middleware(['api', 'auth:sanctum,web'])
+            ->get('api/v1/zz-oracle-probe-two-guards', static fn (): string => 'probe');
+        Route::middleware(['api', 'auth'])
+            ->get('api/v1/zz-oracle-probe-bare-auth', static fn (): string => 'probe');
+        Route::middleware(['api', 'auth:sanctum,web', 'throttle:api'])
+            ->get('api/v1/zz-oracle-probe-throttled', static fn (): string => 'probe');
+
+        $reported = $this->unthrottledAuthenticatedApiRoutes();
+
+        $this->assertContains('api/v1/zz-oracle-probe-two-guards', $reported);
+        $this->assertContains('api/v1/zz-oracle-probe-bare-auth', $reported);
+        $this->assertNotContains('api/v1/zz-oracle-probe-throttled', $reported);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function unthrottledAuthenticatedApiRoutes(): array
+    {
         $unthrottled = [];
 
         foreach (Route::getRoutes() as $route) {
@@ -59,7 +101,7 @@ final class EveryAuthenticatedRouteIsThrottledTest extends TestCase
                 continue;
             }
 
-            $isAuthenticated = in_array(Authenticate::class.':sanctum', $this->middlewareTheRouteRuns($route), true);
+            $isAuthenticated = $this->parametersOf($route, Authenticate::class) !== [];
 
             $hasThrottle = $this->parametersOf($route, ThrottleRequests::class) !== []
                 || $this->parametersOf($route, ThrottleAfterAccountResolution::class) !== [];
@@ -69,11 +111,7 @@ final class EveryAuthenticatedRouteIsThrottledTest extends TestCase
             }
         }
 
-        $this->assertSame(
-            [],
-            $unthrottled,
-            'Authenticated API routes reachable at unlimited rate: '.implode(', ', $unthrottled),
-        );
+        return $unthrottled;
     }
 
     /**
