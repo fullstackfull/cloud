@@ -91,6 +91,79 @@ final class ARenewalAndAPlanChangeDoNotDeadlockTest extends TestCase
         $this->assertNoDeadlock($outcomes);
     }
 
+    #[Test]
+    public function a_renewal_does_not_lapse_an_upgrade_made_after_it_looked_while_an_operator_voids_it(): void
+    {
+        /*
+         * The verifier's dl2: the renewal's unlocked read finds no open
+         * upgrade; a plan change then commits one (Y); the renewal takes the
+         * subscription; an operator's VoidInvoice(Y) holds Y and its
+         * synchronous RestorePlanOnVoidedUpgrade waits for the subscription;
+         * the renewal then lapsed Y - locking it after the subscription - and
+         * the two deadlocked (also on the round-three base). The renewal now
+         * lapses only an invoice it locked before the subscription; one that
+         * appeared since ends this attempt without renewing, and the next
+         * sweep takes it first.
+         *
+         * Two barriers inside the actions, advisory locks the test holds: the
+         * renewal stops right after its unlocked read, the void right after
+         * it has locked Y.
+         */
+        $fixture = $this->upgradeLeftOpen(withoutTheUpgrade: true);
+
+        DB::select('SELECT pg_advisory_lock(?)', [self::RENEWAL_BARRIER]);
+        DB::select('SELECT pg_advisory_lock(?)', [self::VOID_BARRIER]);
+
+        try {
+            $renew = $this->start(
+                ['renew', $fixture['sub'], $fixture['period_end']->addSecond()->toIso8601String()],
+                ['RACER_PAUSE_AFTER' => '/from "subscription_plan_changes"/', 'RACER_PAUSE_LOCK' => (string) self::RENEWAL_BARRIER],
+            );
+            $this->waitUntilWaitingOnAdvisory(1);
+
+            // The upgrade, committed after the renewal looked.
+            app(ApplyPlanChange::class)->execute(
+                Subscription::query()->findOrFail($fixture['sub']),
+                $fixture['large'],
+                $fixture['large_price'],
+                'raced-up-later',
+                User::query()->findOrFail($fixture['user']),
+            );
+            /** @var Invoice $upgrade */
+            $upgrade = Invoice::query()->where('subscription_id', $fixture['sub'])->where('status', InvoiceStatus::Open->value)->sole();
+
+            $void = $this->start(
+                ['void', (string) $upgrade->getKey()],
+                ['RACER_PAUSE_AFTER' => '/from "invoices".*for update/i', 'RACER_PAUSE_LOCK' => (string) self::VOID_BARRIER],
+            );
+            $this->waitUntilWaitingOnAdvisory(2);
+
+            // The renewal takes the subscription and meets the upgrade.
+            DB::select('SELECT pg_advisory_unlock(?)', [self::RENEWAL_BARRIER]);
+            $this->waitUntil(fn (): bool => ! $renew->isRunning() || $this->waiting() >= 1, 'The renewal neither finished nor waited.');
+
+            // The void goes on to restore the plan, under the subscription's lock.
+            DB::select('SELECT pg_advisory_unlock(?)', [self::VOID_BARRIER]);
+        } finally {
+            DB::select('SELECT pg_advisory_unlock_all()');
+        }
+
+        $outcomes = [$this->verdict($renew), $this->verdict($void)];
+        $this->assertNoDeadlock($outcomes);
+
+        // The upgrade was voided by the operator, not lapsed by the renewal,
+        // and the renewal did not advance the period: the next sweep renews.
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertTrue(
+            CarbonImmutable::instance(Subscription::query()->findOrFail($fixture['sub'])->current_period_end)->equalTo($fixture['period_end']),
+            'The renewal advanced the period in the attempt it should have given up.',
+        );
+    }
+
+    private const int RENEWAL_BARRIER = 424301;
+
+    private const int VOID_BARRIER = 424302;
+
     /**
      * @param  array{sub: string, x: string, customer: string, due: int, small: string, small_price: string, user: string, period_end: CarbonImmutable}  $fixture
      * @param  list<string>  $first
@@ -162,9 +235,12 @@ final class ARenewalAndAPlanChangeDoNotDeadlockTest extends TestCase
      * A subscription twenty days into a paid small-plan period, moved to
      * large, the upgrade's invoice open.
      *
-     * @return array{sub: string, x: string, customer: string, due: int, small: string, small_price: string, user: string, period_end: CarbonImmutable}
+     * With $withoutTheUpgrade, the subscription as it stood before the change
+     * (and the large plan and price to make it with).
+     *
+     * @return array{sub: string, x: string, customer: string, due: int, small: string, small_price: string, user: string, period_end: CarbonImmutable, large?: Plan, large_price?: PlanPrice}
      */
-    private function upgradeLeftOpen(): array
+    private function upgradeLeftOpen(bool $withoutTheUpgrade = false): array
     {
         $product = Product::factory()->create(['kind' => 'vps']);
         [$small, $smallPrice] = $this->plan($product, 'small', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160], 9_000);
@@ -216,6 +292,21 @@ final class ARenewalAndAPlanChangeDoNotDeadlockTest extends TestCase
             ->forService($service)
             ->create(['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160]);
 
+        if ($withoutTheUpgrade) {
+            return [
+                'sub' => (string) $subscription->getKey(),
+                'x' => '',
+                'customer' => (string) $customer->getKey(),
+                'due' => 0,
+                'small' => (string) $small->getKey(),
+                'small_price' => (string) $smallPrice->getKey(),
+                'user' => (string) $user->getKey(),
+                'period_end' => CarbonImmutable::instance($subscription->fresh()->current_period_end),
+                'large' => $large,
+                'large_price' => $largePrice,
+            ];
+        }
+
         app(ApplyPlanChange::class)->execute($subscription->fresh(), $large, $largePrice, 'raced-up', $user);
 
         /** @var Invoice $upgrade */
@@ -265,13 +356,14 @@ final class ARenewalAndAPlanChangeDoNotDeadlockTest extends TestCase
 
     /**
      * @param  list<string>  $arguments
+     * @param  array<string, string>  $environment
      */
-    private function start(array $arguments): Process
+    private function start(array $arguments, array $environment = []): Process
     {
         $process = new Process(
             ['php', __DIR__.'/subscription_lock_racer.php', ...$arguments],
             base_path(),
-            ['APP_ENV' => 'testing'],
+            ['APP_ENV' => 'testing', ...$environment],
             null,
             60.0,
         );
@@ -279,6 +371,32 @@ final class ARenewalAndAPlanChangeDoNotDeadlockTest extends TestCase
         $process->start();
 
         return $process;
+    }
+
+    private function waiting(): int
+    {
+        return (int) DB::scalar("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND wait_event IN ('transactionid', 'tuple')");
+    }
+
+    private function waitUntilWaitingOnAdvisory(int $count): void
+    {
+        $this->waitUntil(
+            static fn (): bool => (int) DB::scalar("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND wait_event = 'advisory'") >= $count,
+            'The racers never reached their barriers, so nothing was raced.',
+        );
+    }
+
+    private function waitUntil(callable $condition, string $failure): void
+    {
+        $deadline = microtime(true) + 45.0;
+
+        while (! $condition()) {
+            if (microtime(true) > $deadline) {
+                $this->fail($failure);
+            }
+
+            usleep(20_000);
+        }
     }
 
     /** Until this many other backends of this database are waiting on a row lock. */

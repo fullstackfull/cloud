@@ -71,7 +71,8 @@ final readonly class RenewSubscription
              * voids its invoice. VoidInvoice locks the invoice and then the
              * subscription; the invoice is locked here first, before the
              * subscription, so a renewal and an operator's void of the same
-             * invoice take the two rows in the same order.
+             * invoice take the two rows in the same order - and an invoice
+             * this did not lock first is not lapsed in this attempt (below).
              *
              * Locked only while it is still open (LockAnInvoiceWhileOpen): a
              * row paid in the meantime is left unlocked. Found open by an unlocked read and then locked by its id,
@@ -83,9 +84,9 @@ final readonly class RenewSubscription
              */
             $lapsing = $this->unpaid->openInvoiceOf($subscription);
 
-            if ($lapsing !== null) {
-                LockAnInvoiceWhileOpen::take((string) $lapsing->getKey());
-            }
+            $lockedFirst = $lapsing === null
+                ? null
+                : LockAnInvoiceWhileOpen::take((string) $lapsing->getKey());
 
             /** @var Subscription $locked */
             $locked = Subscription::query()
@@ -161,6 +162,28 @@ final readonly class RenewSubscription
              * upgrade cannot be revived afterwards.
              */
             $open = $this->unpaid->openInvoiceOf($locked);
+
+            /*
+             * Lapsed only if it is the invoice locked above, before the
+             * subscription. One that appeared since - an upgrade committed
+             * between the unlocked read and the subscription's lock - is not
+             * locked here, after the subscription: an operator voiding that
+             * invoice holds it and waits for the subscription (VoidInvoice's
+             * RestorePlanOnVoidedUpgrade), and the two deadlocked (the
+             * verifier's dl2, on the round-three base too;
+             * ARenewalAndAPlanChangeDoNotDeadlockTest). This attempt ends
+             * without renewing - nothing has been written - and is counted
+             * skipped; the next sweep finds the invoice first and locks it
+             * before the subscription.
+             */
+            if ($open !== null && (string) $open->getKey() !== (string) $lockedFirst?->getKey()) {
+                Log::info('A renewal was put off: an upgrade invoice appeared after it looked; the next sweep lapses it.', [
+                    'subscription_id' => (string) $locked->getKey(),
+                    'invoice_id' => (string) $open->getKey(),
+                ]);
+
+                return null;
+            }
 
             if ($open !== null) {
                 $this->lapse($open);

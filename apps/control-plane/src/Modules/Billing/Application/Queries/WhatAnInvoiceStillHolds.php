@@ -82,7 +82,10 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  * CreditWhatACancelledOrderPaid and ReturnWhatAnInvoiceStillHolds (invoice,
  * wallet); VoidInvoice (invoice, then the subscription through
  * RestorePlanOnVoidedUpgrade); RenewSubscription (the lapsing invoice, the
- * subscription, the wallet); an ended subscription's wind-up (its invoices,
+ * subscription, the wallet - and it lapses only an invoice it locked before
+ * the subscription: an upgrade that appeared after its unlocked read ends the
+ * attempt unrenewed, for the next sweep, since locking it after the
+ * subscription deadlocked with an operator's void of it); an ended subscription's wind-up (its invoices,
  * the subscription, the wallet); ApplyPlanChange (the subscription, its
  * orders, then the paid invoices a credit draws on, then the wallet - the one
  * invoice lock taken after a subscription, and safe because nothing holding a
