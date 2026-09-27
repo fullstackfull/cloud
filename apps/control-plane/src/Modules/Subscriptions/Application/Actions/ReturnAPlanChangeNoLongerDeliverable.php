@@ -64,8 +64,12 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *    reason `plan_change_not_deliverable_at_settlement`, naming the invoice,
  *    the change, the refusal and what was returned, beside the log warning.
  *  - The customer is told (`billing.plan_change_returned`), once the
- *    transaction commits: the change was not made, what was returned to the
- *    wallet, and that the service stays on its current plan.
+ *    transaction commits: the change was not made, so the service was not
+ *    changed, and what was returned to the wallet. Not which plan the
+ *    subscription is on: it goes back only when nothing was changed after
+ *    this change, and the sentence used to say the service "stays on its
+ *    current plan" of a subscription left on the plan it was returned from
+ *    (N4, the re-audit after round six).
  */
 final readonly class ReturnAPlanChangeNoLongerDeliverable
 {

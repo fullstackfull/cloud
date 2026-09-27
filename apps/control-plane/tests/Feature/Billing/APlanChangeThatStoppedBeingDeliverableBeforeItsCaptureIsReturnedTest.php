@@ -310,6 +310,20 @@ final class APlanChangeThatStoppedBeingDeliverableBeforeItsCaptureIsReturnedTest
         $this->assertSame($invoice->total_minor, (int) WalletTransaction::query()->where('invoice_id', $invoice->getKey())->sum('amount_minor'));
         $this->assertSame($planId, (string) $subscription->fresh()?->plan_id, 'The plan was put back over a change recorded after the one returned.');
         $this->assertNotSame($fromPlanId, (string) $subscription->fresh()?->plan_id);
+
+        /*
+         * And the customer is not told the service stays on its current plan
+         * (N4, the re-audit after round six): the plan was left to the later
+         * change. What is true either way: the service was not changed, and
+         * the money went back.
+         */
+        $notice = Notification::query()->where('customer_id', $this->customer->getKey())->where('type', 'billing.plan_change_returned')->sole();
+        $english = app(RenderNotification::class)->execute($notice, 'en')->body;
+        $arabic = app(RenderNotification::class)->execute($notice, 'ar')->body;
+        $this->assertStringNotContainsString('stays on its current plan', $english);
+        $this->assertStringNotContainsString('على خطته الحالية', $arabic);
+        $this->assertStringContainsString('has not been changed', $english);
+        $this->assertStringContainsString('فلم يُغيَّر', $arabic);
     }
 
     private function redeliverTheSettlementOf(Invoice $invoice): void

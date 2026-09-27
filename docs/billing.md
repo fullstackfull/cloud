@@ -90,8 +90,9 @@ subscription goes back to the plan and the recurring amount it came from, the ch
 recorded `returned_at` with its `return_reason`, and a `subscription.plan_changed` audit
 entry with the reason `plan_change_not_deliverable_at_settlement` names the invoice, the
 refusal and the amount returned (`ReturnAPlanChangeNoLongerDeliverable`), and the customer
-is told (`billing.plan_change_returned`: the amount returned to the wallet, and that the
-service stays on its current plan). A returned change counts afterwards as having bought
+is told (`billing.plan_change_returned`: that the service was not changed, and the amount
+returned to the wallet - not which plan the subscription is on, since it goes back only when
+nothing was changed after the returned change). A returned change counts afterwards as having bought
 nothing: it does not reprice the period's discount, supersede an earlier paid change, or
 hold the subscription's next change.
 
@@ -108,9 +109,12 @@ waiting for the team and that what they paid for it is held
 message goes to a change that owed nothing). A paid change whose resize or package change
 fails outright is not returned automatically either: the payment is held for an operator
 to complete the change or return it, and the customer is told exactly that
-(`service.plan_change_failed_after_payment`). A change that owed nothing and fails is told
-that nothing was charged (`service.plan_change_failed`). Which of the two a failure is, is
-read off the job's key: an upgrade is queued under the invoice that paid for it.
+(`service.plan_change_failed_after_payment`). Both messages also say what "held" does not:
+the subscription is on the new plan, and a renewal before the change is completed bills
+its price. A change that owed nothing and fails is told that nothing was charged, and that
+its subscription is on the new plan and billed at its price while the service runs as it
+was (`service.plan_change_failed`). Which of the two a failure is, is read off the job's
+key: an upgrade is queued under the invoice that paid for it.
 
 ## Invoice numbering
 
