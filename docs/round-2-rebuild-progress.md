@@ -192,3 +192,18 @@ testsuites `skipped="0"`, exit 0 (the one red of an earlier full run, a clock
 comparison in a round-six test, was fixed at `02d7364` and is what band G's gate
 now refuses); vitest 651 / 651, tsc and eslint clean; `make infra-validate` 0;
 `npm run openapi:lint` valid. An independent re-audit after round six follows.
+
+### Round seven — fixing what the re-audit after round six found
+
+The re-audit after round six against `a66ac17` is recorded in
+`docs/independent-re-audit-after-round-6.md`: F-07 partially reproduces (VPS half);
+every other finding does not reproduce; the confirmed unnumbered items are listed
+there.
+
+| Band | Scope | Status | Commit |
+|---|---|---|---|
+| A | F-07 VPS half and the stale service shape; the undeliverable-change lockout; a shrink refused; stock on return; a change settled after the renewal; wording | verifying | `79910e1` |
+| B | a delegate's invitation revealing a login exists; soft-deleted address; `roles: []` | repairing after a rejection | — |
+| C | cPanel unreadable listings; one node's failure stopping the sweep; runbook; overlapping sweeps in two processes | verifying | `d1dbdbb` |
+| D | destroy overlapping a resize; a retried resize growing the disk twice; adopted VPS without a machine row; adoption's provider call inside a transaction; clock gate limits | fixing | — |
+| E | owed oracles: staff roles pinned, by-value reads, pairing check, `Rule::in`, notification literals, schema collisions | upheld with reservations; closing them | `692a929` |
