@@ -171,6 +171,23 @@ final readonly class ApplyPlanChange
                 throw PlanChangeRefusedException::because($quote->refusals);
             }
 
+            /*
+             * A downgrade credits the wallet, and the wallet is locked before
+             * the plan (the money-path lock order, WhatAnInvoiceStillHolds).
+             * Claiming the unit locks the plan moved onto; taking the wallet
+             * only when the credit was posted, after it, deadlocked against a
+             * renewal lapsing a sibling subscription's upgrade, which holds
+             * the wallet (returning what the upgrade held) and then locks the
+             * plan it restores - the same plan, for a downgrade onto it (OA-1,
+             * round four's re-audit, 40P01 4/4). An upgrade, which posts
+             * nothing to the wallet, takes no wallet lock.
+             */
+            if ($quote->credit->isGreaterThan($quote->charge)) {
+                /** @var Customer $owner */
+                $owner = $locked->customer()->firstOrFail();
+                $this->wallet->lockWalletFor($owner, $locked->currency);
+            }
+
             $this->claimTheUnit($locked, $plan, $quote->units);
 
             $fromPlanId = $locked->plan_id;

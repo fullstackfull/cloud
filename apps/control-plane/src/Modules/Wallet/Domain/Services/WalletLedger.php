@@ -59,6 +59,27 @@ final class WalletLedger
     }
 
     /**
+     * The customer's wallet in a currency, opened if need be, and locked for
+     * the rest of the caller's transaction.
+     *
+     * For a caller that will post to the wallet later in its transaction, but
+     * must take the wallet's lock earlier than the posting would, to keep the
+     * money-path lock order (WhatAnInvoiceStillHolds: the wallet before the
+     * plans). Must be called inside a transaction; the lock is released when
+     * it ends. The posting itself locks the same row again, which is a no-op
+     * for the holder.
+     */
+    public function lockWalletFor(Customer $customer, string $currency): Wallet
+    {
+        $wallet = $this->walletFor($customer, $currency);
+
+        /** @var Wallet $locked */
+        $locked = $wallet->newQuery()->lockForUpdate()->findOrFail($wallet->getKey());
+
+        return $locked;
+    }
+
+    /**
      * The cached balance, re-read from the database so a stale in-memory model
      * cannot answer this question.
      */
