@@ -13,6 +13,7 @@ use Illuminate\Testing\TestResponse;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
 use Lynomia\Modules\Billing\Application\Actions\RecordInvoiceRefund;
+use Lynomia\Modules\Billing\Application\Actions\ReturnWhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
 use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
@@ -38,6 +39,7 @@ use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Models\OrderItem;
 use Lynomia\Modules\Payments\Application\Actions\IngestWebhookEvent;
 use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
+use Lynomia\Modules\Payments\Application\Actions\ReturnToTheWalletWhatAFailedRefundLeft;
 use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
 use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
@@ -45,6 +47,7 @@ use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
 use Lynomia\Modules\Payments\Domain\Exceptions\RefundExceedsCaptureException;
 use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
 use Lynomia\Modules\Payments\Infrastructure\Providers\FakePaymentProvider;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
@@ -62,6 +65,7 @@ use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
+use Tests\Support\ProviderThatWithdrawsTheInvoiceMidRefund;
 use Throwable;
 
 /**
@@ -452,6 +456,59 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
             $this->fail('Money returned to the wallet was refunded to the card as well.');
         } catch (RefundExceedsCaptureException) {
         }
+    }
+
+    #[Test]
+    public function a_refund_the_provider_refuses_while_its_invoice_is_withdrawn_returns_what_the_invoice_holds(): void
+    {
+        $this->assertTheInvoiceWithdrawnDuringTheRefundReachesTheWallet(throws: false);
+    }
+
+    #[Test]
+    public function a_refund_the_provider_never_answers_while_its_invoice_is_withdrawn_returns_what_the_invoice_holds(): void
+    {
+        $this->assertTheInvoiceWithdrawnDuringTheRefundReachesTheWallet(throws: true);
+    }
+
+    /**
+     * N05/N06: IssueRefund's own failure paths. The upgrade is withdrawn (the
+     * lapse's ReturnWhatAnInvoiceStillHolds::andWithdraw) while the refund is
+     * out at the provider - its pending row counted as money going back, so
+     * the withdrawal credits nothing - and the provider then refuses it, or
+     * throws. What the void invoice holds again must reach the wallet.
+     */
+    private function assertTheInvoiceWithdrawnDuringTheRefundReachesTheWallet(bool $throws): void
+    {
+        [$customer, $upgrade, $capture] = $this->upgradePartPaidByCard(5_000);
+
+        $provider = new ProviderThatWithdrawsTheInvoiceMidRefund(
+            function () use ($upgrade, $customer): void {
+                $credited = app(ReturnWhatAnInvoiceStillHolds::class)->andWithdraw(
+                    $upgrade->fresh(),
+                    'lapsed-upgrade',
+                    'Payment returned: the upgrade lapsed unpaid',
+                    'The upgrade was not paid for in full before the next period was billed.',
+                );
+                $this->assertSame(0, $credited, 'Precondition: the withdrawal left the money to the refund in flight.');
+                $this->assertSame(0, $this->walletOf($customer));
+            },
+            $throws,
+        );
+        $registry = new PaymentProviderRegistry($this->app);
+        $registry->swap((string) $capture->provider, $provider);
+        $issue = new IssueRefund($registry, app(WalletLedger::class), app(ReturnToTheWalletWhatAFailedRefundLeft::class));
+
+        try {
+            $refund = $issue->execute($capture, Money::ofMinor(5_000, 'KWD'), 'customer asked');
+            $this->assertFalse($throws, 'The provider was to throw.');
+            $this->assertSame(RefundStatus::Failed, $refund->status);
+        } catch (RuntimeException $e) {
+            $this->assertTrue($throws, 'Unexpected: '.$e->getMessage());
+        }
+
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(5_000, $this->walletOf($customer), 'What the failed refund left on the withdrawn invoice reached the wallet.');
+        $this->assertSame(0, WhatAnInvoiceStillHolds::minor($upgrade->fresh()));
     }
 
     #[Test]
