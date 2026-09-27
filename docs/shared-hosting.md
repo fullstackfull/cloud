@@ -131,8 +131,11 @@ of a single listing that might have paged badly. Whichever way the sweep
 guessed on a suspension mismatch, half the time it would be switching off a
 customer who has paid.
 
-A panel that will not answer produces no drift at all: nothing is concluded and
-the node keeps its old timestamp, so the next run looks again. A sweep that
+A panel that will not answer produces no drift at all: nothing is concluded,
+`reconciled_at` keeps its old value, and the attempt is stamped and the refusal kept
+(above), so the node goes to the back of the queue and a later run looks again once
+the nodes asked less recently have had their turn. A listing read on a later run clears
+the refusal and stamps both. A sweep that
 recorded "missing at the panel" for every account on a node whose API was down
 would report an outage as data loss, and bury the one real missing account in
 the middle of it. Nodes in maintenance are not asked, for the same reason.

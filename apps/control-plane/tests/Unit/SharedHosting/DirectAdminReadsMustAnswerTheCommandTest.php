@@ -146,6 +146,8 @@ final class DirectAdminReadsMustAnswerTheCommandTest extends TestCase
         yield 'two names joined by a semicolon in one element' => ['list[]=alice&list[]=bob;carol'];
         yield 'two names joined by a bar in one element' => ['list[]=bob%7Calice'];
         yield 'a control character inside a name' => ['list[]=bob%00alice'];
+        yield 'an invalid UTF-8 byte inside a name' => ['list[]=bob%FFalice'];
+        yield 'a name that is only an invalid UTF-8 sequence' => ['list[]=%C3%28'];
     }
 
     /**

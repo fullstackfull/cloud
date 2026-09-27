@@ -1396,7 +1396,7 @@ return [
         'description' => 'The scope is the security-relevant field and is fixed at creation. `management` reaches the hypervisor and BMC control planes: the allocator refuses to give one to a customer service and placement refuses to count one as capacity. A pool of the other kind is a new pool, never an edit — reclassifying would move addresses already allocated between the control plane and the customer estate.',
         'permission' => 'ipam.manage',
         'body' => ['datacenter_id', 'slug', 'name', 'ip_version', 'scope', 'quarantine_days'],
-        'response' => $one('AdminIpPool', 201),
+        'response' => $one('AdminIpPoolWritten', 201),
     ],
     'api.admin.infrastructure.ip_pools.update' => [
         'tag' => 'Operator',
@@ -1404,7 +1404,7 @@ return [
         'description' => 'Name, quarantine window and whether it is active. Sending `scope` or `ip_version` is refused rather than ignored. Deactivating is refused while any address in it is anything other than available.',
         'permission' => 'ipam.manage',
         'body' => ['name', 'quarantine_days', 'is_active', 'version'],
-        'response' => $one('AdminIpPool'),
+        'response' => $one('AdminIpPoolWritten'),
     ],
     'api.admin.infrastructure.subnets.index' => [
         'tag' => 'Operator',
@@ -1449,7 +1449,7 @@ return [
         'description' => 'Created claiming nothing: no licence state, no usage, no accounts. Those are statements only the panel can make and the reconciler is what asks it. The endpoint goes through the same outbound policy a cluster\'s does.',
         'permission' => 'hosting_node.manage',
         'body' => ['datacenter_id', 'slug', 'hostname', 'panel', 'api_endpoint', 'verify_tls', 'credentials_reference', 'max_accounts'],
-        'response' => $one('AdminHostingNode', 201),
+        'response' => $one('AdminHostingNodeWritten', 201),
     ],
     'api.admin.infrastructure.hosting_nodes.update' => [
         'tag' => 'Operator',
@@ -1457,7 +1457,7 @@ return [
         'description' => 'Taking a node offline is refused while accounts are still on it. Draining — `accepts_new_accounts: false` — is the supported way to wind one down and is never refused.',
         'permission' => 'hosting_node.manage',
         'body' => ['hostname', 'api_endpoint', 'verify_tls', 'credentials_reference', 'max_accounts', 'accepts_new_accounts', 'status', 'version'],
-        'response' => $one('AdminHostingNode'),
+        'response' => $one('AdminHostingNodeWritten'),
     ],
     'api.admin.infrastructure.dedicated.store' => [
         'tag' => 'Operator',
