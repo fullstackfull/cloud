@@ -209,3 +209,10 @@ there.
 | E | owed oracles: staff roles pinned, by-value reads, pairing check, `Rule::in`, notification literals, schema collisions | upheld after one closing pass (its six reservations fixed); merged `7dde69e` | `7069dc1` |
 | C2 | a listing-step failure fails `hosting:reconcile`; the deadlock fallback pinned; `ScheduledCommandFailing` alert | upheld with reservations; merged; three sentences (a comment, the scheduler runbook on where a failed backup is named, the rule comment's timing) corrected at integration | `f9afa72` |
 | H | the full suite at `bf36e3f` red once: a delegate-indistinguishability test compared cookie lifetimes read on PHP's own clock (7200 against 7199) | upheld with reservations (two vendor paraphrases simplified; `Response::getMaxAge()` also matched by name; a clock read inside a closure into a variable, the `bf36e3f` shape, is still not seen by the gate — disclosed, none left in the tree); merged | `bd48c42` |
+
+All of round seven merged at `5a7fc6f`. Full backend suite there: 5,942/5,942,
+751 suites `skipped="0"`, exit 0. Also `pint --test`, `openapi:generate --check`
+(302 operations), `npm run openapi:lint`, `make infra-validate`, and in `apps/web`
+vitest 653/653, `tsc --noEmit` and `eslint --max-warnings=0` (these four at
+`bf36e3f`, whose difference from `5a7fc6f` is four files in `apps/control-plane/tests`).
+The re-audit after round seven is next, against `5a7fc6f`.
