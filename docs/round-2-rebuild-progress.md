@@ -160,3 +160,11 @@ reproduce. The unnumbered items it found stay unnumbered.
 | C | F-09 compare-and-set and poll bookkeeping on the attempt; a scalar DirectAdmin `list` read as no accounts; file-restore lock oracle | upheld with reservations after one repair (indeterminate-poll call site has no committed test; operator verdicts not bound to the review seen); merged `0b06f52` | `376584a` |
 | D | a VPS built with no gateway; a quarantine test red at midnight (and two more of that shape); capacity left on the node a retry moved away from, now moved in one lock order | upheld with reservations after one repair (a VPS already on a gateway-less block cannot be reinstalled; `SyncClusterInventory` locks node, pool, node outside the stated capacity order); merged `7493efe` | `1600178` |
 | E | F-23 per-case entries replace the by-value excuses for `NodeStatus`, `ServerState` and `DomainContactRole`; no whole-enum excuse beside per-case answers (coordinator) | rejected once (DomainContactRole), repaired; upheld with reservations (the pairing check has no dedicated test; the spelled check reads comments; a const-list writer is not seen) | `6568d78`, `8633cdb` |
+
+All five round-five bands merged, then `round5/A2` (four guards band A's
+verifier measured load-bearing, now pinned; upheld without reservations). At
+`31e679c`: backend 5,657 / 5,657, 701 testsuites `skipped="0"`, exit 0; after
+merging `round5/A2`, the directories it touches 383 / 383, exit 0. Vitest
+648 / 648, tsc and eslint clean; `make infra-validate` 0 (with the Ansible
+virtual environment on `PATH`, which the safety-gate self-test needs). An
+independent re-audit after round five follows.
