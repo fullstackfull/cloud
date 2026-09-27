@@ -17,9 +17,8 @@ use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Domain\Services\InstallProfileRenderer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\OsInstallProfile;
-use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
 use Lynomia\Modules\Ipam\Domain\Enums\IpPoolScope;
-use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
+use Lynomia\Modules\Ipam\Domain\Services\IpAllocator;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Provisioning\Application\Actions\ProvisionOrderedService;
@@ -99,9 +98,15 @@ use Lynomia\Modules\SharedHosting\Domain\Services\HostingNodeScheduler;
  *    such cluster and one such IPv4 pool must exist. And, for a sale only
  *    (resolveForSale()), the cluster must have a compute node in service — a `compute_nodes` row whose status the
  *    scheduler accepts placement on (NodeStatus::acceptsPlacement(), only
- *    ACTIVE) — and the pool an active IPv4 subnet holding a host address (an
- *    `ip_addresses` row not stamped `unavailable`), because IpAllocator
- *    reserves only from those rows. Both are rows an operator writes, like a
+ *    ACTIVE) — and the pool an active IPv4 subnet, on a network a customer
+ *    machine can be plugged into (Network::canCarryACustomerMachine(): active,
+ *    customer-facing, not management, with a bridge), holding a host address
+ *    (an `ip_addresses` row not stamped `unavailable`), asked of the allocator
+ *    itself (IpAllocator::holdsACustomerAttachableHost()) because the VPS
+ *    build reserves with `attachableOnly` and takes from no other subnet. A
+ *    pool whose only subnets were on no network, or a bridgeless or
+ *    management one, used to be sold and built into ipam.pool_exhausted on
+ *    every attempt (F-07, the re-audit of round four). These are rows an operator writes, like a
  *    hosting node: an active cluster with no node, or only nodes still in the
  *    maintenance SyncClusterInventory creates them in, and a pool with no
  *    subnet, used to be sold, paid and built straight into needs_review
@@ -144,6 +149,7 @@ final readonly class LocalPlacementFeasibility
         private HostingPackageForPlan $packages,
         private HostingNodeScheduler $scheduler,
         private InstallProfileRenderer $renderer,
+        private IpAllocator $addresses,
     ) {}
 
     /**
@@ -468,7 +474,7 @@ final readonly class LocalPlacementFeasibility
         }
 
         if (! $this->holdsAHostAddress($poolId)) {
-            return PlacementResolution::blocked('the IP pool has no active IPv4 subnet holding a host address');
+            return PlacementResolution::blocked('the IP pool has no active IPv4 subnet, on a network a customer machine can be attached to, holding a host address');
         }
 
         return $resolution;
@@ -496,26 +502,21 @@ final readonly class LocalPlacementFeasibility
     }
 
     /**
-     * Whether the pool holds an address IpAllocator could ever hand out: a row
-     * in one of its active IPv4 subnets (the subnets the allocator reserves
-     * from) that is not stamped `unavailable` - the network, broadcast and
-     * gateway, and whatever an operator took out of service. A host that is
-     * reserved, assigned or quarantined counts: the pool is configured, and
-     * waiting for one to come free is capacity.
+     * Whether the pool holds an address a VPS build could ever be given, asked
+     * of the allocator the build reserves by
+     * (IpAllocator::holdsACustomerAttachableHost()): a row not stamped
+     * `unavailable` in an active IPv4 subnet whose network can carry a
+     * customer machine (Network::canCarryACustomerMachine()). A host that is
+     * reserved, assigned or quarantined counts — the pool is configured, and
+     * waiting for one to come free is capacity. A subnet on no network, or on
+     * a bridgeless, management, inactive or not customer-facing one, does
+     * not: the build reserves with `attachableOnly` and never takes from it.
      */
     private function holdsAHostAddress(string $poolId): bool
     {
-        return IpAddress::query()
-            ->where('status', '!=', IpAddressStatus::Unavailable->value)
-            ->whereIn(
-                'subnet_id',
-                Subnet::query()
-                    ->where('ip_pool_id', $poolId)
-                    ->where('is_active', true)
-                    ->where('ip_version', 4)
-                    ->select('id'),
-            )
-            ->exists();
+        $pool = IpPool::query()->find($poolId);
+
+        return $pool !== null && $this->addresses->holdsACustomerAttachableHost($pool);
     }
 
     /**

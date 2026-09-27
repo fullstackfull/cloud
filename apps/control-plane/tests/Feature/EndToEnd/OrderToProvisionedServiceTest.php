@@ -66,12 +66,14 @@ final class OrderToProvisionedServiceTest extends TestCase
         // that names none and a cluster offering no single one leaves the
         // service waiting for an operator rather than building an empty disk.
         // And a node in service on the cluster and a host address in the
-        // pool: a sale refuses a cluster with neither (F-07 (c)).
+        // pool, on a network a customer machine can be plugged into: a sale
+        // refuses a cluster with neither (F-07 (c)), and a pool whose subnet
+        // is on no such network (F-07, round four's re-audit).
         $cluster = ComputeCluster::factory()->create(['status' => 'active']);
         $pool = IpPool::factory()->create(['is_active' => true, 'ip_version' => 4]);
         VmTemplate::factory()->create(['cluster_id' => $cluster->getKey()]);
         ComputeNode::factory()->create(['cluster_id' => $cluster->getKey()]);
-        IpAddress::factory()->create(['subnet_id' => Subnet::factory()->create(['ip_pool_id' => $pool->getKey()])->getKey()]);
+        IpAddress::factory()->create(['subnet_id' => Subnet::factory()->onACustomerNetwork()->create(['ip_pool_id' => $pool->getKey()])->getKey()]);
     }
 
     private function vpsPlan(int $monthlyMinor = 9_000): Plan

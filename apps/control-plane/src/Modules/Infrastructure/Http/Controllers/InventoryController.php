@@ -566,7 +566,15 @@ final class InventoryController
             $this->operator($request),
             self::NETWORK_EDITABLE,
             $request->input('version'),
-            $this->takesOutOfService($changes, 'is_active')
+            /*
+             * Clearing the bridge takes the network out of service for a VPS
+             * as surely as switching it off: the build attaches a machine only
+             * where Network::canCarryACustomerMachine() holds, which needs a
+             * bridge, so every active subnet on the network would become
+             * addresses no build can use (F-07, round four's re-audit). It is
+             * refused on the same count. Renaming the bridge is not.
+             */
+            $this->takesOutOfService($changes, 'is_active') || self::clearsTheBridge($changes)
                 ? static fn (): int => Subnet::query()
                     ->where('network_id', $found->getKey())
                     ->where('is_active', true)
@@ -707,6 +715,16 @@ final class InventoryController
                 'accepts_new_accounts' => $found->accepts_new_accounts,
             ],
         ]);
+    }
+
+    /**
+     * Whether a network change clears its bridge (null or blank).
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    private static function clearsTheBridge(array $changes): bool
+    {
+        return array_key_exists('bridge', $changes) && trim((string) ($changes['bridge'] ?? '')) === '';
     }
 
     /**

@@ -20,6 +20,7 @@ use Lynomia\Modules\Dedicated\Infrastructure\Models\OsInstallProfile;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Orders\Application\Actions\PlaceOrder;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutLine;
@@ -205,8 +206,9 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
             }
         };
 
-        // A subnet with a host to hand out, so every refusal below is the node's.
-        $subnet = Subnet::factory()->create(['ip_pool_id' => $pool->getKey()]);
+        // A subnet with a host to hand out, on a network a machine can be
+        // plugged into, so every refusal below is the node's.
+        $subnet = Subnet::factory()->onACustomerNetwork()->create(['ip_pool_id' => $pool->getKey()]);
         IpAddress::factory()->create(['subnet_id' => $subnet->getKey()]);
 
         $refused('a cluster with no compute node');
@@ -232,13 +234,13 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
 
         $refused('a pool with no subnet');
 
-        $unseeded = Subnet::factory()->create(['ip_pool_id' => $pool->getKey()]);
+        $unseeded = Subnet::factory()->onACustomerNetwork()->create(['ip_pool_id' => $pool->getKey()]);
         $refused('a pool whose subnet has no address rows');
 
         IpAddress::factory()->unavailable()->create(['subnet_id' => $unseeded->getKey()]);
         $refused('a pool whose subnet holds only addresses taken out of service');
 
-        $inactive = Subnet::factory()->create(['ip_pool_id' => $pool->getKey(), 'is_active' => false]);
+        $inactive = Subnet::factory()->onACustomerNetwork()->create(['ip_pool_id' => $pool->getKey(), 'is_active' => false]);
         IpAddress::factory()->create(['subnet_id' => $inactive->getKey()]);
         $refused('a pool whose only host address is in a switched-off subnet');
 
@@ -250,6 +252,71 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
         IpAddress::factory()->assigned()->create(['subnet_id' => $unseeded->getKey()]);
         ComputeNode::query()->where('cluster_id', $cluster->getKey())->where('status', NodeStatus::Active->value)
             ->update(['allocated_memory_mib' => 262144, 'allocated_cpu_cores' => 128, 'allocated_storage_gib' => 8192]);
+
+        [$customer] = $this->accountWithOwner();
+        $this->place($customer, $this->planFor(ProductKind::Vps));
+
+        $this->assertSame(1, Order::query()->count());
+    }
+
+    #[Test]
+    public function a_vps_plan_whose_pool_has_no_subnet_a_machine_can_be_plugged_in_at_is_not_orderable(): void
+    {
+        /*
+         * F-07, as the re-audit of round four found it (A×D): the sale asked
+         * only for an active IPv4 subnet holding a host address, never which
+         * network the subnet is on, while CreateVpsHandler reserves only from
+         * subnets whose network can carry a customer machine
+         * (IpAllocator `attachableOnly`, Network::canCarryACustomerMachine()).
+         * A pool whose only subnet was on no network, on a network with no
+         * bridge, on a management or an inactive network was sold, paid, and
+         * built into ipam.pool_exhausted on every attempt - needs_review with
+         * the money held. Each is refused at sale now; a host already
+         * reserved or assigned on a network that can carry the machine is
+         * capacity and still sells.
+         */
+        $cluster = ComputeCluster::factory()->create(['status' => 'active']);
+        VmTemplate::factory()->create(['cluster_id' => $cluster->getKey()]);
+        ComputeNode::factory()->create(['cluster_id' => $cluster->getKey()]);
+        $pool = IpPool::factory()->create(['is_active' => true, 'ip_version' => 4]);
+
+        $refused = function (string $what): void {
+            [$customer] = $this->accountWithOwner();
+
+            try {
+                $this->place($customer, $this->planFor(ProductKind::Vps));
+                $this->fail('A VPS was sold onto '.$what.'.');
+            } catch (CheckoutRejectedException $e) {
+                $this->assertSame('checkout.not_deliverable', $e->errorCode(), $what);
+            }
+        };
+
+        $networkless = Subnet::factory()->create(['ip_pool_id' => $pool->getKey(), 'network_id' => null]);
+        IpAddress::factory()->create(['subnet_id' => $networkless->getKey()]);
+        $refused('a pool whose only subnet is on no network');
+
+        foreach ([
+            'a network with no bridge' => Network::factory()->create(['bridge' => null]),
+            'a network with an empty bridge' => Network::factory()->create(['bridge' => '']),
+            'a management network' => Network::factory()->management()->create(['bridge' => 'vmbr0']),
+            'an inactive network' => Network::factory()->inactive()->create(['bridge' => 'vmbr1']),
+            'a network not customer-facing' => Network::factory()->create(['bridge' => 'vmbr1', 'is_customer_facing' => false]),
+        ] as $what => $network) {
+            $subnet = Subnet::factory()->create(['ip_pool_id' => $pool->getKey(), 'network_id' => $network->getKey()]);
+            IpAddress::factory()->create(['subnet_id' => $subnet->getKey()]);
+            $refused('a pool whose only subnets are on '.$what);
+        }
+
+        // An attachable subnet whose only host is out of service is no host.
+        $carrying = Subnet::factory()->onACustomerNetwork()->create(['ip_pool_id' => $pool->getKey()]);
+        IpAddress::factory()->unavailable()->create(['subnet_id' => $carrying->getKey()]);
+        $refused('a pool whose attachable subnet holds only addresses taken out of service');
+
+        $this->assertSame(0, Order::query()->count());
+
+        // Positive control: the attachable subnet's host is assigned already.
+        // Waiting for one to come free is capacity, so the sale goes through.
+        IpAddress::factory()->assigned()->create(['subnet_id' => $carrying->getKey()]);
 
         [$customer] = $this->accountWithOwner();
         $this->place($customer, $this->planFor(ProductKind::Vps));
@@ -618,13 +685,16 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
     }
 
     /**
-     * A node in service on the cluster and a subnet in the pool with a host
-     * address to hand out: what a VPS needs configured before it is sold.
+     * A node in service on the cluster and a subnet in the pool, on a network
+     * a customer machine can be plugged into, with a host address to hand
+     * out: what a VPS needs configured before it is sold. The subnet used to
+     * be on no network at all — an estate the build can never reserve from,
+     * which this fixture asserted was sellable (F-07, round four's re-audit).
      */
     private function inService(ComputeCluster $cluster, IpPool $pool): void
     {
         ComputeNode::factory()->create(['cluster_id' => $cluster->getKey()]);
-        $subnet = Subnet::factory()->create(['ip_pool_id' => $pool->getKey()]);
+        $subnet = Subnet::factory()->onACustomerNetwork()->create(['ip_pool_id' => $pool->getKey()]);
         IpAddress::factory()->create(['subnet_id' => $subnet->getKey()]);
     }
 

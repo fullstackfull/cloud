@@ -220,6 +220,39 @@ final readonly class IpAllocator
     }
 
     /**
+     * Whether the pool holds a host a VPS build could ever be given: an
+     * address row, not stamped `unavailable`, in one of the subnets reserve()
+     * takes from when a build asks with `attachableOnly` — the same subnet
+     * list, filtered by the same helper as customerAttachableCount().
+     *
+     * Unlike that count, a host that is reserved, assigned or quarantined
+     * counts: it is configured capacity, and waiting for it to come free is
+     * the build's capacity retry. What does not count is a subnet on no
+     * network, or on one a customer machine cannot be plugged into (inactive,
+     * management, not customer-facing, no bridge) — the build never reserves
+     * from those, so an estate holding only them cannot deliver a machine at
+     * all. Asked by checkout (LocalPlacementFeasibility) so a sale and a build
+     * cannot disagree about which subnets a machine can use.
+     */
+    public function holdsACustomerAttachableHost(IpPool $pool): bool
+    {
+        if (! $pool->scope->isCustomerAllocatable()) {
+            return false;
+        }
+
+        $subnetIds = $this->attachable($this->subnetIdsFor($pool));
+
+        if ($subnetIds === []) {
+            return false;
+        }
+
+        return DB::table('ip_addresses')
+            ->whereIn('subnet_id', $subnetIds)
+            ->where('status', '!=', IpAddressStatus::Unavailable->value)
+            ->exists();
+    }
+
+    /**
      * Turn a held reservation into a live assignment.
      *
      * @param  ?string  $serviceId  The service the address now belongs to. A string id rather than a

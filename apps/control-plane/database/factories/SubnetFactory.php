@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 use Lynomia\Modules\Ipam\Domain\Enums\IpVersion;
 use Lynomia\Modules\Ipam\Domain\ValueObjects\Cidr;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 
 /**
@@ -66,6 +67,19 @@ class SubnetFactory extends Factory
             'ip_version' => IpVersion::V6,
             'prefix_length' => $block->prefixLength(),
             'gateway' => null,
+        ]);
+    }
+
+    /**
+     * On an active customer-facing network with a bridge: a block a VPS can
+     * actually be plugged in at (Network::canCarryACustomerMachine()). The
+     * default is no network at all, which the VPS build refuses and checkout
+     * no longer sells onto.
+     */
+    public function onACustomerNetwork(): static
+    {
+        return $this->state(fn (): array => [
+            'network_id' => Network::factory()->state(['bridge' => 'vmbr1', 'vlan_id' => 1234]),
         ]);
     }
 
