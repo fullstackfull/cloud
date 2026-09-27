@@ -7,6 +7,8 @@ namespace Lynomia\Modules\Wallet\Application\Actions;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Application\DTOs\InvoiceSettlement;
+use Lynomia\Modules\Billing\Application\Queries\TheSubscriptionAnInvoiceBills;
+use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceNotPayableException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
@@ -15,6 +17,7 @@ use Lynomia\Modules\Payments\Domain\Enums\TransactionKind;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use Lynomia\Modules\Wallet\Domain\Exceptions\IdempotencyKeyConflictException;
 use Lynomia\Modules\Wallet\Domain\Exceptions\WalletPaymentRefusedException;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
@@ -55,10 +58,11 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
  *  3. **The charge row, then settlement**, which locks the charge and the
  *     invoice again — both already held by this transaction, so no new wait.
  *
- * The lock order is invoice → wallet → charge, and the external payments path
- * is charge → invoice → wallet. The charge here is a row this transaction
- * created, which no other transaction can be holding, so the two orders cannot
- * form a cycle.
+ * The money-path lock order ({@see WhatAnInvoiceStillHolds}) puts an existing
+ * capture before its invoice. The charge locked here after the invoice is a
+ * row this transaction created, which no other transaction can be holding or
+ * waiting for, so it cannot close a cycle. A replay never locks the charge the
+ * first request wrote (see execute()).
  *
  * ---------------------------------------------------------------------------
  * Repeating the request
@@ -112,13 +116,46 @@ final readonly class PayInvoiceFromWallet
             if ($wallet !== null) {
                 $replay = $this->ledger->entryPostedUnder($wallet, $idempotencyKey);
 
+                if ($replay !== null && (string) $replay->invoice_id !== (string) $locked->getKey()) {
+                    // The same key on a different invoice is not a repeat of
+                    // the same request (R4): refused, as the ledger refuses a
+                    // key reused for a different entry.
+                    throw IdempotencyKeyConflictException::forAnotherInvoice(
+                        (string) $wallet->getKey(),
+                        $idempotencyKey,
+                        (string) $replay->getKey(),
+                        (string) $locked->getKey(),
+                    );
+                }
+
                 if ($replay !== null) {
-                    return $this->settle->execute($locked, $this->chargeOf($replay->transaction_id));
+                    /*
+                     * The first request wrote the charge, the debit and the
+                     * settlement in one transaction, so finding its entry
+                     * means all three are committed: what settlement would
+                     * answer now is a redelivery, which moves nothing. Said
+                     * here rather than asked of SettleInvoice, because that
+                     * locks the charge, and a charge locked after its invoice
+                     * is the opposite of the money-path lock order
+                     * (WhatAnInvoiceStillHolds) - a replay racing a refund of
+                     * the same wallet charge would deadlock.
+                     */
+                    return new InvoiceSettlement(
+                        invoice: $locked->refresh(),
+                        applied: Money::zero($locked->currency),
+                        creditedToWallet: Money::zero($locked->currency),
+                    );
                 }
             }
 
             if (! $locked->status->isCollectible()) {
                 throw InvoiceNotPayableException::forStatus((string) $locked->getKey(), $locked->status);
+            }
+
+            // Nothing more is delivered on a subscription that has ended, so
+            // an invoice of it left open is not paid for nothing (O-1, N-3).
+            if (TheSubscriptionAnInvoiceBills::hasEnded($locked)) {
+                throw InvoiceNotPayableException::becauseItsSubscriptionHasEnded((string) $locked->getKey());
             }
 
             $due = $locked->amountDue();
@@ -204,15 +241,6 @@ final readonly class PayInvoiceFromWallet
             ->first();
 
         return $wallet;
-    }
-
-    /** The charge an earlier attempt already wrote. */
-    private function chargeOf(?string $id): Transaction
-    {
-        /** @var Transaction $charge */
-        $charge = Transaction::query()->whereKey($id)->lockForUpdate()->firstOrFail();
-
-        return $charge;
     }
 
     private function newCharge(Invoice $invoice, Money $applied, Customer $customer): Transaction

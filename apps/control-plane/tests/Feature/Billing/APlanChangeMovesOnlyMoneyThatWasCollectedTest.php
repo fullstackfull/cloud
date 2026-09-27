@@ -12,6 +12,7 @@ use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
 use Lynomia\Modules\Billing\Application\Actions\RecordInvoiceRefund;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
+use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
@@ -28,6 +29,11 @@ use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Models\OrderItem;
+use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
+use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
+use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
+use Lynomia\Modules\Payments\Domain\Exceptions\RefundExceedsCaptureException;
+use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
@@ -38,6 +44,7 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
+use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use PHPUnit\Framework\Attributes\Test;
@@ -192,6 +199,149 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
 
         // 3.333 unused on mid, less 1.500 for the rest of the period on cheaper.
         $this->assertSame(3_333 - 1_500, $this->walletOf($customer), 'The cap must not bite on money that was paid.');
+    }
+
+    #[Test]
+    public function a_downgrade_credit_is_recorded_against_the_invoice_it_draws_on_and_a_card_refund_is_held_to_the_rest(): void
+    {
+        /*
+         * O-2. The credit was one Adjustment against no invoice, so
+         * WhatAnInvoiceStillHolds still read 90.000 on the period's invoice
+         * and IssueRefund accepted a card refund of all of it: 117.000 back
+         * for 90.000 paid.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        // Smaller at the same disk, so nothing refuses the move but the money.
+        $lean = $this->plan('lean', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160], 9_000);
+        $subscription = $this->paidSubscriptionOn($customer, $this->large);
+        $this->serviceWithMachine($customer, $subscription);
+
+        /** @var Invoice $period */
+        $period = Invoice::query()->where('subscription_id', $subscription->getKey())->sole();
+        /** @var Transaction $capture */
+        $capture = Transaction::query()->where('invoice_id', $period->getKey())->sole();
+
+        $this->changePlan($user, $subscription, $lean, 'drawn-down-1')->assertOk();
+
+        // 30.000 unused on large, less 3.000 for the rest of the period on small.
+        $this->assertSame(27_000, $this->walletOf($customer));
+        $this->assertSame(27_000, (int) WalletTransaction::query()
+            ->where('invoice_id', $period->getKey())
+            ->where('kind', WalletTransactionKind::Adjustment->value)
+            ->sum('amount_minor'), 'The credit is recorded against the invoice whose money it is.');
+        $this->assertSame(63_000, WhatAnInvoiceStillHolds::minor($period->fresh()));
+
+        Event::fake([RefundIssued::class]);
+
+        try {
+            app(IssueRefund::class)->execute($capture, Money::ofMinor(90_000, 'KWD'), 'customer asked');
+            $this->fail('The downgrade credit was refunded to the card as well.');
+        } catch (RefundExceedsCaptureException $e) {
+            $this->assertSame(63_000, $e->context()['refundable_minor']);
+        }
+
+        app(IssueRefund::class)->execute($capture, Money::ofMinor(63_000, 'KWD'), 'the rest');
+        $this->assertSame(0, WhatAnInvoiceStillHolds::minor($period->fresh()));
+    }
+
+    #[Test]
+    public function a_downgrade_after_a_card_refund_not_yet_booked_credits_nothing_it_took_back(): void
+    {
+        // The reverse order: the card refund first, still in flight, so the
+        // invoice's own refunded figure has not moved.
+        [$customer, $user] = $this->accountWithOwner();
+        // Smaller at the same disk, so nothing refuses the move but the money.
+        $lean = $this->plan('lean', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160], 9_000);
+        $subscription = $this->paidSubscriptionOn($customer, $this->large);
+        $this->serviceWithMachine($customer, $subscription);
+
+        /** @var Invoice $period */
+        $period = Invoice::query()->where('subscription_id', $subscription->getKey())->sole();
+
+        Refund::query()->create([
+            'transaction_id' => Transaction::query()->where('invoice_id', $period->getKey())->sole()->getKey(),
+            'invoice_id' => $period->getKey(),
+            'amount_minor' => 90_000,
+            'currency' => 'KWD',
+            'status' => RefundStatus::Pending,
+            'reason' => 'in flight at the provider',
+        ]);
+        $this->assertSame(0, $period->fresh()?->amount_refunded_minor);
+
+        $this->changePlan($user, $subscription, $lean, 'refunded-down-1')->assertOk();
+
+        $this->assertSame(0, $this->walletOf($customer), 'The whole period is on its way back to the card.');
+    }
+
+    #[Test]
+    public function a_period_a_percentage_coupon_discounted_credits_its_unused_time_at_the_discounted_price(): void
+    {
+        /*
+         * O-3 (a). The period was sold at half price - 45.000 for a 90.000
+         * plan - and the remainder was credited at list: 30.000 of unused time
+         * returned for the 15.000 that time had cost.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        // Smaller at the same disk, so nothing refuses the move but the money.
+        $lean = $this->plan('lean', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160], 9_000);
+        $subscription = $this->paidSubscriptionOn($customer, $this->large);
+        $this->serviceWithMachine($customer, $subscription);
+
+        /** @var Invoice $period */
+        $period = Invoice::query()->where('subscription_id', $subscription->getKey())->sole();
+        $period->forceFill(['subtotal_minor' => 90_000, 'discount_minor' => 45_000, 'total_minor' => 45_000, 'amount_paid_minor' => 45_000])->save();
+        InvoiceItem::query()->where('invoice_id', $period->getKey())->update(['discount_minor' => 45_000, 'total_minor' => 45_000]);
+        Transaction::query()->where('invoice_id', $period->getKey())->update(['amount_minor' => 45_000]);
+
+        $quoted = $this->actingAs($user)
+            ->getJson("/api/v1/subscriptions/{$subscription->id}/plan-options")
+            ->assertOk()
+            ->json('data');
+
+        $this->changePlan($user, $subscription, $lean, 'coupon-down-1')->assertOk();
+
+        // 15.000 paid for the unused third, less 3.000 for the rest on small.
+        $this->assertSame(12_000, $this->walletOf($customer));
+        $this->assertSame(-15_000, PlanChange::query()->where('subscription_id', $subscription->getKey())->sole()->credit_minor);
+
+        $option = collect($quoted)->firstWhere('plan_id', $lean->id);
+        $this->assertIsArray($option);
+        $this->assertSame(15_000, abs((int) $option['credit']['minor_units']), 'The quote and the change agree.');
+    }
+
+    #[Test]
+    public function after_a_paid_upgrade_a_discounted_period_credits_the_upgraded_time_at_the_price_it_was_bought_at(): void
+    {
+        /*
+         * The other half of O-3 (a): the discount belongs to the time the
+         * coupon priced. An upgrade's charge is at list (proration lines are
+         * not discountable), so once it is paid, the time on the bigger plan
+         * was bought at list and is returned at list.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $base = $this->plan('base', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160], 10_000);
+        $lean = $this->plan('lean', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160], 9_000);
+        $subscription = $this->paidSubscriptionOn($customer, $base);
+        $this->serviceWithMachine($customer, $subscription);
+
+        /** @var Invoice $period */
+        $period = Invoice::query()->where('subscription_id', $subscription->getKey())->sole();
+        $period->forceFill(['subtotal_minor' => 10_000, 'discount_minor' => 5_000, 'total_minor' => 5_000, 'amount_paid_minor' => 5_000])->save();
+        InvoiceItem::query()->where('invoice_id', $period->getKey())->update(['discount_minor' => 5_000, 'total_minor' => 5_000]);
+        Transaction::query()->where('invoice_id', $period->getKey())->update(['amount_minor' => 5_000]);
+
+        $this->changePlan($user, $subscription, $this->large, 'coupon-up-1')->assertOk();
+        $upgrade = $this->openProrationInvoice($subscription);
+
+        // Half of base's unused 3.333 came off; large's 30.000 was charged.
+        $this->assertSame(30_000 - 1_667, $upgrade->total_minor);
+        $this->settle($upgrade, $customer);
+        $this->finishEveryProvisioningJob();
+
+        $this->changePlan($user, $subscription->fresh(), $lean, 'coupon-up-down-1')->assertOk();
+
+        // Large's unused 30.000 at the list price it was bought at, less 3.000.
+        $this->assertSame(27_000, $this->walletOf($customer));
     }
 
     // ---- 2. the resize delivers what the paid invoice bought ---------------
@@ -441,13 +591,13 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
             'current_period_start' => CarbonImmutable::parse('2026-05-01 00:00:00', 'UTC'),
             'current_period_end' => CarbonImmutable::parse('2026-05-31 00:00:00', 'UTC'),
         ])->save();
-        $renewal = Invoice::factory()->paid()->create([
+        $renewal = self::captured(Invoice::factory()->paid()->create([
             'customer_id' => $customer->getKey(),
             'subscription_id' => $subscription->getKey(),
             'subtotal_minor' => 10_000,
             'total_minor' => 10_000,
             'amount_paid_minor' => 10_000,
-        ]);
+        ]));
         InvoiceItem::query()->create([
             'invoice_id' => $renewal->getKey(),
             'kind' => InvoiceItemKind::Plan,
@@ -746,13 +896,13 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
 
     private function renewalPaid(Subscription $subscription, int $minor): void
     {
-        $invoice = Invoice::factory()->paid()->create([
+        $invoice = self::captured(Invoice::factory()->paid()->create([
             'customer_id' => $subscription->customer_id,
             'subscription_id' => $subscription->getKey(),
             'subtotal_minor' => $minor,
             'total_minor' => $minor,
             'amount_paid_minor' => $minor,
-        ]);
+        ]));
 
         InvoiceItem::query()->create([
             'invoice_id' => $invoice->getKey(),
@@ -828,13 +978,13 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         }
 
         $paid = $firstTotal + $secondTotal;
-        $invoice = Invoice::factory()->paid()->create([
+        $invoice = self::captured(Invoice::factory()->paid()->create([
             'customer_id' => $customer->getKey(),
             'order_id' => $order->getKey(),
             'subtotal_minor' => $paid,
             'total_minor' => $paid,
             'amount_paid_minor' => $paid,
-        ]);
+        ]));
 
         InvoiceItem::query()->create([
             'invoice_id' => $invoice->getKey(),
@@ -940,13 +1090,13 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
                 'recurring_amount_minor' => $unit * $quantity,
             ]);
 
-        $invoice = Invoice::factory()->paid()->create([
+        $invoice = self::captured(Invoice::factory()->paid()->create([
             'customer_id' => $customer->getKey(),
             'order_id' => $order->getKey(),
             'subtotal_minor' => $total,
             'total_minor' => $total,
             'amount_paid_minor' => $total,
-        ]);
+        ]));
 
         InvoiceItem::query()->create([
             'invoice_id' => $invoice->getKey(),
@@ -1054,13 +1204,13 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
 
         // amount_paid_minor stated: the factory's paid() state reads the
         // definition's total (9.000), not the one given here.
-        $invoice = Invoice::factory()->paid()->create([
+        $invoice = self::captured(Invoice::factory()->paid()->create([
             'customer_id' => $customer->getKey(),
             'subscription_id' => $subscription->getKey(),
             'subtotal_minor' => $recurring,
             'total_minor' => $recurring,
             'amount_paid_minor' => $recurring,
-        ] + ($refunded ? ['status' => InvoiceStatus::Refunded, 'amount_refunded_minor' => $recurring] : []));
+        ] + ($refunded ? ['status' => InvoiceStatus::Refunded, 'amount_refunded_minor' => $recurring] : [])));
 
         InvoiceItem::query()->create([
             'invoice_id' => $invoice->getKey(),
@@ -1102,5 +1252,26 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
             ]);
 
         return $service;
+    }
+
+    /**
+     * A paid invoice is paid by a capture: every payment applied to an invoice
+     * is a transactions row (SettleInvoice's invariant), and what a downgrade
+     * credit may draw on is read from those rows (WhatAnInvoiceStillHolds,
+     * O-2). A fixture that only states amount_paid_minor describes money that
+     * never arrived.
+     */
+    private static function captured(Invoice $invoice): Invoice
+    {
+        if ($invoice->amount_paid_minor > 0) {
+            Transaction::factory()->create([
+                'customer_id' => $invoice->customer_id,
+                'invoice_id' => $invoice->getKey(),
+                'amount_minor' => $invoice->amount_paid_minor,
+                'currency' => $invoice->currency,
+            ]);
+        }
+
+        return $invoice;
     }
 }

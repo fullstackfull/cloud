@@ -9,6 +9,7 @@ use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
+use Lynomia\Modules\Payments\Application\Actions\ReturnToTheWalletWhatAFailedRefundLeft;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
@@ -36,7 +37,7 @@ final class ARefundReachesTheInvoiceTest extends TestCase
     {
         parent::setUp();
 
-        $this->issue = new IssueRefund(new PaymentProviderRegistry($this->app), app(WalletLedger::class));
+        $this->issue = new IssueRefund(new PaymentProviderRegistry($this->app), app(WalletLedger::class), app(ReturnToTheWalletWhatAFailedRefundLeft::class));
     }
 
     /**

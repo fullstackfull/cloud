@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Billing\Application\Actions;
 
+use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
@@ -49,6 +52,19 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  *
  * Keyed on the capture, so a redelivered webhook credits once. The ledger
  * refuses a second entry under a key it has already posted.
+ *
+ * ---------------------------------------------------------------------------
+ * No more than the invoice still holds of it
+ * ---------------------------------------------------------------------------
+ *
+ * A capture RecordPaymentCapture attached to the invoice is already part of
+ * what that invoice holds (WhatAnInvoiceStillHolds), and an invoice withdrawn
+ * because nothing more will be delivered for it has had that figure returned
+ * to the wallet first (ReturnWhatAnInvoiceStillHolds) - capture included. So
+ * for an attached capture this credits what the invoice still holds, up to the
+ * capture, read under the invoice's lock: crediting the capture in full again
+ * would hand the same money back twice. A capture not attached to the invoice
+ * is in nobody's figure, and is credited whole, as before.
  */
 final readonly class CompensateUncollectableCapture
 {
@@ -58,7 +74,27 @@ final readonly class CompensateUncollectableCapture
 
     public function execute(Invoice $invoice, Transaction $capture): ?WalletTransaction
     {
+        return DB::transaction(fn (): ?WalletTransaction => $this->compensate($invoice, $capture));
+    }
+
+    private function compensate(Invoice $invoice, Transaction $capture): ?WalletTransaction
+    {
+        // The capture, then the invoice: the money-path lock order.
+        /** @var Transaction $capture */
+        $capture = Transaction::query()->lockForUpdate()->findOrFail($capture->getKey());
+        /** @var Invoice $invoice */
+        $invoice = Invoice::query()->lockForUpdate()->findOrFail($invoice->getKey());
+
         $amount = $capture->amount();
+
+        // Counted in the invoice's figure only when it is one of the captures
+        // that figure reads: attached, in its currency, from its customer.
+        if ((string) $capture->invoice_id === (string) $invoice->getKey()
+            && $capture->currency === $invoice->currency
+            && (string) $capture->customer_id === (string) $invoice->customer_id) {
+            $held = Money::ofMinor(max(0, WhatAnInvoiceStillHolds::minor($invoice)), $amount->currency());
+            $amount = $held->isLessThan($amount) ? $held : $amount;
+        }
 
         if (! $amount->isPositive()) {
             return null;

@@ -7,9 +7,9 @@ namespace Tests\Feature\Admin;
 use Carbon\CarbonImmutable;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
+use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
@@ -21,6 +21,8 @@ use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
+use Lynomia\Modules\Payments\Application\Actions\StartInvoicePayment;
+use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Application\Actions\TransitionService;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
@@ -29,6 +31,7 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
+use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\SharedHosting\Application\Actions\EndHostingService;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
@@ -37,7 +40,9 @@ use Lynomia\Modules\Subscriptions\Application\Actions\TransitionSubscription;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ReviveSubscriptionOnRenewalPayment;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Wallet\Application\Actions\PayInvoiceFromWallet;
-use Mockery;
+use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
+use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
 use Tests\Support\BuysSharedHosting;
@@ -338,8 +343,16 @@ final class EndingAServiceEndsWhatItIsBilledForTest extends TestCase
     }
 
     #[Test]
-    public function a_partly_paid_invoice_is_left_open_and_the_ones_after_it_are_still_voided(): void
+    public function a_partly_paid_invoice_has_what_it_holds_returned_and_is_voided_with_the_rest(): void
     {
+        /*
+         * N-3. This test used to pin the defect: the partly paid invoice was
+         * "left for an operator", open, and the customer could pay the other
+         * 8.500 by card or wallet for a service already terminated - the
+         * invoice then read paid 9.000, the subscription cancelled, nothing
+         * delivered and nothing returned. What it holds now goes back to the
+         * wallet, recorded against it, and it is voided like the others.
+         */
         [$customer, $service, $subscription] = $this->activeServiceOnASubscription();
 
         $partlyPaid = $this->openInvoiceOn($subscription, $customer);
@@ -353,28 +366,33 @@ final class EndingAServiceEndsWhatItIsBilledForTest extends TestCase
         ]));
         $this->assertSame(InvoiceStatus::Open, $partlyPaid->refresh()->status);
 
-        Log::spy();
-
         app(TransitionService::class)->execute($service, ServiceStatus::Terminated);
 
-        /*
-         * Skipped as a decision, and said so, rather than attempted and
-         * caught as a failure: the operator's log line has to say "left for
-         * you because money is on it", not "could not be voided".
-         */
-        Log::shouldHaveReceived('warning')->with(
-            'A subscription ended with a partly paid invoice still open; it was left for an operator.',
-            Mockery::on(static fn (array $context): bool => $context['invoice_id'] === (string) $partlyPaid->getKey()),
-        );
-        Log::shouldNotHaveReceived('warning', [
-            'A subscription ended and one of its open invoices could not be voided; it is still payable.',
-            Mockery::any(),
-        ]);
-
-        // Money is on it: VoidInvoice would refuse, and what is owed or
-        // returned is an operator's decision.
-        $this->assertSame(InvoiceStatus::Open, $partlyPaid->refresh()->status);
+        $this->assertTrue($subscription->refresh()->status->isTerminal());
+        $this->assertSame(InvoiceStatus::Void, $partlyPaid->refresh()->status);
         $this->assertSame(InvoiceStatus::Void, $unpaid->refresh()->status);
+
+        $ledger = app(WalletLedger::class);
+        $this->assertSame(500, $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits());
+        $this->assertSame(500, (int) WalletTransaction::query()
+            ->where('invoice_id', $partlyPaid->getKey())
+            ->where('kind', WalletTransactionKind::Topup->value)
+            ->sum('amount_minor'), 'The return is recorded against the invoice it came from.');
+
+        // And the rest cannot be paid, from the wallet or by card.
+        foreach ([
+            fn () => app(PayInvoiceFromWallet::class)->execute($customer, $partlyPaid->refresh(), 'pay-the-rest-1'),
+            fn () => app(StartInvoicePayment::class)->execute($partlyPaid->refresh()),
+        ] as $pay) {
+            try {
+                $pay();
+                $this->fail('The rest of an ended subscription\'s invoice was taken.');
+            } catch (InvoiceNotPayableException $e) {
+                $this->assertSame('invoice.not_payable', $e->errorCode());
+            }
+        }
+
+        $this->assertSame(500, $partlyPaid->refresh()->amount_paid_minor);
     }
 
     #[Test]
@@ -402,6 +420,49 @@ final class EndingAServiceEndsWhatItIsBilledForTest extends TestCase
         $this->assertTrue($subscription->refresh()->status->isTerminal());
         $this->assertSame(InvoiceStatus::Open, $first->refresh()->status, 'Precondition: the first void really failed.');
         $this->assertSame(InvoiceStatus::Void, $second->refresh()->status, 'One failed void left a later invoice payable.');
+
+        // The one left open is refused at payment instead: its subscription
+        // has ended, so nothing more would be delivered for it (N-3, O-1).
+        $ledger = app(WalletLedger::class);
+        $ledger->credit(wallet: $ledger->walletFor($customer, 'KWD'), amount: Money::ofMinor(9_000, 'KWD'), kind: WalletTransactionKind::Topup, description: 'top-up');
+
+        foreach ([
+            fn () => app(PayInvoiceFromWallet::class)->execute($customer, $first->refresh(), 'pay-after-the-end-2'),
+            fn () => app(StartInvoicePayment::class)->execute($first->refresh()),
+        ] as $pay) {
+            try {
+                $pay();
+                $this->fail('An open invoice of an ended subscription was taken payment for.');
+            } catch (InvoiceNotPayableException $e) {
+                $this->assertSame('invoice.subscription_ended', $e->errorCode());
+                $this->assertSame(409, $e->httpStatus());
+            }
+        }
+
+        $this->assertSame(0, $first->refresh()->amount_paid_minor);
+        $this->assertSame(9_000, $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits());
+
+        // And a card payment opened before the end, captured after it, goes
+        // to the wallet rather than onto the invoice.
+        $late = Transaction::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'invoice_id' => $first->getKey(),
+            'amount_minor' => 9_000,
+            'currency' => 'KWD',
+        ]);
+        app(SettleInvoiceOnPaymentCaptured::class)->handle(new PaymentCaptured(
+            transactionId: (string) $late->getKey(),
+            customerId: (string) $customer->getKey(),
+            invoiceId: (string) $first->getKey(),
+            provider: (string) $late->provider,
+            providerReference: (string) $late->provider_reference,
+            amount: Money::ofMinor(9_000, 'KWD'),
+            capturedAt: CarbonImmutable::now(),
+        ));
+
+        $this->assertSame(0, $first->refresh()->amount_paid_minor);
+        $this->assertSame(InvoiceStatus::Open, $first->status);
+        $this->assertSame(18_000, $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits());
     }
 
     #[Test]

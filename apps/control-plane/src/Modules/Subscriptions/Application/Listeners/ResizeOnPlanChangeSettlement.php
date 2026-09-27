@@ -145,6 +145,10 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
             return;
         }
 
+        if ($this->hasEnded($subscription, $event)) {
+            return;
+        }
+
         if ($this->aLaterChangeHasBeenSettled($change)) {
             return;
         }
@@ -155,6 +159,32 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
             resources: PlanResources::fromArray($change->resources),
             idempotencyKey: 'invoice:'.$event->invoiceId,
         );
+    }
+
+    /**
+     * Nothing is resized onto a subscription that has ended (O-1).
+     *
+     * Its open invoices are withdrawn as it ends, and paying one is refused,
+     * so this is reached by an upgrade paid in the moment before the end,
+     * whose settlement is heard after it. The machine it would have grown is
+     * being switched off or is already gone; resizing it is work at a
+     * provider for a customer who will not have it. What the upgrade was paid
+     * for the rest of the period is treated as the rest of the period is on an
+     * immediate cancellation: kept, and an operator's to refund.
+     */
+    private function hasEnded(Subscription $subscription, InvoicePaid $event): bool
+    {
+        if (! $subscription->status->isTerminal()) {
+            return false;
+        }
+
+        Log::warning('A plan change was paid for a subscription that has since ended; nothing was resized.', [
+            'invoice_id' => $event->invoiceId,
+            'subscription_id' => (string) $subscription->getKey(),
+            'status' => $subscription->status->value,
+        ]);
+
+        return true;
     }
 
     /**
@@ -171,6 +201,10 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
                 'subscription_id' => $event->subscriptionId,
             ]);
 
+            return;
+        }
+
+        if ($this->hasEnded($subscription, $event)) {
             return;
         }
 

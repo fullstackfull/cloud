@@ -459,13 +459,13 @@ final class APlanChangeSettlesItsMoneyTest extends BillingApiTestCase
 
     private function periodPaidFor(Customer $customer, Subscription $subscription): void
     {
-        $invoice = Invoice::factory()->paid()->create([
+        $invoice = self::captured(Invoice::factory()->paid()->create([
             'customer_id' => $customer->getKey(),
             'subscription_id' => $subscription->getKey(),
             'subtotal_minor' => $subscription->recurring_amount_minor,
             'total_minor' => $subscription->recurring_amount_minor,
             'amount_paid_minor' => $subscription->recurring_amount_minor,
-        ]);
+        ]));
 
         InvoiceItem::query()->create([
             'invoice_id' => $invoice->getKey(),
@@ -513,5 +513,26 @@ final class APlanChangeSettlesItsMoneyTest extends BillingApiTestCase
             ]);
 
         return $service;
+    }
+
+    /**
+     * A paid invoice is paid by a capture: every payment applied to an invoice
+     * is a transactions row (SettleInvoice's invariant), and what a downgrade
+     * credit may draw on is read from those rows (WhatAnInvoiceStillHolds,
+     * O-2). A fixture that only states amount_paid_minor describes money that
+     * never arrived.
+     */
+    private static function captured(Invoice $invoice): Invoice
+    {
+        if ($invoice->amount_paid_minor > 0) {
+            Transaction::factory()->create([
+                'customer_id' => $invoice->customer_id,
+                'invoice_id' => $invoice->getKey(),
+                'amount_minor' => $invoice->amount_paid_minor,
+                'currency' => $invoice->currency,
+            ]);
+        }
+
+        return $invoice;
     }
 }

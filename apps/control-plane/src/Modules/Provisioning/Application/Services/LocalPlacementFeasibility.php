@@ -8,14 +8,18 @@ use Illuminate\Database\Eloquent\Builder;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Compute\Domain\Enums\ClusterStatus;
+use Lynomia\Modules\Compute\Domain\Enums\NodeStatus;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
+use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
 use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Domain\Services\InstallProfileRenderer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\OsInstallProfile;
+use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
 use Lynomia\Modules\Ipam\Domain\Enums\IpPoolScope;
+use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Provisioning\Application\Actions\ProvisionOrderedService;
@@ -54,8 +58,10 @@ use Lynomia\Modules\SharedHosting\Domain\Services\HostingNodeScheduler;
  * refuses, the service is kept PENDING with the reason and no job is made,
  * because no retry can conjure a package or a cluster nobody configured.
  *
- * resolveForSale() asks that and then whether the hosting fleet has a node
- * that would take the package right now. Checkout and the payment-time
+ * resolveForSale() asks that and then, for Shared Hosting, whether the
+ * hosting fleet has a node that would take the package right now, and for a
+ * VPS whether the cluster has a node in service and the pool a host address
+ * (below). Checkout and the payment-time
  * recheck ask this, before any money moves. The build path deliberately does
  * not: a fleet that is full, loaded or in maintenance at the moment a paid
  * order is fulfilled is a condition that passes, and it belongs to the job —
@@ -90,12 +96,24 @@ use Lynomia\Modules\SharedHosting\Domain\Services\HostingNodeScheduler;
  *    — an ACTIVE cluster, an ACTIVE pool in a customer-allocatable scope. A
  *    declared id used to be trusted as given, so a plan naming an offline
  *    cluster and an inactive pool was sold. With nothing declared, exactly one
- *    such cluster and one such IPv4 pool must exist.
- *  - Dedicated: nothing (below).
+ *    such cluster and one such IPv4 pool must exist. And, for a sale only
+ *    (resolveForSale()), the cluster must have a compute node in service — a `compute_nodes` row whose status the
+ *    scheduler accepts placement on (NodeStatus::acceptsPlacement(), only
+ *    ACTIVE) — and the pool an active IPv4 subnet holding a host address (an
+ *    `ip_addresses` row not stamped `unavailable`), because IpAllocator
+ *    reserves only from those rows. Both are rows an operator writes, like a
+ *    hosting node: an active cluster with no node, or only nodes still in the
+ *    maintenance SyncClusterInventory creates them in, and a pool with no
+ *    subnet, used to be sold, paid and built straight into needs_review
+ *    (F-07 (c), the re-audit after round three).
+ *  - Dedicated: the datacenter, pool and install profile (below).
  *
- * Whether a hypervisor node has room, and whether an IP pool has a free
- * address, is not asked here: those are provider-side or allocation-time
- * answers and a different phase's problem.
+ * What is not asked here, for a VPS, is room: whether a node in service has
+ * the memory and disk free, whether it reported healthy a minute ago, and
+ * whether the pool has an address free rather than every host reserved,
+ * assigned or quarantined. Those move between checkout and build, and they
+ * are the job's — it fails as capacity and the engine retries it — for the
+ * reason the build path does not ask the hosting fleet (above).
  *
  * ---------------------------------------------------------------------------
  * Dedicated
@@ -114,9 +132,11 @@ use Lynomia\Modules\SharedHosting\Domain\Services\HostingNodeScheduler;
  * must be one the estate would itself pick), or the estate's only answer —
  * and refuses a profile needing a gateway the pool's subnets may not have
  * (dedicated() says exactly what is checked). Whether a machine of that profile is free is still the
- * handler's question, answered under a row lock: stock moves between checkout
- * and build, and a capacity wait is the right outcome for a machine that is
- * busy, not a refusal at checkout.
+ * handler's question, answered under a row lock, because stock moves between
+ * checkout and build. What happens when none is: the job fails as capacity,
+ * the engine retries it a bounded number of times, and then the service is
+ * handed to a person as needs_review with the money held — not a refusal at
+ * checkout, and not an indefinite wait.
  */
 final readonly class LocalPlacementFeasibility
 {
@@ -134,7 +154,19 @@ final readonly class LocalPlacementFeasibility
     {
         $resolution = $this->resolve($plan);
 
-        if (! $resolution->isFeasible() || ! isset($resolution->values['hosting_package_id'])) {
+        if (! $resolution->isFeasible()) {
+            return $resolution;
+        }
+
+        if (isset($resolution->values['cluster_id'], $resolution->values['ip_pool_id'])) {
+            return $this->vpsInService(
+                $resolution,
+                (string) $resolution->values['cluster_id'],
+                (string) $resolution->values['ip_pool_id'],
+            );
+        }
+
+        if (! isset($resolution->values['hosting_package_id'])) {
             return $resolution;
         }
 
@@ -420,6 +452,70 @@ final readonly class LocalPlacementFeasibility
             'os_family' => $template->os_family->value,
             'architecture' => $template->architecture->value,
         ]);
+    }
+
+    /**
+     * For a sale only: the cluster has a node in service and the pool a host
+     * address. Not asked by the build path, for the reason the hosting fleet
+     * is not: the only node going into maintenance between the payment and
+     * the build is a wait the job's capacity retries cover, and a PENDING
+     * service with no job would not be retried at all.
+     */
+    private function vpsInService(PlacementResolution $resolution, string $clusterId, string $poolId): PlacementResolution
+    {
+        if (! $this->hasANodeInService($clusterId)) {
+            return PlacementResolution::blocked('the compute cluster has no node in service');
+        }
+
+        if (! $this->holdsAHostAddress($poolId)) {
+            return PlacementResolution::blocked('the IP pool has no active IPv4 subnet holding a host address');
+        }
+
+        return $resolution;
+    }
+
+    /**
+     * Whether the cluster has a node the scheduler would consider at all.
+     *
+     * The statuses are asked of the enum NodeScheduler's policy refuses by
+     * (NodeStatus::acceptsPlacement()), not listed here. Health, load and room
+     * are not asked: they are the scheduler's answer at build time, and a
+     * node that is busy now is capacity.
+     */
+    private function hasANodeInService(string $clusterId): bool
+    {
+        $inService = array_values(array_map(
+            static fn (NodeStatus $status): string => $status->value,
+            array_filter(NodeStatus::cases(), static fn (NodeStatus $status): bool => $status->acceptsPlacement()),
+        ));
+
+        return ComputeNode::query()
+            ->where('cluster_id', $clusterId)
+            ->whereIn('status', $inService)
+            ->exists();
+    }
+
+    /**
+     * Whether the pool holds an address IpAllocator could ever hand out: a row
+     * in one of its active IPv4 subnets (the subnets the allocator reserves
+     * from) that is not stamped `unavailable` - the network, broadcast and
+     * gateway, and whatever an operator took out of service. A host that is
+     * reserved, assigned or quarantined counts: the pool is configured, and
+     * waiting for one to come free is capacity.
+     */
+    private function holdsAHostAddress(string $poolId): bool
+    {
+        return IpAddress::query()
+            ->where('status', '!=', IpAddressStatus::Unavailable->value)
+            ->whereIn(
+                'subnet_id',
+                Subnet::query()
+                    ->where('ip_pool_id', $poolId)
+                    ->where('is_active', true)
+                    ->where('ip_version', 4)
+                    ->select('id'),
+            )
+            ->exists();
     }
 
     /**

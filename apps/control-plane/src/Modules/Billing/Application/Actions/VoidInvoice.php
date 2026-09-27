@@ -6,12 +6,11 @@ namespace Lynomia\Modules\Billing\Application\Actions;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Events\InvoiceVoided;
 use Lynomia\Modules\Billing\Domain\Exceptions\PaidInvoiceCannotBeVoidedException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
-use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
-use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 
 /**
  * Withdraws an invoice that should not have been issued.
@@ -23,12 +22,22 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  * refuses paid → void on its own; this action refuses the partially paid case
  * the machine cannot see.
  *
- * One exception: money already handed back to the wallet against it (a
- * top-up carrying its id). An invoice some of whose payment went back that
- * way may be voided once nothing is left on it - what was paid, less what was
- * refunded, less what went back to the wallet. That is a lapsing plan-change
- * upgrade, whose part payment the renewal returns before voiding it. Without
- * a wallet return, any money on the invoice refuses the void as before.
+ * One exception, for an invoice that is still open: money that has already
+ * gone back to the customer against it, by any route - credited to the wallet
+ * against it (a top-up carrying its id), or refunded, a card refund still
+ * pending at the provider included. Such an invoice may be voided once nothing
+ * is left on it: once what it was paid, less everything that went back by
+ * those routes (the parts WhatAnInvoiceStillHolds counts), is nothing. That is a
+ * lapsing plan-change upgrade, or the open invoice of a subscription that has
+ * ended, whose part payment ReturnWhatAnInvoiceStillHolds returns before
+ * voiding it - or whose part payment a refund in flight is already returning,
+ * which the return leaves to that refund (N-1). Should that refund fail at the
+ * provider, what the void invoice then holds again goes to the wallet when the
+ * failure is recorded (IssueRefund, SettleRefundFromProvider: both call
+ * ReturnWhatAnInvoiceStillHolds for a void invoice). With nothing gone back, any
+ * money on the invoice refuses the void as before; and a paid or refunded
+ * invoice is refused for its money whatever went back, before the state
+ * machine refuses the transition.
  *
  * A void invoice keeps its number. Numbers are a series a tax authority may
  * audit, and a gap that turns out to be a withdrawn document is answerable in
@@ -53,18 +62,26 @@ final readonly class VoidInvoice
                 return $locked;
             }
 
-            $returnedToTheWallet = (int) WalletTransaction::query()
-                ->where('invoice_id', $locked->getKey())
-                ->where('kind', WalletTransactionKind::Topup->value)
-                ->sum('amount_minor');
+            $goneBackMinor = WhatAnInvoiceStillHolds::creditedToTheWalletMinor($locked)
+                + WhatAnInvoiceStillHolds::refundedMinor($locked);
 
-            $held = $locked->amount_paid_minor - $locked->amount_refunded_minor - $returnedToTheWallet;
+            /*
+             * Measured on the document, not on the captures: a capture that
+             * is attached and not yet settled does not make the invoice
+             * unvoidable - settlement finds it void and hands it to
+             * CompensateUncollectableCapture, which credits what the invoice
+             * still holds of it.
+             */
+            $heldMinor = $locked->amount_paid_minor - $goneBackMinor;
 
-            // Money on it and none of it handed back through the wallet is the
-            // original rule, unchanged - a refunded invoice included, which
-            // is refused here for its money before the state machine refuses
-            // the transition.
-            if (($locked->amountPaid()->isPositive() && $returnedToTheWallet === 0) || $held > 0) {
+            $tookMoney = $locked->amountPaid()->isPositive();
+
+            // Money on it and none of it gone back is the original rule,
+            // unchanged; a paid or refunded document is refused for its money
+            // first, as it always was.
+            if (($tookMoney && in_array($locked->status, [InvoiceStatus::Paid, InvoiceStatus::Refunded], true))
+                || ($tookMoney && $goneBackMinor === 0)
+                || $heldMinor > 0) {
                 throw PaidInvoiceCannotBeVoidedException::forInvoice(
                     (string) $locked->getKey(),
                     $locked->amountPaid(),

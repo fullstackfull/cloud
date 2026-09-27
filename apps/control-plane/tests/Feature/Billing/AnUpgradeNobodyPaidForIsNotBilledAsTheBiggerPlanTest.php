@@ -7,15 +7,22 @@ namespace Tests\Feature\Billing;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
+use Lynomia\Modules\Billing\Application\Actions\RecordInvoiceRefund;
+use Lynomia\Modules\Billing\Application\Actions\ReturnWhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
+use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
+use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
+use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
+use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceNotPayableException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
@@ -30,20 +37,35 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Models\OrderItem;
+use Lynomia\Modules\Payments\Application\Actions\IngestWebhookEvent;
+use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
+use Lynomia\Modules\Payments\Application\Actions\ReturnToTheWalletWhatAFailedRefundLeft;
+use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
+use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
+use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
+use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
+use Lynomia\Modules\Payments\Domain\Exceptions\RefundExceedsCaptureException;
+use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
+use Lynomia\Modules\Payments\Infrastructure\Providers\FakePaymentProvider;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Subscriptions\Application\Actions\CancelSubscription;
 use Lynomia\Modules\Subscriptions\Application\Actions\RenewDueSubscriptions;
+use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
+use Lynomia\Modules\Wallet\Application\Actions\PayInvoiceFromWallet;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
+use Tests\Support\ProviderThatWithdrawsTheInvoiceMidRefund;
 use Throwable;
 
 /**
@@ -309,7 +331,14 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
 
         $this->changePlan($user, $subscription, $this->large, 'held-up-1')->assertOk();
         $upgrade = $this->openUpgradeInvoice($subscription);
-        $upgrade->forceFill(['amount_paid_minor' => 1_000])->save();
+
+        // 1.000 paid on it - a capture, as every payment is (SettleInvoice's
+        // invariant); the figure a lapse returns is read from the captures.
+        app(SettleInvoice::class)->execute(
+            $upgrade,
+            Transaction::factory()->forCustomer($customer)->create(['amount_minor' => 1_000, 'currency' => 'KWD']),
+        );
+        $this->assertSame(1_000, $upgrade->fresh()?->amount_paid_minor);
 
         // 400 of it was already returned to the wallet against this invoice.
         $ledger = app(WalletLedger::class);
@@ -336,6 +365,203 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
         $this->assertSame([400, 600], $returned, 'The 600 still held, once; never the 1.000 again.');
         $this->assertSame(1_000, $this->walletOf($customer));
         $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+    }
+
+    #[Test]
+    public function a_lapse_after_a_card_refund_not_yet_booked_returns_nothing_twice(): void
+    {
+        /*
+         * N-1. The lapse used to read the document's own paid-less-refunded,
+         * and the card refund is booked onto the invoice only when the queued
+         * RecordRefundAgainstTheInvoice runs. In that window the lapse handed
+         * the 5.000 to the wallet as well: 10.000 back for 5.000 paid, and the
+         * refund's booking then failed into failed_jobs.
+         */
+        Event::fake([RefundIssued::class]);
+
+        [$customer, $upgrade, $capture] = $this->upgradePartPaidByCard(5_000);
+
+        $refund = app(IssueRefund::class)->execute($capture, Money::ofMinor(5_000, 'KWD'), 'customer asked');
+        $this->assertSame(RefundStatus::Succeeded, $refund->status);
+        $this->assertSame(0, $upgrade->fresh()?->amount_refunded_minor, 'Precondition: the refund is not booked yet.');
+
+        $this->renewalLineAfterThePeriod($this->subscriptionOf($upgrade));
+        app(RenewDueSubscriptions::class)->execute();
+
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(0, $this->walletOf($customer), 'The refund returned the 5.000; the lapse returned it again.');
+
+        // The booking the queue would have made now goes through, instead of
+        // failing into failed_jobs over money the wallet already had.
+        app(RecordInvoiceRefund::class)->execute($upgrade->fresh(), Money::ofMinor(5_000, 'KWD'), $refund->fresh());
+        $this->assertSame(5_000, $upgrade->fresh()?->amount_refunded_minor);
+        $this->assertSame(0, $this->walletOf($customer));
+    }
+
+    #[Test]
+    public function a_lapse_leaves_alone_what_a_pending_card_refund_is_already_returning(): void
+    {
+        [$customer, $upgrade, $capture] = $this->upgradePartPaidByCard(5_000);
+
+        // Accepted by the provider and not yet settled there: the row holds
+        // the funds, and nothing is on the invoice.
+        Refund::query()->create([
+            'transaction_id' => $capture->getKey(),
+            'invoice_id' => $upgrade->getKey(),
+            'amount_minor' => 5_000,
+            'currency' => 'KWD',
+            'status' => RefundStatus::Pending,
+            'reason' => 'in flight at the provider',
+        ]);
+
+        $this->renewalLineAfterThePeriod($this->subscriptionOf($upgrade));
+
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(0, $this->walletOf($customer));
+    }
+
+    #[Test]
+    public function a_pending_refund_that_fails_after_the_lapse_returns_what_it_had_left_to_the_wallet_once(): void
+    {
+        /*
+         * B2 (the round-four verifier). The lapse leaves to a pending refund
+         * what that refund is returning. When the refund then failed, its
+         * reservation was released and the void invoice held 5.005 again,
+         * credited nowhere.
+         */
+        [$customer, $upgrade, $capture] = $this->upgradePartPaidByCard(5_005);
+
+        // The controlled provider answers pending for an amount ending in 05.
+        $refund = app(IssueRefund::class)->execute($capture, Money::ofMinor(5_005, 'KWD'), 'customer asked');
+        $this->assertSame(RefundStatus::Pending, $refund->status);
+
+        $this->renewalLineAfterThePeriod($this->subscriptionOf($upgrade));
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(0, $this->walletOf($customer), 'Precondition: the lapse left it to the refund.');
+
+        $failed = (new FakePaymentProvider)->emitWebhook(ProviderEventKind::RefundSucceeded, (string) $refund->provider_reference, Money::ofMinor(5_005, 'KWD'), refundStatus: RefundStatus::Failed);
+        app(IngestWebhookEvent::class)->execute('fake', $failed->rawPayload, $failed->headers);
+
+        $this->assertSame(RefundStatus::Failed, $refund->fresh()?->status);
+        $this->assertSame(5_005, $this->walletOf($customer), 'What the failed refund left on the withdrawn invoice reached the wallet.');
+        $this->assertSame(0, WhatAnInvoiceStillHolds::minor($upgrade->fresh()));
+
+        // Once: a redelivered failure credits nothing more, and the capture
+        // is not refundable to the card as well.
+        app(IngestWebhookEvent::class)->execute('fake', $failed->rawPayload, $failed->headers);
+        $this->assertSame(5_005, $this->walletOf($customer));
+
+        try {
+            app(IssueRefund::class)->execute($capture->fresh(), Money::ofMinor(5_005, 'KWD'), 'again');
+            $this->fail('Money returned to the wallet was refunded to the card as well.');
+        } catch (RefundExceedsCaptureException) {
+        }
+    }
+
+    #[Test]
+    public function a_refund_the_provider_refuses_while_its_invoice_is_withdrawn_returns_what_the_invoice_holds(): void
+    {
+        $this->assertTheInvoiceWithdrawnDuringTheRefundReachesTheWallet(throws: false);
+    }
+
+    #[Test]
+    public function a_refund_the_provider_never_answers_while_its_invoice_is_withdrawn_returns_what_the_invoice_holds(): void
+    {
+        $this->assertTheInvoiceWithdrawnDuringTheRefundReachesTheWallet(throws: true);
+    }
+
+    /**
+     * N05/N06: IssueRefund's own failure paths. The upgrade is withdrawn (the
+     * lapse's ReturnWhatAnInvoiceStillHolds::andWithdraw) while the refund is
+     * out at the provider - its pending row counted as money going back, so
+     * the withdrawal credits nothing - and the provider then refuses it, or
+     * throws. What the void invoice holds again must reach the wallet.
+     */
+    private function assertTheInvoiceWithdrawnDuringTheRefundReachesTheWallet(bool $throws): void
+    {
+        [$customer, $upgrade, $capture] = $this->upgradePartPaidByCard(5_000);
+
+        $provider = new ProviderThatWithdrawsTheInvoiceMidRefund(
+            function () use ($upgrade, $customer): void {
+                $credited = app(ReturnWhatAnInvoiceStillHolds::class)->andWithdraw(
+                    $upgrade->fresh(),
+                    'lapsed-upgrade',
+                    'Payment returned: the upgrade lapsed unpaid',
+                    'The upgrade was not paid for in full before the next period was billed.',
+                );
+                $this->assertSame(0, $credited, 'Precondition: the withdrawal left the money to the refund in flight.');
+                $this->assertSame(0, $this->walletOf($customer));
+            },
+            $throws,
+        );
+        $registry = new PaymentProviderRegistry($this->app);
+        $registry->swap((string) $capture->provider, $provider);
+        $issue = new IssueRefund($registry, app(WalletLedger::class), app(ReturnToTheWalletWhatAFailedRefundLeft::class));
+
+        try {
+            $refund = $issue->execute($capture, Money::ofMinor(5_000, 'KWD'), 'customer asked');
+            $this->assertFalse($throws, 'The provider was to throw.');
+            $this->assertSame(RefundStatus::Failed, $refund->status);
+        } catch (RuntimeException $e) {
+            $this->assertTrue($throws, 'Unexpected: '.$e->getMessage());
+        }
+
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(5_000, $this->walletOf($customer), 'What the failed refund left on the withdrawn invoice reached the wallet.');
+        $this->assertSame(0, WhatAnInvoiceStillHolds::minor($upgrade->fresh()));
+    }
+
+    #[Test]
+    public function a_pending_refund_that_succeeds_after_the_lapse_is_booked_and_credits_nothing(): void
+    {
+        [$customer, $upgrade, $capture] = $this->upgradePartPaidByCard(5_005);
+        $refund = app(IssueRefund::class)->execute($capture, Money::ofMinor(5_005, 'KWD'), 'customer asked');
+
+        $this->renewalLineAfterThePeriod($this->subscriptionOf($upgrade));
+
+        $done = (new FakePaymentProvider)->emitWebhook(ProviderEventKind::RefundSucceeded, (string) $refund->provider_reference, Money::ofMinor(5_005, 'KWD'), refundStatus: RefundStatus::Succeeded);
+        app(IngestWebhookEvent::class)->execute('fake', $done->rawPayload, $done->headers);
+
+        $this->assertSame(5_005, $upgrade->fresh()?->amount_refunded_minor);
+        $this->assertSame(0, $this->walletOf($customer));
+    }
+
+    #[Test]
+    public function a_lapse_after_a_wallet_part_payment_was_refunded_to_the_wallet_returns_nothing_twice(): void
+    {
+        /*
+         * The skeptic's production path: the upgrade part-paid from the
+         * wallet (POST /invoices/{id}/wallet-credit), that wallet charge
+         * refunded - its credit is kind refund, not top-up, so the old lapse
+         * did not see it either - and the renewal inside the window before the
+         * queue books the refund on the invoice.
+         */
+        Event::fake([RefundIssued::class]);
+
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+        $this->changePlan($user, $subscription, $this->large, 'wallet-refund-up-1')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        $ledger = app(WalletLedger::class);
+        $ledger->credit(wallet: $ledger->walletFor($customer, 'KWD'), amount: Money::ofMinor(5_000, 'KWD'), kind: WalletTransactionKind::Topup, description: 'top-up');
+        $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'wallet-refund-pay-1')
+            ->postJson("/api/v1/invoices/{$upgrade->id}/wallet-credit", [])
+            ->assertOk();
+        $this->assertSame(5_000, $upgrade->fresh()?->amount_paid_minor);
+        $this->assertSame(0, $this->walletOf($customer));
+
+        /** @var Transaction $charge */
+        $charge = Transaction::query()->where('invoice_id', $upgrade->getKey())->where('provider', 'wallet')->sole();
+        app(IssueRefund::class)->execute($charge, Money::ofMinor(5_000, 'KWD'), 'customer asked');
+        $this->assertSame(5_000, $this->walletOf($customer));
+
+        $this->renewalLineAfterThePeriod($subscription);
+
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(5_000, $this->walletOf($customer), '5.000 paid, 5.000 back - not 10.000.');
     }
 
     #[Test]
@@ -543,7 +769,183 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
         $this->assertSame(90_000, $this->renewalLineAfterThePeriod($subscription)->unit_amount_minor);
     }
 
+    // ---- an ended subscription's open invoices (O-1) -------------------------
+
+    #[Test]
+    public function an_immediate_cancellation_withdraws_its_open_upgrade_and_renewal(): void
+    {
+        /*
+         * O-1. Cancelling now voided nothing: the upgrade's proration and an
+         * open renewal stayed payable by card and by wallet, and paying the
+         * upgrade queued a resize onto the cancelled subscription's machine.
+         */
+        [$customer, $upgrade, $capture] = $this->upgradePartPaidByCard(5_000);
+        $subscription = $this->subscriptionOf($upgrade);
+
+        $renewal = Invoice::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'subscription_id' => $subscription->getKey(),
+            'currency' => 'KWD',
+            'subtotal_minor' => 90_000,
+            'total_minor' => 90_000,
+        ]);
+
+        app(CancelSubscription::class)->execute($subscription, immediately: true);
+
+        $this->assertSame(SubscriptionStatus::Cancelled, $subscription->fresh()?->status);
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(InvoiceStatus::Void, $renewal->fresh()?->status);
+        $this->assertSame(5_000, $this->walletOf($customer), 'What the upgrade held went back to the wallet.');
+        $this->assertSame(5_000, (int) WalletTransaction::query()->where('invoice_id', $upgrade->getKey())->sum('amount_minor'));
+
+        // O-4: an ended subscription is not moved back to the plan the voided
+        // upgrade left, nor audited as a plan change.
+        $this->assertSame($this->large->id, $subscription->fresh()?->plan_id);
+        $this->assertSame(0, AuditEntry::query()->where('action', AuditAction::PlanChanged->value)->where('context->reason', 'proration_invoice_voided')->count());
+
+        // Neither can be paid any more...
+        foreach ([$upgrade, $renewal] as $invoice) {
+            try {
+                app(PayInvoiceFromWallet::class)->execute($customer, $invoice->fresh(), 'after-cancel-'.$invoice->id);
+                $this->fail('An invoice of a cancelled subscription was paid from the wallet.');
+            } catch (InvoiceNotPayableException) {
+            }
+        }
+
+        // ...and a card payment already in flight for the upgrade lands in
+        // the wallet, once, rather than on the invoice.
+        $late = Transaction::factory()->forCustomer($customer)->amount(Money::ofMinor(1_000, 'KWD'))->create(['invoice_id' => $upgrade->getKey()]);
+        app(SettleInvoiceOnPaymentCaptured::class)->handle(new PaymentCaptured(
+            transactionId: (string) $late->getKey(),
+            customerId: (string) $customer->getKey(),
+            invoiceId: (string) $upgrade->getKey(),
+            provider: (string) $late->provider,
+            providerReference: (string) $late->provider_reference,
+            amount: Money::ofMinor(1_000, 'KWD'),
+            capturedAt: CarbonImmutable::now(),
+        ));
+
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(6_000, $this->walletOf($customer));
+        $this->assertSame(0, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->count());
+
+        // A card refund of the first capture is now refused: its money is in
+        // the wallet.
+        try {
+            app(IssueRefund::class)->execute($capture->fresh(), Money::ofMinor(5_000, 'KWD'), 'customer asked');
+            $this->fail('Money returned to the wallet was refunded to the card as well.');
+        } catch (RefundExceedsCaptureException) {
+        }
+    }
+
+    #[Test]
+    public function a_capture_recorded_but_not_yet_settled_when_the_subscription_ends_is_returned_once(): void
+    {
+        /*
+         * RecordPaymentCapture attaches a capture to its invoice before the
+         * queue settles it. The wind-up returns what the invoice holds -
+         * that capture included - and voids it; the settlement then finds a
+         * void invoice and compensates. Crediting the capture in full there
+         * as well would hand the same 1.000 back twice.
+         */
+        [$customer, $upgrade] = $this->upgradePartPaidByCard(5_000);
+        $subscription = $this->subscriptionOf($upgrade);
+
+        $inFlight = Transaction::factory()->forCustomer($customer)->amount(Money::ofMinor(1_000, 'KWD'))->create(['invoice_id' => $upgrade->getKey()]);
+
+        app(CancelSubscription::class)->execute($subscription, immediately: true);
+
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(6_000, $this->walletOf($customer));
+
+        app(SettleInvoiceOnPaymentCaptured::class)->handle(new PaymentCaptured(
+            transactionId: (string) $inFlight->getKey(),
+            customerId: (string) $customer->getKey(),
+            invoiceId: (string) $upgrade->getKey(),
+            provider: (string) $inFlight->provider,
+            providerReference: (string) $inFlight->provider_reference,
+            amount: Money::ofMinor(1_000, 'KWD'),
+            capturedAt: CarbonImmutable::now(),
+        ));
+
+        $this->assertSame(6_000, $this->walletOf($customer), '6.000 paid, 6.000 back - not 7.000.');
+    }
+
+    #[Test]
+    public function an_upgrade_paid_the_moment_before_the_end_resizes_nothing_after_it(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+        $this->changePlan($user, $subscription, $this->large, 'paid-then-ended-1')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        // Paid, and the settlement's listeners not yet heard.
+        Event::fake([InvoicePaid::class]);
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+        $this->assertSame(InvoiceStatus::Paid, $upgrade->fresh()?->status);
+
+        app(CancelSubscription::class)->execute($subscription, immediately: true);
+
+        app(ResizeOnPlanChangeSettlement::class)->handle(new InvoicePaid(
+            invoiceId: (string) $upgrade->getKey(),
+            customerId: (string) $customer->getKey(),
+            orderId: null,
+            subscriptionId: (string) $subscription->getKey(),
+            paidAt: CarbonImmutable::now(),
+        ));
+
+        $this->assertSame(0, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->count());
+    }
+
+    #[Test]
+    public function a_cancellation_at_the_end_of_the_period_withdraws_nothing_until_the_period_ends(): void
+    {
+        [$customer, $upgrade] = $this->upgradePartPaidByCard(5_000);
+        $subscription = $this->subscriptionOf($upgrade);
+
+        app(CancelSubscription::class)->execute($subscription);
+
+        // Still running, so the upgrade is still for something.
+        $this->assertSame(InvoiceStatus::Open, $upgrade->fresh()?->status);
+        $this->assertSame(0, $this->walletOf($customer));
+
+        app(CancelSubscription::class)->applyScheduled($subscription->fresh(), CarbonImmutable::parse('2026-05-01 00:00:01', 'UTC'));
+
+        $this->assertSame(SubscriptionStatus::Cancelled, $subscription->fresh()?->status);
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(5_000, $this->walletOf($customer));
+    }
+
     // ---- helpers ------------------------------------------------------------
+
+    /**
+     * An upgrade whose invoice took part of its money by card.
+     *
+     * @return array{Customer, Invoice, Transaction}
+     */
+    private function upgradePartPaidByCard(int $minor): array
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+
+        $this->changePlan($user, $subscription, $this->large, 'card-part-up-'.$minor)->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        $capture = Transaction::factory()->forCustomer($customer)->amount(Money::ofMinor($minor, 'KWD'))->create();
+        app(SettleInvoice::class)->execute($upgrade, $capture);
+
+        $this->assertSame($minor, $upgrade->fresh()?->amount_paid_minor);
+        $this->assertSame(InvoiceStatus::Open, $upgrade->fresh()?->status);
+
+        return [$customer, $upgrade, $capture->fresh()];
+    }
+
+    private function subscriptionOf(Invoice $invoice): Subscription
+    {
+        return Subscription::query()->findOrFail($invoice->subscription_id);
+    }
 
     private function walletOf(Customer $customer): int
     {

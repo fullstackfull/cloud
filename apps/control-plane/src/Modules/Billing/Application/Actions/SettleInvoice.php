@@ -85,11 +85,11 @@ final readonly class SettleInvoice
     {
         return DB::transaction(function () use ($invoice, $payment): InvoiceSettlement {
             /*
-             * Lock ordering convention: the payment-side row first, then the
-             * invoice. The payments flow records a capture and then asks for it
-             * to be settled, so it already holds the transaction when it gets
-             * here; taking the two rows in the other order would let the two
-             * paths deadlock against each other under load.
+             * Lock order: the payment-side row first, then the invoice - the
+             * money-path order WhatAnInvoiceStillHolds writes down, which
+             * IssueRefund and RecordInvoiceRefund follow too. Taking the two
+             * rows in the other order anywhere lets two correct paths
+             * deadlock against each other under load.
              */
             /** @var Transaction $capture */
             $capture = Transaction::query()->lockForUpdate()->findOrFail($payment->getKey());

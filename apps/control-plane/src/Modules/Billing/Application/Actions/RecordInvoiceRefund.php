@@ -57,10 +57,10 @@ final readonly class RecordInvoiceRefund
 
         return DB::transaction(function () use ($invoice, $amount, $refund): Invoice {
             /*
-             * The refund row is taken before the invoice, the same ordering
-             * SettleInvoice uses for a capture: the payments flow reaches both
-             * actions holding the payment-side row, and one path locking them
-             * in the opposite order is how two correct actions deadlock.
+             * The refund row is taken before the invoice: the money-path lock
+             * order (WhatAnInvoiceStillHolds), the one SettleInvoice and
+             * IssueRefund follow for a capture. One path locking them in the
+             * opposite order is how two correct actions deadlock.
              */
             if ($refund !== null) {
                 $this->assertRecordsTheWholeRefund($refund, $amount);
