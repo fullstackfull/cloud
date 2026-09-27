@@ -8,8 +8,9 @@ use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 
 /**
  * A block the estate cannot take: a block it already holds shares an address
- * with it in the same realm, or it is too wide to be expanded into the address
- * rows the allocator hands out.
+ * with it in the same realm, it is too wide to be expanded into the address
+ * rows the allocator hands out, or it would hand customers addresses on no
+ * segment a customer machine may be attached to.
  *
  * 422 rather than the 409 InventoryChangeRefused answers with. A 409 says a
  * reload and a retry may well succeed; this one will not, because no route
@@ -69,6 +70,40 @@ final class SubnetRegistrationRefused extends DomainException
             'cidr' => $block,
             'addresses' => $addresses,
             'limit' => $limit,
+        ]);
+    }
+
+    /**
+     * A block a customer may be given an address from, on no segment a
+     * customer machine may be attached to. The build refuses such an address
+     * permanently (`vps.network_not_attachable`), and no route attaches a
+     * network to a block once it is registered.
+     */
+    public static function becauseNoCustomerSegmentIsNamed(string $block, ?string $network): self
+    {
+        $exception = new self(
+            $network === null
+                ? sprintf(
+                    '%s is registered for allocation in a pool customers are given addresses from, and names no network. '
+                    .'A customer machine given an address from it would have no segment to be attached to, and a '
+                    .'registered block\'s network cannot be changed. Name the customer-facing network it is on, or '
+                    .'register it with "allocatable": false as held space.',
+                    $block,
+                )
+                : sprintf(
+                    '%s is registered for allocation in a pool customers are given addresses from, and network "%s" '
+                    .'is not one a customer machine may be attached to (it is inactive, not customer-facing, or '
+                    .'reserved for the platform). Name the customer-facing network the block is on.',
+                    $block,
+                    $network,
+                ),
+        );
+
+        $exception->refusal = 'infrastructure.subnet_has_no_customer_network';
+
+        return $exception->withContext([
+            'cidr' => $block,
+            'network' => $network,
         ]);
     }
 

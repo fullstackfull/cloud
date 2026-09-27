@@ -35,9 +35,23 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
  * and its version can be given a pair that disagree, and then one of the two
  * is wrong on a row the allocator reads.
  *
- * A network is optional and, when given, must be in the same building as the
- * pool. An address plan that joins a pool in one datacenter to a segment in
- * another describes somewhere that does not exist.
+ * A network, when given, must be in the same building as the pool. An address
+ * plan that joins a pool in one datacenter to a segment in another describes
+ * somewhere that does not exist.
+ *
+ * And a block a customer may be given an address from — expanded for
+ * allocation, in a pool whose scope serves customers — must name a network a
+ * customer machine may be attached to (Network::acceptsCustomerAttachments()).
+ * The VPS build refuses an address on no such segment permanently
+ * (`vps.network_not_attachable`), and no route attaches a network to a block
+ * once it is registered, so a block registered without one was addresses the
+ * allocator handed out and every build then refused — while the preflight
+ * counted them. Held space, IPv6 and a management pool's blocks are not
+ * addresses a customer machine is plugged in at, and name a network or not
+ * as the operator likes. The bridge is not required here: a dedicated server
+ * is not attached by one, and a network's bridge can be recorded afterwards;
+ * `mapping.network` counts only addresses on a segment that has one
+ * (IpAllocator::customerAttachableCount()).
  *
  * ---------------------------------------------------------------------------
  * No two blocks in one realm share an address
@@ -180,8 +194,9 @@ final readonly class RegisterSubnet
      * @param  bool  $allocatable  False registers the block as held space: no address rows are written.
      *
      * @throws InvalidIpAddressException
-     * @throws SubnetRegistrationRefused when the block shares an address with one in its realm, or is too
-     *                                   wide to expand
+     * @throws SubnetRegistrationRefused when the block shares an address with one in its realm, is too
+     *                                   wide to expand, or would give customers addresses on no segment a
+     *                                   customer machine may be attached to
      */
     public function execute(
         IpPool $pool,
@@ -218,6 +233,12 @@ final readonly class RegisterSubnet
                 $cidr,
                 'the network is in a different datacenter from the pool',
             );
+        }
+
+        if ($expands
+            && $pool->scope->isCustomerAllocatable()
+            && ($network === null || ! $network->acceptsCustomerAttachments())) {
+            throw SubnetRegistrationRefused::becauseNoCustomerSegmentIsNamed((string) $block, $network?->slug);
         }
 
         // Filled by the act, read by the audit entry: what the registration

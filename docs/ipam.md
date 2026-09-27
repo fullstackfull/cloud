@@ -91,7 +91,7 @@ audit entry.
 Until this was done (F-02) the route wrote the subnet and no rows, and a block an operator
 registered was one `IpAllocator::reserve()` refused as exhausted.
 
-Three cases are handled differently, and each says so:
+Four cases are handled differently, and each says so:
 
 - **IPv6** is registered without rows (`allocatable_addresses: 0`): it is delegated as a
   prefix per service, never expanded.
@@ -102,8 +102,21 @@ Three cases are handled differently, and each says so:
   from instead. Held space is overlap-checked like any block, so an aggregate registered as
   held space cannot then have pieces registered inside it.
 
+- **A block a customer may be given an address from** — registered for allocation in a pool
+  whose scope serves customers — must name a network a customer machine may be attached to
+  (active, customer-facing, not a platform segment), or it is refused with
+  `422 infrastructure.subnet_has_no_customer_network`. No route attaches a network to a block
+  once it is registered, and a VPS build refuses, permanently, an address on no such segment
+  (`vps.network_not_attachable`). Held space, IPv6 and a management pool's blocks need none.
+
 `infra:preflight`'s `mapping.network` passes only when the active pools hold at least one
-address the allocator could give a customer machine (`IpAllocator::customerAllocatableCount`).
+address the allocator could give a customer machine and a build could attach it at
+(`IpAllocator::customerAttachableCount`: in a subnet whose network is active, customer-facing
+and has a bridge — `Network::canCarryACustomerMachine()`, the rule the build refuses by). A
+pass names how many allocatable addresses it left out for being on no such network. A VPS
+build reserves from exactly the counted subnets (`IpAllocator::reserve(..., attachableOnly: true)`),
+so it is never handed one of the left-out addresses; when only those remain it waits on
+`ipam.pool_exhausted`, whose sentence says it counted only addresses on such a network.
 
 ## Blocks in one realm never overlap
 

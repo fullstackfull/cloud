@@ -88,6 +88,21 @@ class Network extends Model
     }
 
     /**
+     * Whether a customer machine can be plugged in here: a segment a customer
+     * may be attached to, with the bridge the hypervisor attaches it by.
+     *
+     * The one rule CreateVpsHandler builds by and the preflight's
+     * `mapping.network` counts by, so the two cannot disagree about an
+     * address. Without a bridge the platform cannot say where the machine
+     * would be plugged in, and a guess is what put customer machines untagged
+     * beside the hypervisors' management interfaces.
+     */
+    public function canCarryACustomerMachine(): bool
+    {
+        return $this->acceptsCustomerAttachments() && ($this->bridge ?? '') !== '';
+    }
+
+    /**
      * @param  Builder<static>  $query
      * @return Builder<static>
      */

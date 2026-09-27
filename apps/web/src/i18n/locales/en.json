@@ -1768,7 +1768,10 @@
       "managementWarning": "A management pool reaches the hypervisor and BMC control planes. It is never handed to a customer service, and this cannot be changed afterwards.",
       "cidr": "Block",
       "cidrHint": "In CIDR notation, as in 203.0.113.0/24.",
-      "gateway": "Gateway"
+      "gateway": "Gateway",
+      "subnetNetwork": "Network segment",
+      "subnetNetworkHint": "The segment a machine given an address from this block is plugged into. It cannot be changed once the block is registered.",
+      "subnetNeedsNetwork": "A block customers are given addresses from has to name a customer-facing segment. Register one first; a VPS also needs its bridge recorded."
     },
     "operators": {
       "title": "Operators",

@@ -271,6 +271,29 @@ final readonly class MappingChain
      * counts the rows there that are `available`.
      *
      * ===========================================================================
+     * AND ON A SEGMENT A MACHINE CAN BE PLUGGED INTO
+     * ===========================================================================
+     *
+     * A pass also used to count an address in a subnet naming no network, or
+     * one no customer machine may be attached to, or one with no bridge: "5
+     * address(es) a customer machine can be given" on an estate whose every
+     * VPS build failed `vps.network_not_attachable`, permanently, because
+     * CreateVpsHandler will not guess where to plug a machine in. So the pass
+     * counts {@see IpAllocator::customerAttachableCount()} — the same rows,
+     * restricted to subnets whose network passes
+     * Network::canCarryACustomerMachine(), the rule the build itself refuses
+     * by — and names how many it left out. And the allocator takes a VPS
+     * build's address from exactly those subnets (reserve() with
+     * `attachableOnly`, filtered by the same helper as the count), so what
+     * this counts is what a build can be given. The operator's subnet route
+     * refuses a customer block with no customer network (RegisterSubnet), but
+     * it does not require the bridge (a dedicated server is not attached by
+     * one); a network's bridge can be cleared afterwards through the network
+     * route (its `is_active` cannot be switched off while an active subnet
+     * uses it — the route refuses that); and rows written before the subnet
+     * route refused are still there. This count is what reads all three.
+     *
+     * ===========================================================================
      * WHAT A PASS HERE STILL DOES NOT SAY
      * ===========================================================================
      *
@@ -287,6 +310,15 @@ final readonly class MappingChain
      *
      *   (c) Handed a subnet rather than a pool, the allocator reads that
      *       subnet alone. Nothing in the build path does that today.
+     *
+     *   (d) Not a term any more: a VPS build's reservation reads the network
+     *       and takes addresses only from the subnets counted here. It used
+     *       not to, and — the subnet list being ordered by the block's text —
+     *       one bridgeless block in a pool was picked by every build and
+     *       failed it, while this passed on the pool's other blocks. What is
+     *       left is the race every term here shares: a network changed
+     *       between the reservation and the build's own read of it, which
+     *       the build refuses (`vps.network_not_attachable`).
      *
      * And one term that is not about the estate: the allocator's read is
      * `FOR UPDATE SKIP LOCKED`, so a row another transaction holds and has
@@ -333,14 +365,35 @@ final readonly class MappingChain
             );
         }
 
+        $attachable = (int) $active->sum(fn (IpPool $pool): int => $this->addresses->customerAttachableCount($pool));
+
+        if ($attachable < 1) {
+            return PreflightFinding::fail(
+                'mapping.network',
+                CheckCategory::Mapping,
+                $target,
+                sprintf(
+                    '%d address(es) a customer machine can be given, across %d active address pool(s), and none of them is on a network a customer machine can be attached to (active, customer-facing, with a bridge), so every build would be refused.',
+                    $allocatable,
+                    $active->count(),
+                ),
+                'Record a bridge on the customer-facing network the block is on, or register a block for allocation on a customer-facing network that has one; a registered block\'s network cannot be changed.',
+            );
+        }
+
+        $unattachable = $allocatable - $attachable;
+
         return PreflightFinding::pass(
             'mapping.network',
             CheckCategory::Mapping,
             $target,
             sprintf(
-                '%d address(es) a customer machine can be given, across %d active address pool(s).',
-                $allocatable,
+                '%d address(es) a customer machine can be given and attached, across %d active address pool(s).%s',
+                $attachable,
                 $active->count(),
+                $unattachable > 0
+                    ? sprintf(' %d more are in subnets on no network a customer machine can be attached to, and are not counted.', $unattachable)
+                    : '',
             ),
             EvidenceClass::Configuration,
         );

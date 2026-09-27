@@ -58,6 +58,12 @@ final readonly class IpAllocator
      * @param  Subnet|IpPool  $scope  A specific subnet, or a pool to pick any of its subnets from.
      * @param  string  $provisioningJobId  The job the addresses are held for; the reaper reads this to
      *                                     find out whether the claim is still worth honouring.
+     * @param  bool  $attachableOnly  Take addresses only from subnets whose network a customer machine
+     *                                can be plugged into (Network::canCarryACustomerMachine()). A VPS
+     *                                build asks for this: an address anywhere else is one it refuses
+     *                                permanently, and without the filter the first block in text order
+     *                                is chosen every time, so one bridgeless block in a pool failed every
+     *                                build while the preflight counted the pool's good addresses.
      * @return list<IpReservation>
      *
      * @throws IpPoolExhaustedException
@@ -69,6 +75,7 @@ final readonly class IpAllocator
         ?Customer $customer = null,
         int $count = 1,
         ?int $ttlSeconds = null,
+        bool $attachableOnly = false,
     ): array {
         if ($count < 1) {
             throw new \InvalidArgumentException('At least one address must be requested.');
@@ -78,8 +85,10 @@ final readonly class IpAllocator
 
         $ttl = $ttlSeconds ?? (int) config('provisioning.reservation_ttl_seconds', self::FALLBACK_TTL_SECONDS);
 
-        return DB::transaction(function () use ($scope, $provisioningJobId, $customer, $count, $ttl): array {
-            $subnetIds = $this->subnetIdsFor($scope);
+        return DB::transaction(function () use ($scope, $provisioningJobId, $customer, $count, $ttl, $attachableOnly): array {
+            $subnetIds = $attachableOnly
+                ? $this->attachable($this->subnetIdsFor($scope))
+                : $this->subnetIdsFor($scope);
 
             /*
              * What this job already holds here, before anything new is taken.
@@ -117,7 +126,7 @@ final readonly class IpAllocator
                  * a machine with no route to the internet, bills for it, and
                  * discovers the problem from the customer.
                  */
-                throw $this->exhausted($scope, $count, count($existing) + count($addressIds));
+                throw $this->exhausted($scope, $count, count($existing) + count($addressIds), $attachableOnly);
             }
 
             // One statement for the whole batch: the rows are already locked,
@@ -171,6 +180,34 @@ final readonly class IpAllocator
         }
 
         $subnetIds = $this->subnetIdsFor($pool);
+
+        if ($subnetIds === []) {
+            return 0;
+        }
+
+        return DB::table('ip_addresses')
+            ->whereIn('subnet_id', $subnetIds)
+            ->where('status', IpAddressStatus::Available->value)
+            ->count();
+    }
+
+    /**
+     * How many of customerAllocatableCount()'s addresses are in a subnet whose
+     * network a customer machine can be plugged into
+     * (Network::canCarryACustomerMachine()).
+     *
+     * Exactly the addresses reserve() takes from when a VPS build asks with
+     * `attachableOnly` — the same subnet list, filtered by the same helper —
+     * so the preflight and the allocator cannot disagree about which
+     * addresses a build can use. Same rows, same absence of a lock.
+     */
+    public function customerAttachableCount(IpPool $pool): int
+    {
+        if (! $pool->scope->isCustomerAllocatable()) {
+            return 0;
+        }
+
+        $subnetIds = $this->attachable($this->subnetIdsFor($pool));
 
         if ($subnetIds === []) {
             return 0;
@@ -911,8 +948,43 @@ final readonly class IpAllocator
         return $ids;
     }
 
-    private function exhausted(Subnet|IpPool $scope, int $requested, int $found): IpPoolExhaustedException
+    /**
+     * The subnets, of those given, whose network a customer machine can be
+     * plugged into — in the order given, which is the order reserve() takes
+     * addresses in.
+     *
+     * @param  list<string>  $subnetIds
+     * @return list<string>
+     */
+    private function attachable(array $subnetIds): array
     {
+        if ($subnetIds === []) {
+            return [];
+        }
+
+        $carrying = Subnet::query()
+            ->whereIn('id', $subnetIds)
+            ->with('network')
+            ->get()
+            ->filter(static fn (Subnet $subnet): bool => $subnet->network?->canCarryACustomerMachine() === true)
+            ->map(static fn (Subnet $subnet): string => trim((string) $subnet->getKey()))
+            ->all();
+
+        return array_values(array_filter($subnetIds, static fn (string $id): bool => in_array($id, $carrying, true)));
+    }
+
+    private function exhausted(Subnet|IpPool $scope, int $requested, int $found, bool $attachableOnly = false): IpPoolExhaustedException
+    {
+        if ($attachableOnly) {
+            return IpPoolExhaustedException::onSegmentsAMachineCanBeAttachedTo(
+                $scope instanceof Subnet ? $scope->cidr : $scope->slug,
+                (string) $scope->getKey(),
+                $scope instanceof Subnet ? 'subnet' : 'pool',
+                $requested,
+                $found,
+            );
+        }
+
         return $scope instanceof Subnet
             ? IpPoolExhaustedException::forSubnet((string) $scope->getKey(), $scope->cidr, $requested, $found)
             : IpPoolExhaustedException::forPool((string) $scope->getKey(), $scope->slug, $requested, $found);

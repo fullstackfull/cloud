@@ -56,6 +56,35 @@ final class IpPoolExhaustedException extends DomainException
         ]);
     }
 
+    /**
+     * Exhausted as a VPS build asks: counting only addresses in subnets whose
+     * network a customer machine can be plugged into. The sentence says so,
+     * because "0 left" in a pool full of available addresses on a bridgeless
+     * or management segment sends an operator to buy address space when what
+     * is missing is a bridge.
+     */
+    public static function onSegmentsAMachineCanBeAttachedTo(string $name, string $id, string $scopeType, int $requested, int $available): self
+    {
+        $exception = new self(sprintf(
+            '%s "%s" has %d allocatable address(es) left on a network a customer machine can be attached to '
+            .'(active, customer-facing, with a bridge); %d were requested. Addresses on any other network are not '
+            .'counted.',
+            $scopeType === 'subnet' ? 'Subnet' : 'IP pool',
+            $name,
+            $available,
+            $requested,
+        ));
+
+        return $exception->withContext([
+            'scope_type' => $scopeType,
+            $scopeType === 'subnet' ? 'subnet_id' : 'pool_id' => $id,
+            $scopeType === 'subnet' ? 'cidr' : 'slug' => $name,
+            'requested' => $requested,
+            'available' => $available,
+            'only_attachable_networks' => true,
+        ]);
+    }
+
     public function errorCode(): string
     {
         return 'ipam.pool_exhausted';

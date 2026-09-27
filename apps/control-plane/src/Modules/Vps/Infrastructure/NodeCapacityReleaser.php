@@ -102,10 +102,13 @@ final readonly class NodeCapacityReleaser implements ResourceReservationReleaser
          * history, and releasing the wrong one gives back capacity a live
          * machine is using.
          */
-        $reservation = NodeCapacityReservation::query()
+        return NodeCapacityReservation::query()
             ->where('reservation_key', $key)
+            // Live only: a key keeps its released reservations as history,
+            // and a build retried by an operator after one was released holds
+            // a live one beside it (see the migration that made the key
+            // unique among live rows only).
+            ->whereNull('released_at')
             ->first();
-
-        return $reservation !== null && $reservation->isLive() ? $reservation : null;
     }
 }
