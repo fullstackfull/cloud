@@ -21,8 +21,10 @@ use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Vps\VpsApiTestCase;
 
 /**
- * A backup row is never moved on the strength of a copy read before somebody
- * else moved it.
+ * A backup row is not moved on the strength of a copy read before somebody
+ * else moved it — neither to another state nor, for the states a row can
+ * enter more than once, to a later attempt at the same one; the second is
+ * {@see ASweepSettlesOnlyTheAttemptItPolledTest}.
  *
  * Every sweep here loads a batch and then makes one provider call per row;
  * every request reads a row, checks it, asks a question of something else and

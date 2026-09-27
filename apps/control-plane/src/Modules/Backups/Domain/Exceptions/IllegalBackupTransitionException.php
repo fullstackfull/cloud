@@ -56,6 +56,34 @@ final class IllegalBackupTransitionException extends DomainException
         ]);
     }
 
+    /**
+     * The row is in the state this copy read, but no longer in the attempt.
+     *
+     * One archive can be restored, verified or marked for deletion more than
+     * once, and the state reads the same for every attempt. A sweep that read
+     * the first restore and polled its finished task is not entitled to settle
+     * the second, which it never asked about (F-09). Nothing was written.
+     *
+     * @param  list<string>  $attemptColumns
+     */
+    public static function attemptChanged(string $backupId, BackupState $expected, array $attemptColumns, BackupState $to): self
+    {
+        $exception = new self(sprintf(
+            'A backup read as %s is on a later %s attempt than the one read; it was not moved to %s.',
+            $expected->value,
+            $expected->value,
+            $to->value,
+        ));
+        $exception->raced = true;
+
+        return $exception->withContext([
+            'backup_id' => $backupId,
+            'from' => $expected->value,
+            'attempt' => $attemptColumns,
+            'to' => $to->value,
+        ]);
+    }
+
     public function wasRaced(): bool
     {
         return $this->raced;

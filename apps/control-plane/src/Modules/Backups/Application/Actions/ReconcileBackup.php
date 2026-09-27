@@ -117,10 +117,14 @@ final readonly class ReconcileBackup
     /**
      * Settle one row, or leave it to whoever moved it first.
      *
-     * Every transition here is a compare-and-set ({@see Backup::transitionTo()}).
-     * A row an operator settled, or that another worker already settled,
-     * while this one was asking the provider is not written over: the race is
-     * a refusal, and the row as it now stands is returned.
+     * Every transition here is a compare-and-set ({@see Backup::transitionTo()})
+     * on the state and on the attempt this copy read. A row an operator
+     * settled, or that another worker already settled — including one that
+     * was settled and then started again, which reads `restoring` exactly as
+     * before — while this one was asking the provider is not written over:
+     * the race is a refusal, and the row as it now stands is returned. A
+     * sweep that loaded the row during an earlier restore has polled that
+     * restore's task, and that is no answer about a later one (F-09).
      */
     public function execute(Backup $backup): Backup
     {
@@ -239,8 +243,11 @@ final readonly class ReconcileBackup
      * Null only for a restore whose provider call has not returned one — yet,
      * or ever — which is handled by the caller rather than here: there is no
      * identifier to ask about and guessing at another one is how this went
-     * wrong in the first place. `restore_task_id` is only ever this attempt's:
-     * the move to `Restoring` clears the previous restore's handle.
+     * wrong in the first place. In the table `restore_task_id` is only ever
+     * the current attempt's: the move to `Restoring` clears the previous
+     * restore's handle. A copy loaded earlier may still hold an earlier
+     * attempt's handle; what it learns from that task can only be written if
+     * the row is still on that attempt ({@see Backup::transitionTo()}).
      */
     private function taskFor(Backup $backup): ?string
     {
@@ -289,10 +296,13 @@ final readonly class ReconcileBackup
      * failed one, an indeterminate one, or on a verification of the source
      * archive.
      *
-     * It does not need protecting against being rewritten by a later sweep:
+     * A later sweep that reads the row as `Restored` does not rewrite it:
      * `Restored` is not in flight, so `isAwaitingProvider()` is false and this
-     * action returns before it asks anything. The timestamp means "when this
-     * restore finished", once.
+     * action returns before it asks anything. A sweep that read it as
+     * `restoring` before it settled — and finds it `restoring` again, on a
+     * later restore — does not write it either: the compare-and-set compares
+     * the attempt it polled, not only the state. The timestamp means "when
+     * this restore finished", once per attempt.
      *
      * @return array<string, mixed>
      */
