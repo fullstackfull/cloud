@@ -12,6 +12,7 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobFailed;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobNeedsReview;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobSucceeded;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 
 /**
@@ -107,9 +108,14 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
              * The case the phase brief singles out: the customer has been
              * charged and their machine is still the old size. Telling them is
              * not optional — the alternative is a customer who paid for an
-             * upgrade discovering months later that they never got it.
+             * upgrade discovering months later that they never got it. And
+             * telling them what happened to the money: held for an operator
+             * after a paid upgrade, nothing charged after a change that owed
+             * nothing (wasPaidFor()).
              */
-            $this->isAPlanChange($event->kind) => NotificationType::PlanChangeFailed,
+            $this->isAPlanChange($event->kind) => $this->wasPaidFor($event->provisioningJobId)
+                ? NotificationType::PlanChangeFailedAfterPayment
+                : NotificationType::PlanChangeFailed,
             default => NotificationType::ServiceProvisioningFailed,
         };
 
@@ -144,8 +150,10 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
          * know that, and telling somebody their server was not built when it
          * may exist is worse than saying nothing precise.
          *
-         * The provider half of a paid plan change says so: the change is
-         * waiting for the team and what was paid for it is held. A resize the
+         * The provider half of a plan change says so: the change is waiting
+         * for the team, and a payment for it, if there was one, is held. One
+         * message for a change paid for and one that owed nothing, so the
+         * payment is spoken of conditionally, which is true of both. A resize the
          * node can no longer hold ends here after its retries, with the money
          * held for an operator to grow the machine or return it
          * (ResizeVpsHandler), and the build's message - setting the service up
@@ -200,6 +208,21 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
     {
         return $kind === ProvisioningJobKind::Resize
             || $kind === ProvisioningJobKind::ChangeHostingPackage;
+    }
+
+    /**
+     * Whether the plan change this job delivers was paid for: an upgrade is
+     * queued only once its proration invoice is paid, under a key naming that
+     * invoice (`plan-change:<subscription>:<plan>:invoice:<id>`,
+     * QueuePlanChangeAtProvider); a change that owed nothing is queued when
+     * it is made, under `...:change:<id>`. Read off the job, because the
+     * failure event does not carry it.
+     */
+    private function wasPaidFor(string $provisioningJobId): bool
+    {
+        $key = ProvisioningJob::query()->whereKey($provisioningJobId)->value('idempotency_key');
+
+        return is_string($key) && preg_match('/\Aplan-change:[^:]+:[^:]+:invoice:[0-9A-Za-z]{26}\z/', $key) === 1;
     }
 
     private function isAReinstall(ProvisioningJobKind $kind): bool

@@ -95,7 +95,13 @@ What the settlement cannot see is a room that goes after it: a resize the node c
 longer hold is retried and then stops in review, never failed, with the money held for an
 operator to grow the machine or return it. The customer is told the plan change is
 waiting for the team and that what they paid for it is held
-(`service.plan_change_needs_review`).
+(`service.plan_change_needs_review`, which speaks of the payment conditionally: the same
+message goes to a change that owed nothing). A paid change whose resize or package change
+fails outright is not returned automatically either: the payment is held for an operator
+to complete the change or return it, and the customer is told exactly that
+(`service.plan_change_failed_after_payment`). A change that owed nothing and fails is told
+that nothing was charged (`service.plan_change_failed`). Which of the two a failure is, is
+read off the job's key: an upgrade is queued under the invoice that paid for it.
 
 ## Invoice numbering
 

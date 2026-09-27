@@ -118,7 +118,17 @@ enum NotificationType: string
      */
     case DataRetentionEnding = 'service.data_retention_ending';
     case PlanChangeCompleted = 'service.plan_change_completed';
+    /*
+     * Two failures, because they differ in the money. A change that owed
+     * nothing (a downgrade, a move between equal prices) is queued when it is
+     * made, and nothing was charged for it: PlanChangeFailed says so. An
+     * upgrade is queued only once its proration invoice is paid, so its
+     * failure has been charged, and the payment is held for an operator to
+     * complete the change or return it: PlanChangeFailedAfterPayment. The one
+     * message used to tell both that nothing had been charged.
+     */
     case PlanChangeFailed = 'service.plan_change_failed';
+    case PlanChangeFailedAfterPayment = 'service.plan_change_failed_after_payment';
     /*
      * A paid plan change whose provider half stopped in review - a resize
      * the node could no longer hold, retried to the end, or a package change
@@ -268,7 +278,7 @@ enum NotificationType: string
              * away from the portal, for the same reason the other two are.
              */
             self::RestoreCompleted, self::RestoreFailed, self::RestoreNeedsReview,
-            self::PlanChangeCompleted, self::PlanChangeFailed, self::PlanChangeNeedsReview,
+            self::PlanChangeCompleted, self::PlanChangeFailed, self::PlanChangeFailedAfterPayment, self::PlanChangeNeedsReview,
         ];
 
         return in_array($this, $emailed, strict: true)
@@ -291,6 +301,7 @@ enum NotificationType: string
             self::ServiceNeedsReview,
             self::ServiceReactivationFailed,
             self::PlanChangeFailed,
+            self::PlanChangeFailedAfterPayment,
             self::PlanChangeNeedsReview,
             self::ReinstallFailed,
             self::BackupFailed,
