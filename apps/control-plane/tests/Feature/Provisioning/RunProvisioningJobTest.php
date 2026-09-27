@@ -291,9 +291,10 @@ final class RunProvisioningJobTest extends ProvisioningTestCase
 
         $this->runWorker($job->id);
 
-        // The reservations are what the next attempt will use. Handing them
-        // back mid-retry gives the customer's address to somebody else while
-        // their build is still going.
+        // The reservations are carried to the next attempt (its capacity
+        // moved with it if it is placed elsewhere, ReserveNodeCapacity).
+        // Handing them back mid-retry gives the customer's address to
+        // somebody else while their build is still going.
         $this->assertSame([], $this->releaser->actions());
     }
 

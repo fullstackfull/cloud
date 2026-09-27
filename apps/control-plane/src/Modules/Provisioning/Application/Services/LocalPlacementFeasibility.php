@@ -521,8 +521,8 @@ final readonly class LocalPlacementFeasibility
                     ->where('ip_pool_id', $poolId)
                     ->where('is_active', true)
                     ->where('ip_version', 4)
-                    ->whereNotNull('gateway')
-                    ->where('gateway', '!=', '')
+                    // A character other than what PHP's trim() strips.
+                    ->whereRaw("coalesce(gateway, '') ~ '[^ \\t\\n\\r\\v]'")
                     ->select('id'),
             )
             ->exists();

@@ -72,9 +72,11 @@ use Throwable;
  *     something wrong with it that a fourth will not fix.
  *
  *  6. Compensate, and only once the job has stopped. Between attempts the
- *     reservations are exactly what the next attempt will use — releasing an
- *     address mid-retry hands the customer's address to somebody else while
- *     their build is still in progress.
+ *     reservations are carried to the next attempt: it reuses the addresses,
+ *     and the capacity too — moved, in one transaction, to the node and pool
+ *     the next attempt is placed on when that differs (ReserveNodeCapacity).
+ *     Releasing an address mid-retry hands the customer's address to
+ *     somebody else while their build is still in progress.
  *
  * If this class itself dies — the database goes away, the worker is killed —
  * the job stays running and no other worker may claim it. That is deliberate,
@@ -364,13 +366,14 @@ final class RunProvisioningJob implements ShouldQueue
 
         /*
          * Nothing is compensated here. The addresses and capacity this attempt
-         * reserved are what the next attempt will use; handing them back
-         * between two attempts of the same build would give the customer's
-         * address to somebody else halfway through. The next attempt is
-         * placed afresh, and when it lands on another node the capacity is
-         * moved there — given back on the old node and taken on the new one
-         * in one transaction (ReserveNodeCapacity) — so it is still this
-         * build's one commitment, on the node it is built on.
+         * reserved are carried to the next attempt: it reuses the addresses,
+         * and handing them back between two attempts of the same build would
+         * give the customer's address to somebody else halfway through. The
+         * next attempt is placed afresh, and when it lands on another node or
+         * pool the capacity is moved there — given back where it was and
+         * taken where it is built, in one transaction (ReserveNodeCapacity) —
+         * so it is still this build's one commitment, on the node it is built
+         * on.
          */
         self::dispatch($job->getKey())->delay(now()->addSeconds($delay));
     }

@@ -159,6 +159,33 @@ final class AVpsIsNeverGivenAnAddressWithNoRouteOutTest extends TestCase
         $this->assertStringContainsString('gateway', (string) $resolution->blockedReason);
     }
 
+    #[Test]
+    public function a_blank_gateway_is_no_gateway_to_the_sale_the_preflight_and_the_build(): void
+    {
+        // Not writable through the model (its setter parses an address), but
+        // a row written some other way is read the same by all three.
+        $block = $this->aBlockWithNoGateway();
+        DB::table('subnets')->where('id', $block->getKey())->update(['gateway' => " \t "]);
+        $this->onlyTheBlockWithNoGatewayHasAddresses();
+        VmTemplate::factory()->create(['cluster_id' => $this->cluster->getKey(), 'is_active' => true]);
+
+        $plan = Plan::factory()->create([
+            'product_id' => Product::factory()->create(['is_active' => true])->getKey(),
+            'is_active' => true,
+            'is_public' => true,
+            'placement_constraints' => [
+                'cluster_id' => (string) $this->cluster->getKey(),
+                'ip_pool_id' => (string) $this->pool->getKey(),
+            ],
+        ]);
+
+        $this->assertFalse(app(LocalPlacementFeasibility::class)->resolveForSale($plan)->isFeasible());
+
+        $result = app(CreateVpsHandler::class)->execute($this->createJob());
+        $this->assertSame('ipam.pool_exhausted', $result->errorCode);
+        $this->assertSame([], $this->sent);
+    }
+
     /**
      * A customer block on the fixture's customer network, in the fixture's
      * pool, registered with no gateway: what the operator's subnet route
@@ -178,7 +205,7 @@ final class AVpsIsNeverGivenAnAddressWithNoRouteOutTest extends TestCase
     private function onlyTheBlockWithNoGatewayHasAddresses(): void
     {
         IpAddress::query()
-            ->whereIn('subnet_id', Subnet::query()->whereNotNull('gateway')->select('id'))
+            ->whereIn('subnet_id', Subnet::query()->where('cidr', '!=', '198.51.100.0/29')->select('id'))
             ->update(['status' => IpAddressStatus::Unavailable->value]);
     }
 }
