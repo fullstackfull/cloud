@@ -206,4 +206,4 @@ there.
 | B | a delegate's invitation revealing a login exists; soft-deleted address; `roles: []` | repairing after a rejection | — |
 | C | cPanel unreadable listings; one node's failure stopping the sweep; runbook; overlapping sweeps in two processes | verifying | `d1dbdbb` |
 | D | destroy overlapping a resize; a retried resize growing the disk twice; adopted VPS without a machine row; adoption's provider call inside a transaction; clock gate limits | fixing | — |
-| E | owed oracles: staff roles pinned, by-value reads, pairing check, `Rule::in`, notification literals, schema collisions | upheld with reservations; closing them | `692a929` |
+| E | owed oracles: staff roles pinned, by-value reads, pairing check, `Rule::in`, notification literals, schema collisions | upheld after one closing pass (its six reservations fixed); merged `7dde69e` | `7069dc1` |
