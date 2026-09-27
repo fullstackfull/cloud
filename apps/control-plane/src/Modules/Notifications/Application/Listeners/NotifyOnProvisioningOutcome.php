@@ -91,7 +91,14 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
             type: $type,
             idempotencyKey: 'provisioning-succeeded:'.$event->provisioningJobId,
             subject: $service,
-            data: ['service' => $this->label($service), 'image' => '', 'plan' => $this->planName($event->provisioningJobId, $service)],
+            /*
+             * No image: `reinstall_completed` used to name one as `:image`,
+             * and nothing here knows it - the job carries the provider's
+             * template reference, not a name a customer chose - so it was
+             * sent empty and read "reinstalled with  and is running". The
+             * sentence no longer names it.
+             */
+            data: ['service' => $this->label($service), 'plan' => $this->planName($event->provisioningJobId, $service)],
             link: '/services',
         );
     }

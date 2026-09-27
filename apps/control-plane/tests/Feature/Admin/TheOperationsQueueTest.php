@@ -15,6 +15,7 @@ use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedReinstall;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Notifications\Application\Actions\RenderNotification;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
@@ -237,10 +238,41 @@ final class TheOperationsQueueTest extends TestCase
         $this->assertTrue($entry->action->isAnAssertionAboutTheWorld());
 
         // And the customer, who has been waiting since it stopped, is told.
-        $this->assertSame(
-            NotificationType::ReinstallCompleted,
-            Notification::query()->where('customer_id', $operation->customer_id)->sole()->type,
-        );
+        $notification = Notification::query()->where('customer_id', $operation->customer_id)->sole();
+        $this->assertSame(NotificationType::ReinstallCompleted, $notification->type);
+
+        // In their own language, with no gap where an image name was: this
+        // rebuild names no service, so the server is called "your server" in
+        // English and in Arabic in Arabic, never English inside Arabic.
+        $render = app(RenderNotification::class);
+        $this->assertSame('your server has been reinstalled and is running again.', $render->execute($notification, 'en')->body);
+        $arabic = $render->execute($notification, 'ar');
+        $this->assertStringContainsString('خادمك', $arabic->title.$arabic->body);
+        $this->assertStringNotContainsString('your server', $arabic->title.$arabic->body, 'An English phrase was read inside the Arabic sentence.');
+    }
+
+    #[Test]
+    public function the_customer_told_of_a_confirmed_rebuild_reads_the_services_own_name(): void
+    {
+        $operation = $this->aVpsRebuild(ReinstallState::Indeterminate, destroyed: true);
+        $service = Service::factory()->create(['customer_id' => $operation->customer_id, 'kind' => 'vps', 'label' => 'web-kw-01']);
+        $operation->forceFill(['service_id' => $service->getKey()])->save();
+
+        $this->actingAs($this->operator())
+            ->postJson('/api/admin/operations/reinstalls/vps_reinstall/'.$operation->id.'/resolve', [
+                'verdict' => 'failed',
+                'evidence' => 'VM 910 on pve-kw-03 has an empty disk and does not boot.',
+            ])
+            ->assertOk();
+
+        $notification = Notification::query()->where('customer_id', $operation->customer_id)->sole();
+        $this->assertSame(NotificationType::ReinstallFailed, $notification->type);
+
+        foreach (['en', 'ar'] as $locale) {
+            $rendered = app(RenderNotification::class)->execute($notification, $locale);
+            $this->assertStringContainsString('web-kw-01', $rendered->title, $locale);
+            $this->assertStringNotContainsString('your server', $rendered->title.$rendered->body, $locale);
+        }
     }
 
     #[Test]

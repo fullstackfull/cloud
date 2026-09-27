@@ -66,9 +66,19 @@ use Tests\TestCase;
  * a producer this cannot read is a red test, not a silent pass. Every type
  * must be sent by at least one producer it read.
  *
- * What it does not know: whether a value sent is null or empty at run time
- * (RenderNotification drops a null, and the placeholder then survives), or
- * whether the value reads well in the sentence.
+ * And a placeholder filled with a literal that cannot be right: a value
+ * written in the data array as a string literal - `'key' => '...'` at its
+ * top level, nothing else - for a placeholder the type's English or Arabic
+ * title or body names, that is empty (the sentence reads a gap: "reinstalled
+ * with  and is running") or holds a Latin letter (English text, which the
+ * Arabic sentence reads too: "your server"). A translatable phrase is sent as
+ * {"en": ..., "ar": ...}, which RenderNotification reads in the reader's
+ * language, and a name the customer chose (a label, a domain) is not a
+ * literal.
+ *
+ * What it does not know: whether a value computed at run time is null or
+ * empty (RenderNotification drops a null, and the placeholder then
+ * survives), or whether it reads well in the sentence.
  */
 final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest extends TestCase
 {
@@ -92,6 +102,7 @@ final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest exten
         $unresolved = [];
         $sent = [];
         $missing = [];
+        $literal = [];
 
         foreach ($this->producers() as [$file, $method, $call]) {
             $args = $this->namedArgs($call);
@@ -103,11 +114,23 @@ final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest exten
                     continue;
                 }
 
-                [$types, $keys] = $pair;
+                [$types, $keys, $literals] = $pair;
 
                 foreach ($types as $case) {
                     $sent[$case] = true;
                     $type = constant(NotificationType::class.'::'.$case);
+
+                    foreach ($literals as $key => $value) {
+                        if (! $this->aSentenceNames($type, $key)) {
+                            continue;
+                        }
+
+                        if ($value === '') {
+                            $literal[] = sprintf('%s sends %s with :%s as an empty string; the sentence reads a gap', $this->where($file, $call), $type->value, $key);
+                        } elseif (preg_match('/[A-Za-z]/', $value) === 1) {
+                            $literal[] = sprintf('%s sends %s with :%s as the English text "%s", read inside the Arabic sentence too', $this->where($file, $call), $type->value, $key, $value);
+                        }
+                    }
 
                     foreach (['en', 'ar'] as $locale) {
                         foreach (['title', 'body'] as $part) {
@@ -124,6 +147,7 @@ final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest exten
 
         $this->assertSame([], $unresolved, 'A producer this gate cannot read.');
         $this->assertSame([], $missing, 'A notification is sent without a fact its sentence names; the customer reads the placeholder.');
+        $this->assertSame([], $literal, 'A notification fills a placeholder with a literal that is empty, or English in every language.');
 
         $unsent = array_values(array_diff(array_map(static fn (NotificationType $t): string => $t->name, NotificationType::cases()), array_keys($sent)));
         $this->assertSame([], $unsent, 'A type no producer this gate read sends.');
@@ -193,7 +217,7 @@ final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest exten
      * Each (types, keys) pair the arguments can carry, or a string saying why
      * one could not be read.
      *
-     * @return list<array{list<string>, list<string>}|string>
+     * @return list<array{list<string>, list<string>, array<string, string>}|string>
      */
     private function pairs(string $file, ?ClassMethod $method, Expr $type, ?Expr $data, int $depth): array
     {
@@ -246,7 +270,49 @@ final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest exten
             return [$keys];
         }
 
-        return [[$types, $keys]];
+        return [[$types, $keys, $data === null ? [] : $this->literals($data)]];
+    }
+
+    /**
+     * The values written as a string literal in the data array, by key. Only
+     * a top-level `'key' => 'text'` is read: a value computed any other way
+     * (a variable, a call, a `?? ''` fallback, an array) is not.
+     *
+     * @return array<string, string>
+     */
+    private function literals(Expr $data): array
+    {
+        $literals = [];
+
+        if ($data instanceof Array_) {
+            foreach ($data->items as $item) {
+                if ($item !== null && $item->key instanceof String_ && $item->value instanceof String_) {
+                    $literals[$item->key->value] = $item->value->value;
+                }
+            }
+        }
+
+        return $literals;
+    }
+
+    /**
+     * Whether the type's title or body names this placeholder, in English or
+     * in Arabic. A literal sent for a placeholder no sentence names is never
+     * read, and is not reported.
+     */
+    private function aSentenceNames(NotificationType $type, string $key): bool
+    {
+        foreach (['en', 'ar'] as $locale) {
+            foreach (['title', 'body'] as $part) {
+                $line = Lang::get('notifications.'.$type->value.'.'.$part, [], $locale);
+
+                if (is_string($line) && preg_match('/:'.preg_quote($key, '/').'(?![A-Za-z_])/', $line) === 1) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**

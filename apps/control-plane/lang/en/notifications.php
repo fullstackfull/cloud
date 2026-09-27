@@ -135,7 +135,7 @@ return [
         ],
         'reinstall_completed' => [
             'title' => ':service has been reinstalled',
-            'body' => ':service has been reinstalled with :image and is running again.',
+            'body' => ':service has been reinstalled and is running again.',
         ],
         'reinstall_failed' => [
             'title' => 'Reinstall of :service did not complete',

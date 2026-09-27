@@ -135,7 +135,7 @@ return [
         ],
         'reinstall_completed' => [
             'title' => 'تمت إعادة تثبيت :service',
-            'body' => 'تمت إعادة تثبيت :service باستخدام :image وهو يعمل مجددًا.',
+            'body' => 'تمت إعادة تثبيت :service وهو يعمل مجددًا.',
         ],
         'reinstall_failed' => [
             'title' => 'لم تكتمل إعادة تثبيت :service',
