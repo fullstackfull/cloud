@@ -36,6 +36,28 @@ enum BillingPeriod: string
     }
 
     /**
+     * Steps a period start back by one period: no later than the start of
+     * the period before it.
+     *
+     * Not an exact inverse of advance(): a month that advance() clamped (31
+     * January to 28 February) steps back to the 28th, three days before the
+     * start it came from. What reads it wants a bound that is never later
+     * than the previous period's start, which that is.
+     */
+    public function retreat(DateTimeInterface $from): CarbonImmutable
+    {
+        $start = CarbonImmutable::instance($from);
+
+        return match ($this) {
+            self::Hourly => $start->subHour(),
+            self::Daily => $start->subDay(),
+            self::Monthly => $start->subMonthNoOverflow(),
+            self::Quarterly => $start->subMonthsNoOverflow(3),
+            self::Yearly => $start->subYearNoOverflow(),
+        };
+    }
+
+    /**
      * Whether a period is short enough that usage-style metering, rather than
      * a fixed recurring invoice, is the sensible billing model.
      */

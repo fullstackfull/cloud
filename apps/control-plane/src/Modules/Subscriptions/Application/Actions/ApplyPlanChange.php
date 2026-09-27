@@ -50,7 +50,10 @@ use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
  * a machine running two, and the platform's own capacity accounting would
  * believe a node had handed out memory it has not.
  * {@see ResizeVpsHandler} writes the
- * shape, after the provider confirms it.
+ * shape onto the machine's row, after the provider confirms it, and that row
+ * is what the next quote measures from (PlanChangeDelivery::whatTheServiceRuns()).
+ * The service's `resources` column stays what was bought: nothing here or in
+ * the resize writes it.
  *
  * ---------------------------------------------------------------------------
  * Nothing is handed over against an open invoice

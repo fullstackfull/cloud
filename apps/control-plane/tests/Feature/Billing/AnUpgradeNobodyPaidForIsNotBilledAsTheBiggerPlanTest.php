@@ -60,6 +60,7 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\Actions\CancelSubscription;
 use Lynomia\Modules\Subscriptions\Application\Actions\RenewDueSubscriptions;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
+use Lynomia\Modules\Subscriptions\Application\Queries\PlanChangeDelivery;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Wallet\Application\Actions\PayInvoiceFromWallet;
@@ -1207,13 +1208,17 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
     }
 
     #[Test]
-    public function a_paid_change_from_before_this_period_that_never_recorded_delivery_blocks_nothing(): void
+    public function a_paid_change_from_before_the_last_period_that_never_recorded_delivery_blocks_nothing(): void
     {
         /*
          * `delivered_at` was added without a back-fill: a change settled
          * before it existed that queued nothing looks undelivered for ever.
-         * Only the current period's changes are read, so such a row cannot
-         * hold the customer's plan changes past a renewal.
+         * Only changes made in the current period and the one before it are
+         * read, so such a row cannot hold the customer's plan changes past
+         * a second renewal. (One period used to be read; a change paid just
+         * before a renewal and settled after it then stopped holding the
+         * next change - AChangePaidBeforeTheRenewalAndSettledAfterItIsStillAwaitedTest,
+         * round seven.)
          */
         [$customer, $user] = $this->accountWithOwner();
         $subscription = $this->paidSubscriptionOn($customer, $this->small);
@@ -1224,10 +1229,50 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
         Event::fake([InvoicePaid::class]);
         app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
 
-        PlanChange::query()->where('proration_invoice_id', $upgrade->getKey())
-            ->update(['changed_at' => CarbonImmutable::instance($subscription->fresh()->current_period_start)->subDay()]);
+        $start = CarbonImmutable::instance($subscription->fresh()->current_period_start);
 
+        // Made in the period before this one: still read, still held.
+        PlanChange::query()->where('proration_invoice_id', $upgrade->getKey())
+            ->update(['changed_at' => $start->subDay()]);
+        $this->changePlan($user, $subscription->fresh(), $this->xl, 'last-period-up-2')
+            ->assertStatus(409)
+            ->assertJsonPath('error.details.refusals', 'previous_change_pending');
+
+        // Made before that: not read.
+        PlanChange::query()->where('proration_invoice_id', $upgrade->getKey())
+            ->update(['changed_at' => $subscription->fresh()->billing_period->retreat($start)->subDay()]);
         $this->changePlan($user, $subscription->fresh(), $this->xl, 'old-period-up-2')->assertOk();
+    }
+
+    #[Test]
+    public function on_a_short_period_a_paid_change_is_read_back_at_least_a_week(): void
+    {
+        /*
+         * On an hourly period "the period before" is an hour, shorter than a
+         * settlement held up behind a stalled payments queue can take: the
+         * look-back is the earlier of that and seven days before the current
+         * period began (PlanChangeDelivery::lookBackFrom()).
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+        $this->changePlan($user, $subscription, $this->large, 'hourly-up')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        Event::fake([InvoicePaid::class]);
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+
+        $subscription->fresh()?->forceFill(['billing_period' => BillingPeriod::Hourly])->save();
+        $start = CarbonImmutable::instance($subscription->fresh()->current_period_start);
+        $delivery = app(PlanChangeDelivery::class);
+
+        foreach (['3 hours' => $start->subHours(3), '6 days' => $start->subDays(6)] as $age => $changedAt) {
+            PlanChange::query()->where('proration_invoice_id', $upgrade->getKey())->update(['changed_at' => $changedAt]);
+            $this->assertTrue($delivery->aPaidChangeAwaitsDelivery($subscription->fresh()), 'A paid change '.$age.' before an hourly period stopped holding the next change.');
+        }
+
+        PlanChange::query()->where('proration_invoice_id', $upgrade->getKey())->update(['changed_at' => $start->subDays(PlanChangeDelivery::LOOK_BACK_DAYS)->subHour()]);
+        $this->assertFalse($delivery->aPaidChangeAwaitsDelivery($subscription->fresh()));
     }
 
     #[Test]

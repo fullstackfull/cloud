@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Billing\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
 use Lynomia\Http\Concerns\AuthorisesWithinAccount;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
@@ -19,16 +20,21 @@ use Lynomia\Modules\Billing\Http\Resources\WalletCreditQuoteResource;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Queries\CustomerInvoices;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Subscriptions\Application\Actions\WithdrawAnUnpaidPlanChange;
 use Lynomia\Modules\Wallet\Application\Actions\PayInvoiceFromWallet;
 use Lynomia\Modules\Wallet\Application\Actions\QuoteWalletCredit;
 
 /**
- * The customer-facing invoice surface. Read-only, and deliberately so.
+ * The customer-facing invoice surface. Nothing here edits an invoice.
  *
  * An invoice is a document, not a resource a client edits: its number, dates
  * and billing snapshot are frozen the moment it leaves draft, and every figure
  * on it is moved by the settlement, void and refund actions rather than by
- * anything reachable from here. Paying one is the Payments module's business.
+ * anything reachable from here. Paying one by card is the Payments module's
+ * business. The two acts here go through those actions: paying from the
+ * wallet (a settlement), and withdrawing the unpaid plan change an invoice
+ * bills (the platform's own void, as a renewal's lapse takes it).
  *
  * Two rules hold across both methods, and neither is checked twice.
  *
@@ -50,6 +56,7 @@ final class InvoiceController
         private readonly ActingCustomer $actingCustomer,
         private readonly QuoteWalletCredit $quote,
         private readonly PayInvoiceFromWallet $payFromWallet,
+        private readonly WithdrawAnUnpaidPlanChange $withdraw,
     ) {}
 
     protected function acting(): ActingCustomer
@@ -72,6 +79,17 @@ final class InvoiceController
             // need every line of every one of them, and GET /invoices/{id} is
             // where the lines live.
             ->withCount('items')
+            /*
+             * Whether each invoice bills a recorded plan change, read once for
+             * the page. The resource asks the plan-change questions behind
+             * `is_payable` and `plan_change_withdrawable` only of an open
+             * invoice that does - at most one per subscription, since no
+             * change can be made while one is open - where it used to ask
+             * them of every open subscription invoice, row by row.
+             */
+            ->addSelect([InvoiceResource::BILLS_A_PLAN_CHANGE => DB::table('subscription_plan_changes')
+                ->selectRaw('count(*) > 0')
+                ->whereColumn('subscription_plan_changes.proration_invoice_id', 'invoices.id')])
             ->when($status !== null, fn ($query) => $query->where('status', $status->value))
             // Issued order where it exists, falling back to creation for the
             // drafts that have no issue date yet. The ULID tie-breaks two
@@ -186,6 +204,47 @@ final class InvoiceController
 
         return InvoiceResource::document(
             $settlement->invoice->fresh(['items', 'transactions', 'walletCredits.wallet'])
+        )->response();
+    }
+
+    /**
+     * Withdraw the unpaid plan change this invoice bills.
+     *
+     * The customer's way out of a plan change they have not paid for - above
+     * all one that can no longer be delivered, whose payment is refused
+     * (`invoice.plan_change_not_deliverable`) and whose open invoice held
+     * every other change of plan (N2 / X7-2). What the invoice holds goes back
+     * to the wallet, the invoice is voided, and the subscription goes back to
+     * the plan and the price it came from (WithdrawAnUnpaidPlanChange). Not
+     * an edit of the invoice: the platform's own void, the one a renewal's
+     * lapse takes. `billing.pay`, the permission a plan change needs.
+     */
+    public function withdrawPlanChange(Request $request, string $invoice): JsonResponse
+    {
+        $this->authoriseWithinAccount($request, 'billing.pay');
+
+        $found = $this->scopedInvoice($invoice);
+        $actor = $request->user() instanceof User ? $request->user() : null;
+
+        /** @var array{invoice: Invoice, returned_to_wallet_minor: int} $withdrawn */
+        $withdrawn = app(RecordActAtomically::class)->execute(
+            fn (): array => $this->withdraw->execute($found, $actor),
+            static fn (array $result): AuditedAct => new AuditedAct(
+                action: AuditAction::InvoiceVoided,
+                subject: $result['invoice'],
+                customerId: (string) $result['invoice']->customer_id,
+                context: [
+                    'reason' => WithdrawAnUnpaidPlanChange::REASON,
+                    'number' => $result['invoice']->number,
+                    'total_minor' => $result['invoice']->total_minor,
+                    'currency' => $result['invoice']->currency,
+                    'returned_to_wallet_minor' => $result['returned_to_wallet_minor'],
+                ],
+            ),
+        );
+
+        return InvoiceResource::document(
+            $withdrawn['invoice']->fresh(['items', 'transactions', 'walletCredits.wallet']) ?? $withdrawn['invoice']
         )->response();
     }
 

@@ -748,6 +748,12 @@ return [
         'description' => 'Requires an Idempotency-Key: a repeated submission that debited twice would spend a balance the customer only has once. There is no amount field — how much is applied is decided from the balance and the amount due, both read under a lock. Partial payment is ordinary: the remainder stays payable by card. Credit is never converted between currencies.',
         'response' => $one('Invoice'),
     ],
+    'api.v1.invoices.plan_change.withdraw' => [
+        'tag' => 'Billing',
+        'summary' => 'Withdraw the unpaid plan change an invoice bills',
+        'description' => 'The way out of a plan change the customer has not paid for - above all one that can no longer be delivered, whose payments are refused (409 `invoice.plan_change_not_deliverable`) and whose open invoice holds every other change of plan. What the invoice holds (a part paid from the wallet) goes back to the wallet, the invoice is voided, and the subscription goes back to the plan and the recurring amount it came from; nothing is resized. What a renewal does to an upgrade still unpaid, without waiting for it. Takes no body. Refused (409 `invoice.plan_change_not_withdrawable`) for an invoice that does not bill the subscription\'s latest, unpaid change, or once the subscription has ended or moved on from it; `plan_change_withdrawable` on the invoice says which. Requires `billing.pay`, the permission a plan change needs.',
+        'response' => $one('Invoice'),
+    ],
 
     'api.v1.backups.destroy' => [
         'tag' => 'Backups',
