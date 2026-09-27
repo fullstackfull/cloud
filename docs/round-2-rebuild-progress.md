@@ -179,7 +179,7 @@ reproduce; the confirmed unnumbered items are listed there.
 | Band | Scope | Status | Commit |
 |---|---|---|---|
 | E | F-23 `Role` answered per case where roles are chosen (its by-value site was a read); the Registrant spelling names the write (coordinator) | upheld with reservations (one shared `Role::cases()` spelling does not tell six staff cases apart; the spelled check is a substring match) | `b350894` |
-| A | F-07 plan change onto an undeliverable plan; customer key reuse suppressing a resize; an undelivered upgrade kept beside a later unpaid change; wind-up retry wording | fixing | — |
+| A | F-07 plan change onto an undeliverable plan; customer key reuse suppressing a resize; an undelivered upgrade kept beside a later unpaid change; wind-up retry wording | upheld with reservations (a package withdrawn between a card intent and its capture still takes the money; the quote's VPS growth seam must be reconciled with band D's resize rule; wording); merged `28c2b13` | `86cae2d` |
 | B | an operator invite promoting a squatted account with its password; `verified` unpinned on `/api/admin`; the throttle oracle's guard spelling | rejected once (the delegate's 201 disclosed an existing login by its name and age), repaired; upheld with reservations (a `role.manage` holder inviting a customer's address resets that customer's credentials; the operator list shows a promoted login's stored name); merged `f5bea8d` | `60023fb` |
 | C | DirectAdmin nested lists; indeterminate-poll pin; attempt-bound handle writes; browse/download tests; review verdicts bound to the review seen | fixing | — |
 | D | resize moves capacity; a retry placed on its own node; adoption moves capacity; inventory sync lock order | fixing | — |
