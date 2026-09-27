@@ -8,6 +8,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Compute\Application\Actions\ReleaseNodeCapacity;
 use Lynomia\Modules\Compute\Application\Actions\ReserveNodeCapacity;
+use Lynomia\Modules\Compute\Application\Actions\RestateNodeCommitment;
 use Lynomia\Modules\Compute\Application\Actions\SyncClusterInventory;
 use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
@@ -110,6 +111,46 @@ final class CapacityPathsTakeTheirLocksInOneOrderTest extends TestCase
             ->execute($node, $this->resources(), reservationKey: 'job-1'));
         $this->assertOrdered($release);
         $this->assertSame('node_capacity_reservations', $release[0][0]);
+    }
+
+    #[Test]
+    public function a_commitment_restated_onto_another_node_takes_nodes_then_pools_in_order(): void
+    {
+        // An adoption's move, both ways round.
+        foreach (['to-the-lower' => true, 'to-the-higher' => false] as $key => $toLower) {
+            $this->cluster = ComputeCluster::factory()->create();
+            [$low, $high] = $this->twoNodesInIdOrder();
+            [$from, $to] = $toLower ? [$high, $low] : [$low, $high];
+            // The destination's pool first, so it has the lower id.
+            $toPool = $this->poolOn($to);
+            $fromPool = $this->poolOn($from);
+            app(ReserveNodeCapacity::class)->execute($from, $this->resources(), storageId: $fromPool->id, reservationKey: $key);
+
+            $order = $this->firstLocks(fn () => app(RestateNodeCommitment::class)
+                ->execute($key, $to, $toPool->id, $this->resources(), refuseWhatDoesNotFit: false));
+
+            $this->assertOrdered($order);
+            $this->assertSame('node_capacity_reservations', $order[0][0], 'The reservation row is not the first thing a restatement locks.');
+            $this->assertCount(2, $this->idsOf($order, 'compute_nodes'), 'A restatement onto another node did not lock both nodes.');
+            $this->assertCount(2, $this->idsOf($order, 'compute_storages'), 'A restatement onto another pool did not lock both pools.');
+            $this->assertSame(1, (int) $to->fresh()->vm_count);
+            $this->assertSame(0, (int) $from->fresh()->vm_count);
+        }
+    }
+
+    #[Test]
+    public function a_commitment_restated_in_place_takes_the_node_then_the_pool(): void
+    {
+        // A resize.
+        [$node] = $this->twoNodesInIdOrder();
+        $pool = $this->poolOn($node);
+        app(ReserveNodeCapacity::class)->execute($node, $this->resources(), storageId: $pool->id, reservationKey: 'job-1');
+
+        $order = $this->firstLocks(fn () => app(RestateNodeCommitment::class)
+            ->execute('job-1', $node, $pool->id, new VmResources(vcpu: 4, memoryMib: 8192, diskGib: 80), refuseWhatDoesNotFit: true));
+
+        $this->assertOrdered($order);
+        $this->assertSame([['node_capacity_reservations', null], ['compute_nodes', (string) $node->id], ['compute_storages', (string) $pool->id]], $order);
     }
 
     #[Test]

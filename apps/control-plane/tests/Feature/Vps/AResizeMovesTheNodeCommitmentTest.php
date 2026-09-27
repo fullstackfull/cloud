@@ -15,6 +15,7 @@ use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\Vps\Application\Handlers\ResizeVpsHandler;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Vps\Concerns\DrivesVpsCreatesThroughTheOperatorPath;
 use Tests\TestCase;
@@ -164,6 +165,98 @@ final class AResizeMovesTheNodeCommitmentTest extends TestCase
         $this->assertSame(0, $this->poolCommitted());
     }
 
+    #[Test]
+    public function a_disk_growth_the_pool_cannot_hold_is_refused_before_the_hypervisor_is_asked(): void
+    {
+        $machine = $this->aBuiltMachine();
+        // 60 GiB reported free in the pool, 40 of it committed to this machine.
+        ComputeStorage::query()->where('node_id', $this->node->id)->update(['available_gib' => 60]);
+
+        $resize = $this->resize($machine, vcpu: 2, memoryMib: 4096, diskGib: 200);
+
+        $this->assertSame(FailureClass::Capacity, $resize->failure_class);
+        $this->assertSame(40, $this->hypervisor->fleet->getVm('pve-01', (string) $machine->provider_id)?->diskGib);
+        $this->assertSame(40, $this->poolCommitted());
+    }
+
+    #[Test]
+    public function a_shrink_is_never_refused_on_a_node_already_past_its_ceiling(): void
+    {
+        $machine = $this->aBuiltMachine();
+        // The node now reports less memory than is committed on it (a sync
+        // after a DIMM was lost): giving some back must still be possible.
+        $this->node->forceFill(['memory_mib' => 4096])->save();
+
+        $resize = $this->resize($machine, vcpu: 1, memoryMib: 2048, diskGib: 40);
+
+        $this->assertSame(ProvisioningJobStatus::Succeeded, $resize->status, (string) $resize->last_error);
+        $this->assertNodeHolds(vms: 1, vcpu: 1, memoryMib: 2048, diskGib: 40);
+    }
+
+    #[Test]
+    public function a_growth_is_refused_only_for_what_grows(): void
+    {
+        $machine = $this->aBuiltMachine();
+        // Past its memory ceiling, with disk to spare: a disk-only growth
+        // asks nothing of the memory.
+        $this->node->forceFill(['memory_mib' => 4096])->save();
+
+        $resize = $this->resize($machine, vcpu: 2, memoryMib: 4096, diskGib: 80);
+
+        $this->assertSame(ProvisioningJobStatus::Succeeded, $resize->status, (string) $resize->last_error);
+        $this->assertNodeHolds(vms: 1, vcpu: 2, memoryMib: 4096, diskGib: 80);
+    }
+
+    #[Test]
+    public function a_commitment_held_raised_is_not_lowered_by_the_next_resize_before_it_is_known(): void
+    {
+        $machine = $this->aBuiltMachine();
+
+        // A growth whose outcome is unknown: held raised, machine as recorded.
+        $this->hypervisor->failResizesWith = ComputeProviderException::requestFailed('fake', 'resize_vm', [], indeterminate: true);
+        $this->resize($machine, vcpu: 16, memoryMib: 65536, diskGib: 400);
+        $this->assertNodeHolds(vms: 1, vcpu: 16, memoryMib: 65536, diskGib: 400);
+
+        // A smaller resize whose outcome is unknown as well: the machine may
+        // still be the larger shape, so the larger commitment stands.
+        $this->resize($machine->refresh(), vcpu: 2, memoryMib: 8192, diskGib: 40);
+
+        $this->assertNodeHolds(vms: 1, vcpu: 16, memoryMib: 65536, diskGib: 400);
+    }
+
+    #[Test]
+    public function two_resizes_that_overlap_leave_the_commitment_at_the_machines_shape(): void
+    {
+        /*
+         * Nothing serialises two resize jobs of one machine. The first
+         * settled its commitment from the machine as it held it in memory; a
+         * second that ran whole between the first's write of the machine row
+         * and its settle left the machine at 16384 MiB and the commitment at
+         * the first's 8192 - under-committed, and sold again.
+         */
+        $machine = $this->aBuiltMachine();
+        $first = $this->resizeJob($machine, vcpu: 2, memoryMib: 8192, diskGib: 40);
+        $second = $this->resizeJob($machine, vcpu: 2, memoryMib: 16384, diskGib: 40);
+
+        $fired = false;
+        DB::listen(function ($query) use (&$fired, $second): void {
+            if ($fired || ! str_starts_with(strtolower($query->sql), 'update "virtual_machines"')) {
+                return;
+            }
+
+            $fired = true;
+            $this->assertTrue(app(ResizeVpsHandler::class)->execute($second->fresh())->successful);
+        });
+
+        $this->assertTrue(app(ResizeVpsHandler::class)->execute($first->fresh())->successful);
+        $this->assertTrue($fired);
+
+        $this->assertSame(16384, $this->hypervisor->fleet->getVm('pve-01', (string) $machine->provider_id)?->memoryMib);
+        $this->assertSame(16384, $machine->refresh()->memory_mib);
+        $this->assertNodeHolds(vms: 1, vcpu: 2, memoryMib: 16384, diskGib: 40);
+        $this->assertSame(16384, NodeCapacityReservation::query()->whereNull('released_at')->sole()->memory_mib);
+    }
+
     private function aBuiltMachine(): VirtualMachine
     {
         $job = $this->createJob();
@@ -176,7 +269,15 @@ final class AResizeMovesTheNodeCommitmentTest extends TestCase
 
     private function resize(VirtualMachine $machine, int $vcpu, int $memoryMib, int $diskGib): ProvisioningJob
     {
-        $resize = ProvisioningJob::factory()->create([
+        $resize = $this->resizeJob($machine, $vcpu, $memoryMib, $diskGib);
+        $this->runWorker($resize);
+
+        return $resize->refresh();
+    }
+
+    private function resizeJob(VirtualMachine $machine, int $vcpu, int $memoryMib, int $diskGib): ProvisioningJob
+    {
+        return ProvisioningJob::factory()->create([
             'service_id' => $machine->service_id,
             'customer_id' => $this->customer->id,
             'kind' => ProvisioningJobKind::Resize,
@@ -184,9 +285,6 @@ final class AResizeMovesTheNodeCommitmentTest extends TestCase
             'status' => ProvisioningJobStatus::Queued,
             'payload' => ['virtual_machine_id' => (string) $machine->id, 'vcpu' => $vcpu, 'memory_mib' => $memoryMib, 'disk_gib' => $diskGib],
         ]);
-        $this->runWorker($resize);
-
-        return $resize->refresh();
     }
 
     private function assertNodeHolds(int $vms, int $vcpu, int $memoryMib, int $diskGib): void

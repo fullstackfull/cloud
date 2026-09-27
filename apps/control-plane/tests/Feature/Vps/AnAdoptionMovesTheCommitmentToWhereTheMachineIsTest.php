@@ -9,6 +9,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\Enums\NodeStatus;
+use Lynomia\Modules\Compute\Domain\Exceptions\ClusterNotConfiguredException;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
 use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
@@ -88,6 +89,31 @@ final class AnAdoptionMovesTheCommitmentToWhereTheMachineIsTest extends TestCase
         $this->assertSame(0, (int) $this->poolOn($other)->committed_gib);
 
         $this->assertSame('pve-01', $job->result['adoption']['capacity']['node'] ?? null, json_encode($job->result['adoption'] ?? null));
+    }
+
+    #[Test]
+    public function an_adoption_whose_hypervisor_cannot_be_asked_leaves_the_commitment_and_says_why(): void
+    {
+        $this->addNode('pve-02');
+        $job = $this->createJob();
+        $this->runWorker($job);
+        $this->assertSame(ProvisioningJobStatus::NeedsReview, $job->refresh()->status);
+        $machine = $this->hypervisor->everyMachine()[0];
+        $before = $this->liveReservation();
+
+        // Not a provider exception: the cluster's credentials are gone.
+        $cluster = (string) $this->cluster->id;
+        $this->hypervisor->atTheMomentOfLook = static function () use ($cluster): void {
+            throw ClusterNotConfiguredException::missingCredentials($cluster, 'pve-kw');
+        };
+
+        $this->adoptAsOperator($job, $machine->providerId)->assertOk();
+
+        $this->assertSame(ProvisioningJobStatus::Succeeded, $job->refresh()->status);
+        $after = $this->liveReservation();
+        $this->assertSame([$before->id, $before->node_id], [$after->id, $after->node_id]);
+        $this->assertFalse($job->result['adoption']['capacity']['moved'] ?? null);
+        $this->assertStringContainsString('could not be asked', (string) ($job->result['adoption']['capacity']['reason'] ?? ''));
     }
 
     #[Test]

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Compute\Application\Actions;
 
+use Closure;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Compute\Application\Services\CapacityLocks;
 use Lynomia\Modules\Compute\Domain\Enums\PlacementRejectionReason;
@@ -60,13 +61,23 @@ final readonly class RestateNodeCommitment
     ) {}
 
     /**
+     * @param  VmResources|Closure(NodeCapacityReservation|null): VmResources  $shape  the shape to commit, or
+     *                                                                                 how to work it out under the locks. A closure is called once the
+     *                                                                                 reservation row (passed to it, as locked; null when none is live)
+     *                                                                                 and the node and pool rows are held, so a shape read there from rows
+     *                                                                                 another worker writes before it restates - a resize's machine row -
+     *                                                                                 is read after that worker's restatement or before it, never between.
+     *                                                                                 Two resizes of one machine settled from the machine each held in
+     *                                                                                 memory left the commitment at the one that settled last, not at the
+     *                                                                                 machine's shape (B1, round six).
+     *
      * @throws NodeCapacityExceededException when $refuseWhatDoesNotFit and an increase does not fit
      */
     public function execute(
         string $reservationKey,
         ComputeNode $node,
         ?string $storageId,
-        VmResources $shape,
+        VmResources|Closure $shape,
         bool $refuseWhatDoesNotFit,
         ?string $serviceId = null,
         ?string $customerId = null,
@@ -90,6 +101,8 @@ final readonly class RestateNodeCommitment
                 /** @var ComputeNode $target */
                 $target = ComputeNode::query()->findOrFail($to);
             }
+
+            $shape = $shape instanceof Closure ? $shape($held) : $shape;
 
             $sameNode = $from === $to;
             $samePool = $held !== null && $fromStorage === $storageId;

@@ -77,8 +77,15 @@ final readonly class NodeCapacityPolicy
      * architecture are not asked again - a node put into maintenance takes no
      * new machines, but the ones it holds are still the size their customers
      * pay for. What is asked is whether the node can hold the growth, because
-     * a growth it cannot hold is an oversold node (RestateNodeCommitment). An
-     * amount of zero or less grows nothing and is counted as zero.
+     * a growth it cannot hold is an oversold node (RestateNodeCommitment).
+     *
+     * Only what grows is asked about. An amount of zero or less grows nothing
+     * and no ceiling is applied to it: a node can be past a ceiling already -
+     * a sync that read less memory than is committed, a threshold lowered -
+     * and a shrink, or a growth of the disk alone, on such a node takes
+     * nothing more of what it is short of. Refusing them held the machine at
+     * a size the customer no longer pays for, or refused a disk the node has
+     * room for, over memory nobody asked for.
      */
     public function assessGrowth(ComputeNode $node, int $vcpu, int $memoryMib, int $diskGib): CapacityAssessment
     {
@@ -103,6 +110,9 @@ final readonly class NodeCapacityPolicy
         $memoryAfter = $node->allocated_memory_mib + $memoryMib;
         $coresAfter = $node->allocated_cpu_cores + $vcpu;
         $storageAfter = $node->allocated_storage_gib + $diskGib;
+
+        // A placement asks every ceiling; a growth only those of what grows.
+        $asks = static fn (int $amount): bool => $architecture !== null || $amount > 0;
 
         // Free capacity is measured against the threshold ceiling rather than
         // the physical one, so that scoring ranks nodes by the headroom the
@@ -143,7 +153,7 @@ final readonly class NodeCapacityPolicy
             );
         }
 
-        if ($memoryAfter > $usableMemory) {
+        if ($asks($memoryMib) && $memoryAfter > $usableMemory) {
             return $reject(
                 PlacementRejectionReason::InsufficientMemory,
                 sprintf(
@@ -161,7 +171,7 @@ final readonly class NodeCapacityPolicy
          * ceiling is "buy more memory", over the threshold is "this node is as
          * full as policy allows, and the policy is a number you can change".
          */
-        if ($memoryAfter > $schedulableMemory) {
+        if ($asks($memoryMib) && $memoryAfter > $schedulableMemory) {
             return $reject(
                 PlacementRejectionReason::CapacityThresholdExceeded,
                 sprintf(
@@ -174,7 +184,7 @@ final readonly class NodeCapacityPolicy
             );
         }
 
-        if ($coresAfter > $usableCores) {
+        if ($asks($vcpu) && $coresAfter > $usableCores) {
             return $reject(
                 PlacementRejectionReason::CpuOvercommitExceeded,
                 sprintf(
@@ -187,7 +197,7 @@ final readonly class NodeCapacityPolicy
             );
         }
 
-        if ($storageAfter > $totalStorage) {
+        if ($asks($diskGib) && $storageAfter > $totalStorage) {
             return $reject(
                 PlacementRejectionReason::InsufficientStorage,
                 sprintf(

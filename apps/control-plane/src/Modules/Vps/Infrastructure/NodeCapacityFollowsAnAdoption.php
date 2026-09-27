@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Vps\Infrastructure;
 
+use Illuminate\Database\QueryException;
 use Lynomia\Modules\Compute\Application\Actions\RestateNodeCommitment;
-use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
@@ -15,6 +15,7 @@ use Lynomia\Modules\Provisioning\Domain\Contracts\ReservationsFollowAnAdoption;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
+use Throwable;
 
 /**
  * Moves a VPS build's node commitment to the node the adopted machine is on.
@@ -34,7 +35,7 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * commitment is in stays; a pool of the old node's is replaced by one on the
  * new node of the same class, or by none when the new node has none.
  *
- * Not found, or the hypervisor cannot be asked, and the commitment is left
+ * Not found, or the hypervisor cannot be asked for any reason, and the commitment is left
  * where it is, and the adoption's record says so: the adoption is the
  * operator's statement that the machine is theirs, and refusing it for want
  * of a hypervisor answer would leave the machine unbilled for longer.
@@ -77,7 +78,20 @@ final readonly class NodeCapacityFollowsAnAdoption implements ReservationsFollow
 
         try {
             $found = $this->whereItIs($cluster, $providerReference, $holding, $identity?->nodes ?? []);
-        } catch (ComputeProviderException $e) {
+        } catch (QueryException $e) {
+            // The platform's own database, not the hypervisor: the adoption's
+            // transaction cannot go on, and says so.
+            throw $e;
+        } catch (Throwable $e) {
+            /*
+             * Any failure to ask - a provider error, a cluster whose
+             * credentials are gone (ClusterNotConfiguredException, a domain
+             * exception, not a provider one), a connection reset. It used to
+             * catch provider errors alone, and the rest escaped the adoption
+             * as a 500 and rolled it back: a machine the operator had found
+             * stayed unadopted for want of a lookup the adoption does not
+             * need.
+             */
             return [
                 'node' => $holding->provider_name,
                 'moved' => false,
@@ -112,7 +126,7 @@ final readonly class NodeCapacityFollowsAnAdoption implements ReservationsFollow
     /**
      * @param  list<string>  $sentTo  node names the build's creates were sent to
      *
-     * @throws ComputeProviderException
+     * @throws Throwable whatever asking the hypervisor throws
      */
     private function whereItIs(ComputeCluster $cluster, string $providerReference, ComputeNode $holding, array $sentTo): ?ComputeNode
     {
