@@ -38,6 +38,7 @@ final readonly class ReserveNodeCapacity
     public function __construct(
         private NodeCapacityPolicy $policy,
         private CustomerNodeCensus $census,
+        private ReleaseNodeCapacity $release,
     ) {}
 
     /**
@@ -71,6 +72,17 @@ final readonly class ReserveNodeCapacity
              * loses capacity permanently and silently, in proportion to how
              * often provisioning is retried — which is highest exactly when the
              * fleet is already under strain.
+             *
+             * Returned as already committed only when it is committed where
+             * this call asks: on this node and in this pool. A retry is placed
+             * afresh, and may land elsewhere — the first attempt's node filled
+             * up, or went into maintenance — and a live reservation on the
+             * old node returned as if it were on the new one leaves the old
+             * node charged for a machine it does not run and the new one
+             * running a machine nobody charged it for, which the scheduler
+             * then sells again. So the commitment moves: the old one is given
+             * back and this one taken, in this one transaction, so a refusal
+             * below leaves the old one standing as it was.
              */
             if ($reservationKey !== null) {
                 $existing = NodeCapacityReservation::query()
@@ -79,10 +91,14 @@ final readonly class ReserveNodeCapacity
                     ->first();
 
                 if ($existing !== null) {
-                    /** @var ComputeNode $alreadyCommitted */
-                    $alreadyCommitted = ComputeNode::query()->findOrFail($existing->node_id);
+                    if ($existing->node_id === (string) $node->getKey() && $existing->storage_id === $storageId) {
+                        /** @var ComputeNode $alreadyCommitted */
+                        $alreadyCommitted = ComputeNode::query()->findOrFail($existing->node_id);
 
-                    return $alreadyCommitted;
+                        return $alreadyCommitted;
+                    }
+
+                    $this->release->execute($node, $resources, reservationKey: $reservationKey);
                 }
             }
 

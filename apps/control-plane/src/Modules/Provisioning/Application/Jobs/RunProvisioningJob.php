@@ -366,7 +366,11 @@ final class RunProvisioningJob implements ShouldQueue
          * Nothing is compensated here. The addresses and capacity this attempt
          * reserved are what the next attempt will use; handing them back
          * between two attempts of the same build would give the customer's
-         * address to somebody else halfway through.
+         * address to somebody else halfway through. The next attempt is
+         * placed afresh, and when it lands on another node the capacity is
+         * moved there — given back on the old node and taken on the new one
+         * in one transaction (ReserveNodeCapacity) — so it is still this
+         * build's one commitment, on the node it is built on.
          */
         self::dispatch($job->getKey())->delay(now()->addSeconds($delay));
     }

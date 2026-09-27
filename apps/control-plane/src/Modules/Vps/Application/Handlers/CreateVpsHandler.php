@@ -472,7 +472,10 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
         // Capacity first, keyed on the job so a retry commits once. Without the
         // key a retried job would commit a second machine's worth of capacity
         // that release can never give back — there is only one machine to
-        // destroy.
+        // destroy. A retry placed on another node than the attempt that
+        // reserved moves the commitment here in the same transaction
+        // (ReserveNodeCapacity), so the node built on below is always the
+        // node that holds this job's reservation.
         try {
             $this->reserveCapacity->execute(
                 node: $node,
