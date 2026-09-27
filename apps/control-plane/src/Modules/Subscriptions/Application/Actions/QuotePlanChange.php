@@ -11,6 +11,7 @@ use Lynomia\Modules\Billing\Domain\Services\PricingEngine;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
+use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
@@ -69,13 +70,28 @@ final readonly class QuotePlanChange
     ) {}
 
     /**
+     * The machine behind the subscription as the hypervisor reports it, for
+     * a caller that quotes under a lock to take before it
+     * (PlanChangeDelivery::whatTheMachineRuns()).
+     */
+    public function whatTheMachineRuns(Subscription $subscription): ?VmResources
+    {
+        return $this->delivery->whatTheMachineRuns($subscription);
+    }
+
+    /**
      * Quote one target plan.
+     */
+    /**
+     * @param  VmResources|null  $runs  the machine as the hypervisor reported it, taken before any lock
+     *                                  (whatTheMachineRuns()); null asks the capacity question stricter
      */
     public function execute(
         Subscription $subscription,
         Plan $plan,
         PlanPrice $price,
         ?DateTimeImmutable $changeAt = null,
+        ?VmResources $runs = null,
     ): PlanChangeQuote {
         $now = $changeAt !== null ? CarbonImmutable::instance($changeAt) : CarbonImmutable::now();
 
@@ -89,7 +105,7 @@ final readonly class QuotePlanChange
         // is refused below, so nothing is ever executed at this figure.
         $units = $knownUnits ?? 1;
 
-        $refusals = $this->refusals($subscription, $plan, $price, $current, $target, $service, $units);
+        $refusals = $this->refusals($subscription, $plan, $price, $current, $target, $service, $units, $runs);
 
         if ($knownUnits === null) {
             /*
@@ -201,6 +217,10 @@ final readonly class QuotePlanChange
 
         $quotes = [];
 
+        // The machine is read once for every plan offered, not once per plan
+        // (a read waits on the hypervisor), and outside any transaction.
+        $runs = $this->delivery->whatTheMachineRuns($subscription);
+
         foreach ($plans as $plan) {
             $price = $plan->prices
                 ->firstWhere(fn (PlanPrice $candidate): bool => $candidate->currency === $subscription->currency
@@ -212,7 +232,7 @@ final readonly class QuotePlanChange
                 continue;
             }
 
-            $quotes[] = $this->execute($subscription, $plan, $price, $changeAt);
+            $quotes[] = $this->execute($subscription, $plan, $price, $changeAt, $runs);
         }
 
         return $quotes;
@@ -229,6 +249,7 @@ final readonly class QuotePlanChange
         PlanResources $target,
         ?Service $service,
         int $units,
+        ?VmResources $runs,
     ): array {
         $refusals = [];
 
@@ -330,7 +351,7 @@ final readonly class QuotePlanChange
             $refusals[] = PlanChangeRefusal::PreviousChangePending;
         }
 
-        if ($plan->getKey() !== $subscription->plan_id && $this->delivery->refusal($subscription, $plan, $current) !== null) {
+        if ($plan->getKey() !== $subscription->plan_id && $this->delivery->refusal($subscription, $plan, $current, $runs) !== null) {
             /*
              * A plan the change cannot be delivered onto: a hosting plan with
              * no single package on sale, or a change of shape nothing can

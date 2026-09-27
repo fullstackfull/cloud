@@ -50,20 +50,39 @@ final readonly class MachineCommitment
      * machine from the hypervisor, asks only when the target is larger than
      * that in some dimension (grows()), and asks the node and pool only for
      * what the ceiling adds above what the machine runs and what is held
-     * (RestateNodeCommitment::execute()'s $alreadyRuns). So this reads the
-     * machine from the hypervisor too (whatItRuns()) and asks the same dry
-     * run. When the hypervisor cannot be read, the machine may run less than
-     * its row says, so it is asked as if nothing were running beyond what is
-     * held - the stricter answer: a quote that passes is a change the resize
-     * does not refuse for capacity. Measured from the row instead, the quote
+     * (RestateNodeCommitment::execute()'s $alreadyRuns). So this asks the
+     * same dry run of $runs, the machine as the hypervisor reported it
+     * (whatItRuns()): a target no larger than that in any dimension - a
+     * shrink, or a shape the machine already has - is not refused, as the
+     * resize does not refuse it. Measured from the row instead, the quote
      * passed a machine behind its row that the resize then refused after the
      * money moved, and refused a machine ahead of its row a change the resize
      * would deliver (q2, q1: the verification of round seven D).
+     *
+     * This never asks the hypervisor itself. Its callers ask on the money
+     * path under row locks (a plan change under the subscription's, a wallet
+     * payment under the invoice's, a settlement under the subscription's),
+     * and a hypervisor read there held those locks for as long as the
+     * hypervisor took (B2, the verification of round seven D). The reading
+     * is taken before any lock and passed in. With none - not taken, or the
+     * hypervisor could not be read - the machine may run less than its row
+     * says, so it is asked as if nothing ran beyond what is held: the
+     * stricter answer, so a quote that passes is a change the resize does
+     * not refuse for capacity.
+     *
+     * A reading is as old as the moment it was taken, and the resize reads
+     * the machine again when it runs. A machine that grew in between (a
+     * resize that landed) asks the resize for less, never more. One that
+     * shrank in between - by hand at the hypervisor, the only way a machine
+     * gets smaller outside a resize - asks the resize for what it shrank by,
+     * which this answer did not ask: that, and only that, can be refused at
+     * the resize after a quote passed, and it is refused there for capacity
+     * as any growth that no longer fits is (nothing grown onto room the node
+     * does not have; retried, then held for a person). The payment and the
+     * settlement ask again, each with a reading of its own.
      */
-    public function whyTheGrowthWouldNotFit(VirtualMachine $machine, ?int $vcpu, ?int $memoryMib, ?int $diskGib): ?string
+    public function whyTheGrowthWouldNotFit(VirtualMachine $machine, ?int $vcpu, ?int $memoryMib, ?int $diskGib, ?VmResources $runs = null): ?string
     {
-        $runs = $this->whatItRuns($machine);
-
         if ($runs !== null && ! $this->grows($machine, $vcpu, $memoryMib, $diskGib, $runs)) {
             return null;
         }
@@ -90,7 +109,8 @@ final readonly class MachineCommitment
      * The machine's shape as the hypervisor reports it now - each figure it
      * does not report taken from the row, as the resize takes it - or null
      * when it cannot be read: no confirmed provider id, node or cluster, no
-     * such machine, or any failure to ask.
+     * such machine, or any failure to ask. A provider call: taken outside
+     * every transaction (whyTheGrowthWouldNotFit()).
      */
     public function whatItRuns(VirtualMachine $machine): ?VmResources
     {
@@ -131,9 +151,10 @@ final readonly class MachineCommitment
      *
      * "Runs now" is $current when the caller has read it - the resize reads
      * the machine from the hypervisor before it changes anything
-     * (ResizeVpsHandler), and a machine ahead of its row (a growth that
-     * landed unrecorded) is then compared with what it is - and the row
-     * otherwise, as the plan-change quote reads it.
+     * (ResizeVpsHandler), and the plan-change quote passes the reading it
+     * took (whyTheGrowthWouldNotFit()); a machine ahead of its row (a growth
+     * that landed unrecorded) is then compared with what it is - and the row
+     * otherwise. No caller in the platform passes none today.
      */
     public function grows(VirtualMachine $machine, ?int $vcpu, ?int $memoryMib, ?int $diskGib, ?VmResources $current = null): bool
     {

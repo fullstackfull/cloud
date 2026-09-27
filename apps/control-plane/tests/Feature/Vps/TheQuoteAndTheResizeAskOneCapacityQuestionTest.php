@@ -138,6 +138,27 @@ final class TheQuoteAndTheResizeAskOneCapacityQuestionTest extends TestCase
         $this->hypervisor->failReadsWith = null;
     }
 
+    #[Test]
+    public function a_shrink_against_what_the_machine_runs_is_never_refused_by_either(): void
+    {
+        /*
+         * The row says 4 / 8192, the machine runs 2 / 4096, nothing is held,
+         * and the node has no room at all. A target of 1 / 2048 grows nothing
+         * the machine runs: the resize records it without asking, and so
+         * does the quote that read the machine - it does not ask the node
+         * about the row's shape (R1f, the verification of round seven D).
+         */
+        $machine = $this->aMachine(4005);
+        $held = NodeCapacityReservation::query()->whereNull('released_at')->sole();
+        app(ReleaseNodeCapacity::class)->execute($this->node, $held->resources(), $held->storage_id, $held->reservation_key);
+        $machine->forceFill(['vcpu' => 4, 'memory_mib' => 8192])->save();
+        DB::table('compute_nodes')->where('id', $this->node->id)->update(['memory_mib' => 1024, 'memory_headroom_percent' => 10]);
+
+        $this->assertNull($this->quote($machine, 1, 2048, 160));
+        $resize = $this->resize($machine, 1, 2048, 160);
+        $this->assertTrue($resize->successful, (string) $resize->errorMessage);
+    }
+
     /**
      * A machine the platform built, at 2 / 4096 / 40, committed on pve-01.
      */
@@ -164,7 +185,10 @@ final class TheQuoteAndTheResizeAskOneCapacityQuestionTest extends TestCase
 
     private function quote(VirtualMachine $machine, int $vcpu, int $memoryMib, int $diskGib): ?string
     {
-        return app(MachineCommitment::class)->whyTheGrowthWouldNotFit($machine->refresh(), $vcpu, $memoryMib, $diskGib);
+        // As the quote asks: the machine read first (before any lock), then asked with that reading.
+        $commitment = app(MachineCommitment::class);
+
+        return $commitment->whyTheGrowthWouldNotFit($machine->refresh(), $vcpu, $memoryMib, $diskGib, $commitment->whatItRuns($machine));
     }
 
     private function resize(VirtualMachine $machine, int $vcpu, int $memoryMib, int $diskGib): ProvisioningResult

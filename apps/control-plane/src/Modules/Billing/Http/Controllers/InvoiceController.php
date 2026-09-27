@@ -176,11 +176,16 @@ final class InvoiceController
     {
         $this->authoriseWithinAccount($request, 'billing.pay');
 
+        $scoped = $this->scopedInvoice($invoice);
+        // Read before the audit's transaction opens, never under it (B2).
+        $runs = $this->payFromWallet->whatTheMachineRuns($scoped);
+
         $settlement = app(RecordActAtomically::class)->execute(
             fn (): InvoiceSettlement => $this->payFromWallet->execute(
                 $this->actingCustomer->get(),
-                $this->scopedInvoice($invoice),
+                $scoped,
                 $request->idempotencyKey(),
+                $runs,
             ),
             /*
              * Nothing is recorded when nothing moved, which here means one
