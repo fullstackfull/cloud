@@ -148,8 +148,10 @@ final readonly class MachineCommitment
     }
 
     /**
-     * A machine with no live commitment (given back when its build failed,
-     * then adopted) is committed under a key of its own.
+     * A machine with no live commitment found by its service - one adopted
+     * before adoption committed a released build again
+     * (NodeCapacityFollowsAnAdoption), or one whose commitment was released
+     * some other way - is committed under a key of its own.
      */
     private function keyFor(?NodeCapacityReservation $held, VirtualMachine $machine): string
     {

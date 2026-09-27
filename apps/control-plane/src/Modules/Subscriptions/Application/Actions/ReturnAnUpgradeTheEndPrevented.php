@@ -49,7 +49,10 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *    end. For a change settled before `delivered_at` existed, and a
  *    proration invoice with no recorded change, a resize or package-change
  *    job keyed on the invoice still counts as delivered
- *    (PlanChangeDelivery::wasDelivered());
+ *    (PlanChangeDelivery::wasDelivered()). A change its settlement found
+ *    could no longer be delivered was not delivered either, and was
+ *    returned there (ReturnAPlanChangeNoLongerDeliverable): the invoice
+ *    holds nothing more, and asked again here it credits nothing;
  *  - no later change was settled, when the change is recorded: an upgrade a
  *    later settled change superseded - a later change that owed nothing, or
  *    whose invoice was paid, and whose credit was drawn on this invoice -

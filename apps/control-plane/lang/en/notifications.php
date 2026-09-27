@@ -75,6 +75,10 @@ return [
             'title' => 'Payment overdue for :service',
             'body' => 'Payment for :service is overdue. Your service continues until :grace_ends, after which it will be suspended.',
         ],
+        'plan_change_returned' => [
+            'title' => 'The plan change for :service was not made',
+            'body' => 'The plan change for :service could no longer be made when your payment arrived. :amount has been returned to your wallet, and :service stays on its current plan.',
+        ],
         'cancellation_scheduled' => [
             'title' => ':service is scheduled to end',
             'body' => ':service will end on :date. You will keep full use of it until then. Your data is kept for :retention_days days after that, and destroyed once that time is up.',
@@ -125,9 +129,17 @@ return [
             'title' => 'Could not change the plan for :service',
             'body' => 'The plan change for :service did not complete and has been left as it was. Nothing has been charged for the change.',
         ],
+        'plan_change_failed_after_payment' => [
+            'title' => 'Could not change the plan for :service',
+            'body' => 'The plan change for :service did not complete, and :service is still running as it was. What you paid for the change is held until our team either completes the change or returns the payment to you.',
+        ],
+        'plan_change_needs_review' => [
+            'title' => 'The plan change for :service is waiting for our team',
+            'body' => 'The plan change for :service could not be applied automatically, and a person is looking at it. :service keeps running as it was in the meantime. If you paid for the change, that payment is held until the change is applied, or returned if it cannot be.',
+        ],
         'reinstall_completed' => [
-            'title' => ':service has been reinstalled',
-            'body' => ':service has been reinstalled with :image and is running again.',
+            'title' => 'Reinstall of :service is complete',
+            'body' => 'The reinstall of :service is complete, and it is running again.',
         ],
         'reinstall_failed' => [
             'title' => 'Reinstall of :service did not complete',

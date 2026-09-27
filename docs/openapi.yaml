@@ -3659,7 +3659,7 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/AdminHostingNodeResponse"
+                "$ref": "#/components/schemas/AdminHostingNodeWrittenResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -3748,7 +3748,7 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/AdminHostingNodeResponse"
+                "$ref": "#/components/schemas/AdminHostingNodeWrittenResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -4090,7 +4090,7 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/AdminIpPoolResponse"
+                "$ref": "#/components/schemas/AdminIpPoolWrittenResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -4171,7 +4171,7 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/AdminIpPoolResponse"
+                "$ref": "#/components/schemas/AdminIpPoolWrittenResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -20798,28 +20798,60 @@ components:
     AdminHostingNode:
       type: "object"
       additionalProperties: false
-      description: "A panel server, written down. It arrives claiming nothing: no licence state, no usage, no accounts. Every one of those is a statement only the panel can make, and the reconciler is what asks."
+      description: "Names no api_endpoint and no credentials reference. An operator screen has no use for either, and a support tool that displays them puts them in a screenshot."
       properties:
         id:
           "$ref": "#/components/schemas/Ulid"
         slug:
-          type: "string"
-        hostname:
-          type: "string"
-        panel:
-          type: "string"
-        status:
-          type: "string"
-        panel_licensed:
-          type: "boolean"
-        accepts_new_accounts:
-          type:
-            - "boolean"
-            - "null"
-        version:
           type:
             - "string"
             - "null"
+        hostname:
+          type:
+            - "string"
+            - "null"
+        panel:
+          type:
+            - "string"
+            - "null"
+        panel_version:
+          type:
+            - "string"
+            - "null"
+        status:
+          type:
+            - "string"
+            - "null"
+        accepts_new_accounts:
+          type: "boolean"
+        panel_licensed:
+          type: "boolean"
+        licence_status:
+          type:
+            - "string"
+            - "null"
+        account_count:
+          type:
+            - "integer"
+            - "null"
+        max_accounts:
+          type:
+            - "integer"
+            - "null"
+        disk_used_mib:
+          type:
+            - "integer"
+            - "null"
+        disk_total_mib:
+          type:
+            - "integer"
+            - "null"
+        load_average:
+          type:
+            - "string"
+            - "null"
+        last_synced_at:
+          "$ref": "#/components/schemas/Timestamp"
         reconciled_at:
           "$ref": "#/components/schemas/Timestamp"
         reconcile_attempted_at:
@@ -20841,13 +20873,34 @@ components:
             "$ref": "#/components/schemas/AdminHostingNode"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
-    AdminHostingNodeResponse:
+    AdminHostingNodeWritten:
+      type: "object"
+      additionalProperties: false
+      description: "A panel server, written down. It arrives claiming nothing: no licence state, no usage, no accounts. Every one of those is a statement only the panel can make, and the reconciler is what asks. The registration answers the fields it wrote; a correction answers the node's id, status and whether it accepts new accounts."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        slug:
+          type: "string"
+        hostname:
+          type: "string"
+        panel:
+          type: "string"
+        status:
+          type: "string"
+        panel_licensed:
+          type: "boolean"
+        accepts_new_accounts:
+          type:
+            - "boolean"
+            - "null"
+    AdminHostingNodeWrittenResponse:
       type: "object"
       required:
         - "data"
       properties:
         data:
-          "$ref": "#/components/schemas/AdminHostingNode"
+          "$ref": "#/components/schemas/AdminHostingNodeWritten"
     AdminHostingPasswordReset:
       type: "object"
       additionalProperties: false
@@ -20952,6 +21005,54 @@ components:
     AdminIpPool:
       type: "object"
       additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        slug:
+          type:
+            - "string"
+            - "null"
+        name:
+          type:
+            - "string"
+            - "null"
+        ip_version:
+          type:
+            - "integer"
+            - "null"
+        scope:
+          type:
+            - "string"
+            - "null"
+        datacenter:
+          type:
+            - "string"
+            - "null"
+        subnets_count:
+          type:
+            - "integer"
+            - "null"
+        quarantine_days:
+          type:
+            - "integer"
+            - "null"
+        is_active:
+          type: "boolean"
+    AdminIpPoolPage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/AdminIpPool"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
+    AdminIpPoolWritten:
+      type: "object"
+      additionalProperties: false
       description: "A block of addresses and the scope that decides who may be given one. `management` reaches the hypervisor and BMC control planes; the allocator refuses to hand one to a customer service and placement refuses to count one as capacity. The scope is fixed at creation for that reason — reclassifying a pool would move addresses between the control plane and the customer estate retrospectively."
       properties:
         id:
@@ -20976,25 +21077,13 @@ components:
           type:
             - "string"
             - "null"
-    AdminIpPoolPage:
-      type: "object"
-      required:
-        - "data"
-        - "meta"
-      properties:
-        data:
-          type: "array"
-          items:
-            "$ref": "#/components/schemas/AdminIpPool"
-        meta:
-          "$ref": "#/components/schemas/PaginationMeta"
-    AdminIpPoolResponse:
+    AdminIpPoolWrittenResponse:
       type: "object"
       required:
         - "data"
       properties:
         data:
-          "$ref": "#/components/schemas/AdminIpPool"
+          "$ref": "#/components/schemas/AdminIpPoolWritten"
     AdminNamedHostingDomain:
       type: "object"
       additionalProperties: false

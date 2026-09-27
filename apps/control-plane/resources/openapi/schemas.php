@@ -2305,6 +2305,9 @@ return [
             'disk_total_mib' => ['type' => ['integer', 'null']],
             'load_average' => ['type' => ['string', 'null']],
             'last_synced_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'reconciled_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'reconcile_attempted_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'reconcile_error' => ['type' => ['string', 'null'], 'description' => 'Why the reconciliation sweep\'s last attempt could not read this node\'s account listing, if it could not; null once one is read. While it is set, nothing on the node is being compared with the platform\'s records. `reconciled_at` is when they last were; `reconcile_attempted_at` is when the sweep last asked, and the sweep asks the least recently asked node first.'],
         ],
     ],
     'AdminService' => [
@@ -2382,7 +2385,14 @@ return [
             'version' => ['type' => ['string', 'null']],
         ],
     ],
-    'AdminIpPool' => [
+    /*
+     * What registering or correcting an address pool answers - not the pool
+     * list's row (AdminIpPool, above). It used to be a second `AdminIpPool`
+     * key in this array, which silently replaced the list's schema: the
+     * published pool list lacked datacenter, subnets_count and
+     * quarantine_days, under additionalProperties false.
+     */
+    'AdminIpPoolWritten' => [
         'type' => 'object',
         'additionalProperties' => false,
         'description' => 'A block of addresses and the scope that decides who may be given one. `management` reaches the hypervisor and BMC control planes; the allocator refuses to hand one to a customer service and placement refuses to count one as capacity. The scope is fixed at creation for that reason — reclassifying a pool would move addresses between the control plane and the customer estate retrospectively.',
@@ -2412,10 +2422,17 @@ return [
             'allocatable_addresses' => ['type' => 'integer', 'description' => 'On registration only: the addresses written available for the allocator. Zero for IPv6 and for held space.'],
         ],
     ],
-    'AdminHostingNode' => [
+    /*
+     * What registering or correcting a panel server answers - not the node
+     * list's row (AdminHostingNode, above). It used to be a second
+     * `AdminHostingNode` key in this array, which silently replaced the
+     * list's schema: the published node list lacked every usage and licence
+     * field it returns, under additionalProperties false.
+     */
+    'AdminHostingNodeWritten' => [
         'type' => 'object',
         'additionalProperties' => false,
-        'description' => 'A panel server, written down. It arrives claiming nothing: no licence state, no usage, no accounts. Every one of those is a statement only the panel can make, and the reconciler is what asks.',
+        'description' => 'A panel server, written down. It arrives claiming nothing: no licence state, no usage, no accounts. Every one of those is a statement only the panel can make, and the reconciler is what asks. The registration answers the fields it wrote; a correction answers the node\'s id, status and whether it accepts new accounts.',
         'properties' => [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
             'slug' => ['type' => 'string'],
@@ -2424,12 +2441,6 @@ return [
             'status' => ['type' => 'string'],
             'panel_licensed' => ['type' => 'boolean'],
             'accepts_new_accounts' => ['type' => ['boolean', 'null']],
-            'version' => ['type' => ['string', 'null']],
-            // Returned by the node list (not by the create or update
-            // response), so not required.
-            'reconciled_at' => ['$ref' => '#/components/schemas/Timestamp'],
-            'reconcile_attempted_at' => ['$ref' => '#/components/schemas/Timestamp'],
-            'reconcile_error' => ['type' => ['string', 'null'], 'description' => 'Why the reconciliation sweep\'s last attempt could not read this node\'s account listing, if it could not; null once one is read. While it is set, nothing on the node is being compared with the platform\'s records. `reconciled_at` is when they last were; `reconcile_attempted_at` is when the sweep last asked, and the sweep asks the least recently asked node first.'],
         ],
     ],
     'AdminDedicatedStock' => [

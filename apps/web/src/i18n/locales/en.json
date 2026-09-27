@@ -1980,8 +1980,8 @@
       "invoice_outstanding": "An invoice for this subscription is still unpaid. Pay it before changing plan again.",
       "out_of_stock": "This plan is sold out.",
       "per_customer_limit": "Your account already holds as many of this plan as it may.",
-      "not_deliverable": "This plan is temporarily unavailable to move onto. Nothing has been charged; please try again later.",
-      "previous_change_pending": "Your last plan change is paid for and still being applied. Try again when it has finished.",
+      "not_deliverable": "Your service cannot be moved onto this plan. Nothing has been charged.",
+      "previous_change_pending": "Your last plan change is paid for and has not been applied yet. You can change plan again once it has been; if that takes more than a few minutes, contact support.",
       "unit_count_unknown": "This subscription is on a price we no longer sell, so it cannot be moved onto another plan here. Contact support to change it."
     },
     "warning": {

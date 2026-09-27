@@ -50,6 +50,18 @@ final readonly class RenderNotification
             if (is_scalar($value)) {
                 $replacements[$name] = $value;
             }
+
+            /*
+             * Except a name the catalogue keeps in both languages - a plan's,
+             * stored as it is on the plan, {"en": ..., "ar": ...} - which is
+             * read in the reader's language, as the rest of the sentence is,
+             * and in the fallback language when it has no entry in theirs.
+             * Stored in one language, an Arabic reader would get the English
+             * name in the middle of an Arabic sentence.
+             */
+            if (is_array($value) && self::isATranslatedName($value)) {
+                $replacements[$name] = $value[$locale] ?? $value[(string) config('app.fallback_locale')] ?? null;
+            }
         }
 
         return new RenderedNotification(
@@ -57,6 +69,26 @@ final readonly class RenderNotification
             body: $this->line($key.'.body', $replacements, $locale),
             locale: $locale,
         );
+    }
+
+    /**
+     * A map of locale to text and nothing else: `{"en": "Large", "ar": "كبير"}`.
+     *
+     * @param  array<mixed>  $value
+     */
+    private static function isATranslatedName(array $value): bool
+    {
+        if ($value === []) {
+            return false;
+        }
+
+        foreach ($value as $locale => $text) {
+            if (! is_string($locale) || preg_match('/\A[a-z]{2}\z/', $locale) !== 1 || ! is_string($text)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

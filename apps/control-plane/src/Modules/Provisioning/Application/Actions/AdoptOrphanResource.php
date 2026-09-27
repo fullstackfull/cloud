@@ -39,8 +39,9 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
  *    somebody else is still paying for.
  *
  * And what the job holds follows the resource (ReservationsFollowAnAdoption):
- * a build's node commitment is moved to the node the adopted machine is on,
- * in this transaction, and the adoption's record says where it went. An
+ * a build's node commitment is moved to the node the adopted machine is on
+ * (or, given back when the build failed, committed again there), in this
+ * transaction, and the adoption's record says where it went. An
  * adoption that left it where the last attempt was placed left one node
  * charged for a machine it does not run and the machine's own node charged
  * nothing (D5, round six).

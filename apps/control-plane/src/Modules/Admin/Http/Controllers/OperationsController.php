@@ -21,6 +21,7 @@ use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\StateMachines\ProvisioningJobStateMachine;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Vps\Domain\Enums\ReinstallState;
 use Lynomia\Modules\Vps\Infrastructure\Models\VmReinstall;
 
@@ -318,9 +319,33 @@ final class OperationsController
             type: $completed ? NotificationType::ReinstallCompleted : NotificationType::ReinstallFailed,
             idempotencyKey: 'reinstall-resolved:'.$type.':'.$operation->getKey(),
             subject: $operation,
-            data: ['service' => 'your server', 'image' => ''],
+            data: ['service' => $this->serviceName($operation)],
             link: '/services',
         );
+    }
+
+    /**
+     * What to call the service in the customer's sentence: its label, or its
+     * id, as the engine's own messages name it (NotifyOnProvisioningOutcome).
+     * With no service to name, a phrase in both languages, read in the
+     * reader's (RenderNotification). This used to be the English "your
+     * server" for everyone, inside the Arabic sentence too, and an empty
+     * `image` the sentence read as a gap.
+     *
+     * @return string|array<string, string>
+     */
+    private function serviceName(Model $operation): string|array
+    {
+        $serviceId = $operation->getAttribute('service_id');
+        $service = is_string($serviceId) ? Service::query()->find($serviceId) : null;
+
+        if ($service === null) {
+            return ['en' => 'your server', 'ar' => 'خادمك'];
+        }
+
+        $label = $service->label;
+
+        return is_string($label) && $label !== '' ? $label : (string) $service->getKey();
     }
 
     /**

@@ -246,7 +246,11 @@ final readonly class MoneyCollectedForThePeriod
      * half was netted against its credit - priced the time since at list
      * (proration lines are not discountable, see ChangeSubscriptionPlan), so
      * its remainder is returned at list. An upgrade not paid for (open, void,
-     * uncollectible) bought nothing and does not count.
+     * uncollectible) bought nothing and does not count, and nor does one paid
+     * and then returned at its settlement because it could no longer be
+     * delivered (`returned_at`, ReturnAPlanChangeNoLongerDeliverable): its
+     * invoice stays paid, and counted, the next downgrade credited the
+     * discounted plan's time at list (the round-six verifier's O-3 probe).
      */
     public function pricedAsThePeriodWas(Money $remainder, Subscription $subscription): Money
     {
@@ -342,6 +346,10 @@ final readonly class MoneyCollectedForThePeriod
             ->where('subscription_id', $subscription->getKey())
             ->where('changed_at', '>=', $subscription->current_period_start)
             ->where('changed_at', '<', $subscription->current_period_end)
+            // A change returned at its settlement bought nothing: its money
+            // went back to the wallet and the subscription back to the plan
+            // it left, whose time was still bought at the discounted price.
+            ->whereNull('returned_at')
             ->where(static fn (Builder $bought): Builder => $bought
                 ->whereNull('proration_invoice_id')
                 ->orWhereExists(static fn (Builder $invoice): Builder => $invoice

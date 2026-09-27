@@ -7,10 +7,12 @@ namespace Tests\Feature\Concurrency;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Lynomia\Modules\Billing\Application\Actions\RecordInvoiceRefund;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
+use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
@@ -29,6 +31,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\RenewSubscription;
+use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Wallet\Application\Actions\PayInvoiceFromWallet;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
@@ -257,6 +260,37 @@ final class MoneyPathsTakeTheirLocksInOneOrderTest extends TestCase
         $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status, 'Nothing lapsed, so nothing was measured.');
         $this->assertSame($small->getKey(), $subscription->fresh()?->plan_id);
         $this->assertTakenInOrder($order, ['subscriptions', 'wallets', 'plans'], 'RenewSubscription (a lapse)');
+    }
+
+    #[Test]
+    public function a_settlement_returning_a_change_no_longer_deliverable_locks_the_invoice_and_wallet_before_the_plan(): void
+    {
+        /*
+         * The settlement holds the subscription, returns what the paid
+         * invoice holds (the invoice, then the wallet) and puts the
+         * subscription back on the plan it left (the plan, last): the order
+         * WhatAnInvoiceStillHolds declares for ResizeOnPlanChangeSettlement.
+         */
+        [$customer, $user, $subscription, $small, , $large, $largePrice] = $this->aPaidSubscription(onSmall: true);
+
+        app(ApplyPlanChange::class)->execute($subscription, $large, $largePrice, 'lock-order-return', $user);
+
+        /** @var Invoice $upgrade */
+        $upgrade = Invoice::query()->where('subscription_id', $subscription->getKey())->where('status', InvoiceStatus::Open->value)->sole();
+
+        // Captured with the settlement held back, and then the machine goes:
+        // the change can no longer be delivered when the settlement is heard.
+        Event::fakeFor(fn () => app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount(Money::ofMinor($upgrade->total_minor, 'KWD'))->create()), [InvoicePaid::class]);
+        VirtualMachine::query()->delete();
+
+        $event = new InvoicePaid((string) $upgrade->getKey(), (string) $customer->getKey(), null, (string) $subscription->getKey(), CarbonImmutable::now());
+
+        $order = $this->firstLocksOf(function () use ($event): void {
+            app(ResizeOnPlanChangeSettlement::class)->handle($event);
+        });
+
+        $this->assertSame($small->getKey(), $subscription->fresh()?->plan_id, 'Nothing was returned, so nothing was measured.');
+        $this->assertTakenInOrder($order, ['subscriptions', 'invoices', 'wallets', 'plans'], 'ResizeOnPlanChangeSettlement (a change no longer deliverable)');
     }
 
     /**

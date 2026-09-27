@@ -347,6 +347,52 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
     // ---- 2. the resize delivers what the paid invoice bought ---------------
 
     #[Test]
+    public function after_a_returned_upgrade_a_discounted_period_is_still_credited_at_the_price_it_was_bought_at(): void
+    {
+        /*
+         * An upgrade paid and then returned at its settlement - it could no
+         * longer be delivered (ReturnAPlanChangeNoLongerDeliverable) - bought
+         * nothing: its money went back to the wallet and the subscription
+         * went back to the discounted plan. Its invoice stays paid, and the
+         * repricing rule counted any change with a paid invoice as having
+         * priced the period at list, so the next downgrade credited the
+         * discounted plan's unused time at list: 3.333 for time that cost
+         * 1.667 (O-3, the round-six verifier's probe). A returned change
+         * repriced nothing.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $base = $this->plan('base', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160], 10_000);
+        $lean = $this->plan('lean', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160], 9_000);
+        $subscription = $this->paidSubscriptionOn($customer, $base);
+        $this->serviceWithMachine($customer, $subscription);
+
+        /** @var Invoice $period */
+        $period = Invoice::query()->where('subscription_id', $subscription->getKey())->sole();
+        $period->forceFill(['subtotal_minor' => 10_000, 'discount_minor' => 5_000, 'total_minor' => 5_000, 'amount_paid_minor' => 5_000])->save();
+        InvoiceItem::query()->where('invoice_id', $period->getKey())->update(['discount_minor' => 5_000, 'total_minor' => 5_000]);
+        Transaction::query()->where('invoice_id', $period->getKey())->update(['amount_minor' => 5_000]);
+
+        $this->changePlan($user, $subscription, $this->large, 'coupon-up-returned')->assertOk();
+        $upgrade = $this->openProrationInvoice($subscription);
+
+        // Captured with the settlement held back; then the machine goes, so
+        // the settlement finds the change can no longer be delivered.
+        Event::fakeFor(fn () => $this->settle($upgrade, $customer), [InvoicePaid::class]);
+        VirtualMachine::query()->delete();
+        app(ResizeOnPlanChangeSettlement::class)->handle(new InvoicePaid((string) $upgrade->getKey(), (string) $customer->getKey(), null, (string) $subscription->getKey(), CarbonImmutable::now()));
+
+        $this->assertNotNull(PlanChange::query()->where('proration_invoice_id', $upgrade->getKey())->sole()->returned_at, 'Nothing was returned, so nothing is measured.');
+        $this->assertSame($base->id, $subscription->fresh()?->plan_id);
+
+        $this->changePlan($user, $subscription->fresh(), $lean, 'coupon-down-after-return')->assertOk();
+
+        /** @var PlanChange $downgrade */
+        $downgrade = PlanChange::query()->where('subscription_id', $subscription->getKey())->orderByDesc('changed_at')->orderByDesc('id')->firstOrFail();
+        $this->assertSame((string) $lean->id, $downgrade->to_plan_id);
+        $this->assertSame(-1_667, $downgrade->credit_minor, 'The discounted plan\'s unused time was credited at list after a returned upgrade.');
+    }
+
+    #[Test]
     public function settling_a_cheap_invoice_resizes_to_the_plan_that_invoice_bought(): void
     {
         [$customer, $user] = $this->accountWithOwner();

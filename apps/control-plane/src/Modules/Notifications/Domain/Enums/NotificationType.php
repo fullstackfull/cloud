@@ -69,6 +69,13 @@ enum NotificationType: string
     case RenewalSucceeded = 'billing.renewal_succeeded';
     case GracePeriodStarted = 'billing.grace_period_started';
     case CancellationScheduled = 'billing.cancellation_scheduled';
+    /*
+     * A paid plan change its settlement found could no longer be delivered,
+     * returned: the payment to the wallet, the subscription to the plan it
+     * came from (ReturnAPlanChangeNoLongerDeliverable). The customer paid for
+     * a change and did not get it, and is told where the money went.
+     */
+    case PlanChangeReturned = 'billing.plan_change_returned';
 
     /*
      * The account's country or currency, decided. Applied says from when
@@ -118,7 +125,26 @@ enum NotificationType: string
      */
     case DataRetentionEnding = 'service.data_retention_ending';
     case PlanChangeCompleted = 'service.plan_change_completed';
+    /*
+     * Two failures, because they differ in the money. A change that owed
+     * nothing (a downgrade, a move between equal prices) is queued when it is
+     * made, and nothing was charged for it: PlanChangeFailed says so. An
+     * upgrade is queued only once its proration invoice is paid, so its
+     * failure has been charged, and the payment is held for an operator to
+     * complete the change or return it: PlanChangeFailedAfterPayment. The one
+     * message used to tell both that nothing had been charged.
+     */
     case PlanChangeFailed = 'service.plan_change_failed';
+    case PlanChangeFailedAfterPayment = 'service.plan_change_failed_after_payment';
+    /*
+     * A paid plan change whose provider half stopped in review - a resize
+     * the node could no longer hold, retried to the end, or a package change
+     * that timed out. The build's "needs our attention" says setting the
+     * service up did not finish, which is not what happened: the customer is
+     * told the change is waiting for the team and what they paid for it is
+     * held (NotifyOnProvisioningOutcome).
+     */
+    case PlanChangeNeedsReview = 'service.plan_change_needs_review';
     case ReinstallCompleted = 'service.reinstall_completed';
     case ReinstallFailed = 'service.reinstall_failed';
     case BackupCompleted = 'service.backup_completed';
@@ -221,6 +247,7 @@ enum NotificationType: string
             self::RenewalSucceeded,
             self::GracePeriodStarted,
             self::CancellationScheduled,
+            self::PlanChangeReturned,
             self::CountryCurrencyChangeApplied,
             self::CountryCurrencyChangeRejected,
             self::CountryCurrencyChangeNeedsReview => NotificationCategory::Billing,
@@ -245,7 +272,7 @@ enum NotificationType: string
         $emailed = [
             self::PasswordChanged, self::TwoFactorEnabled, self::TwoFactorDisabled, self::NewSignIn,
             self::InvoiceIssued, self::PaymentFailed, self::RefundIssued,
-            self::GracePeriodStarted, self::CancellationScheduled,
+            self::GracePeriodStarted, self::CancellationScheduled, self::PlanChangeReturned,
             self::CountryCurrencyChangeApplied, self::CountryCurrencyChangeRejected,
             self::ServiceReady, self::ServiceProvisioningFailed,
             self::ServiceSuspended, self::ServiceRestored, self::ServiceReactivationFailed,
@@ -259,7 +286,7 @@ enum NotificationType: string
              * away from the portal, for the same reason the other two are.
              */
             self::RestoreCompleted, self::RestoreFailed, self::RestoreNeedsReview,
-            self::PlanChangeCompleted, self::PlanChangeFailed,
+            self::PlanChangeCompleted, self::PlanChangeFailed, self::PlanChangeFailedAfterPayment, self::PlanChangeNeedsReview,
         ];
 
         return in_array($this, $emailed, strict: true)
@@ -282,6 +309,8 @@ enum NotificationType: string
             self::ServiceNeedsReview,
             self::ServiceReactivationFailed,
             self::PlanChangeFailed,
+            self::PlanChangeFailedAfterPayment,
+            self::PlanChangeNeedsReview,
             self::ReinstallFailed,
             self::BackupFailed,
             self::BackupNeedsReview,

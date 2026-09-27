@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Vps;
 
 use Database\Seeders\RolePermissionSeeder;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
@@ -13,7 +14,10 @@ use Lynomia\Modules\Compute\Domain\Exceptions\ClusterNotConfiguredException;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
 use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
+use Lynomia\Modules\Provisioning\Application\Actions\CompensateFailedJob;
+use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
+use PDOException;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Vps\Concerns\DrivesVpsCreatesThroughTheOperatorPath;
 use Tests\TestCase;
@@ -134,6 +138,167 @@ final class AnAdoptionMovesTheCommitmentToWhereTheMachineIsTest extends TestCase
         $after = $this->liveReservation();
         $this->assertSame([$before->id, $before->node_id, $before->storage_id], [$after->id, $after->node_id, $after->storage_id]);
         $this->assertCommitted($this->node, vms: 1, memoryMib: 4096, diskGib: 40);
+    }
+
+    #[Test]
+    public function a_build_whose_commitment_was_released_is_committed_again_where_the_adopted_machine_is(): void
+    {
+        /*
+         * The build failed and its commitment was given back (the engine's
+         * release on a failure it took for "nothing was built"), and then the
+         * machine was found at the provider and adopted. Adoption found no
+         * live reservation and did nothing: the machine ran on pve-01,
+         * charged to no node, until its next resize wrote one.
+         */
+        $this->addNode('pve-02');
+        $job = $this->createJob();
+        $this->runWorker($job);
+        $machine = $this->hypervisor->everyMachine()[0];
+        $this->assertSame('pve-01', $machine->nodeName);
+
+        $job->refresh()->forceFill(['status' => ProvisioningJobStatus::Failed, 'failure_class' => FailureClass::Permanent])->save();
+        app(CompensateFailedJob::class)->execute($job, FailureClass::Permanent);
+        $this->assertSame(0, NodeCapacityReservation::query()->whereNull('released_at')->count(), 'The build still holds a commitment, so nothing is measured.');
+        $this->assertCommitted($this->node, vms: 0, memoryMib: 0, diskGib: 0);
+
+        $this->adoptAsOperator($job, $machine->providerId)->assertOk();
+
+        $this->assertSame(ProvisioningJobStatus::Succeeded, $job->refresh()->status);
+        $reservation = $this->liveReservation();
+        $this->assertSame((string) $this->node->id, $reservation->node_id, 'The adopted machine is charged to no node.');
+        $this->assertSame([2, 4096, 40], [$reservation->vcpu, $reservation->memory_mib, $reservation->disk_gib]);
+        $this->assertSame($job->service_id, $reservation->service_id);
+        $this->assertSame((string) $this->poolOn($this->node)->id, $reservation->storage_id);
+        $this->assertCommitted($this->node, vms: 1, memoryMib: 4096, diskGib: 40);
+        $this->assertSame(40, (int) $this->poolOn($this->node)->committed_gib);
+        $this->assertTrue($job->result['adoption']['capacity']['recommitted'] ?? null, json_encode($job->result['adoption'] ?? null));
+    }
+
+    #[Test]
+    public function a_released_build_is_committed_again_on_the_node_the_machine_is_found_on_not_where_it_was_last_placed(): void
+    {
+        // The D5 build: its commitment ends on pve-02, the machine on pve-01.
+        $other = $this->addNode('pve-02');
+        $job = $this->createJob();
+        $this->hypervisor->loseTheRequestToCreates = true;
+        $this->runWorker($job);
+        $first = $this->hypervisor->creates[0];
+        $this->node->forceFill(['status' => NodeStatus::Maintenance])->save();
+        $this->hypervisor->loseTheRequestToCreates = false;
+        $this->hypervisor->loseTheAnswerToCreates = false;
+        $this->retryAsOperator($job)->assertOk();
+        $this->hypervisor->atTheMomentOfCreate = function (CreateVmRequest $request) use ($first): void {
+            if ($request->nodeName === 'pve-02') {
+                $this->hypervisor->atTheMomentOfCreate = null;
+                $this->hypervisor->fleet->createVirtualMachine($first);
+            }
+        };
+        DB::table('provisioning_jobs')->where('id', $job->id)->update(['next_attempt_at' => null]);
+        $this->runWorker($job);
+        $this->assertSame((string) $other->id, $this->liveReservation()->node_id);
+
+        // And then it is given back, as a failure would.
+        $job->refresh()->forceFill(['status' => ProvisioningJobStatus::Failed, 'failure_class' => FailureClass::Permanent])->save();
+        app(CompensateFailedJob::class)->execute($job, FailureClass::Permanent);
+        $this->assertSame(0, NodeCapacityReservation::query()->whereNull('released_at')->count());
+
+        $this->adoptAsOperator($job, (string) $first->vmId)->assertOk();
+
+        $this->assertSame((string) $this->node->id, $this->liveReservation()->node_id, 'The machine was committed where the build was last placed, not where it runs.');
+        $this->assertCommitted($this->node, vms: 1, memoryMib: 4096, diskGib: 40);
+        $this->assertCommitted($other, vms: 0, memoryMib: 0, diskGib: 0);
+    }
+
+    #[Test]
+    public function a_released_build_whose_hypervisor_cannot_be_asked_is_committed_where_it_was_last_placed_and_says_why(): void
+    {
+        $this->addNode('pve-02');
+        $job = $this->createJob();
+        $this->runWorker($job);
+        $machine = $this->hypervisor->everyMachine()[0];
+        $job->refresh()->forceFill(['status' => ProvisioningJobStatus::Failed, 'failure_class' => FailureClass::Permanent])->save();
+        app(CompensateFailedJob::class)->execute($job, FailureClass::Permanent);
+
+        $cluster = (string) $this->cluster->id;
+        $this->hypervisor->atTheMomentOfLook = static function () use ($cluster): void {
+            throw ClusterNotConfiguredException::missingCredentials($cluster, 'pve-kw');
+        };
+
+        $this->adoptAsOperator($job, $machine->providerId)->assertOk();
+
+        $this->assertSame((string) $this->node->id, $this->liveReservation()->node_id);
+        $this->assertCommitted($this->node, vms: 1, memoryMib: 4096, diskGib: 40);
+        $this->assertStringContainsString('could not be asked', (string) ($job->refresh()->result['adoption']['capacity']['reason'] ?? ''));
+    }
+
+    #[Test]
+    public function a_build_released_twice_is_committed_again_from_its_last_commitment(): void
+    {
+        /*
+         * Failed on pve-01 (released), retried by an operator onto pve-02
+         * at a larger shape and failed again there (released), then adopted
+         * with a hypervisor that cannot be asked. The commitment taken again
+         * is the build's last: pve-02, at the shape it last held - not the
+         * first row the key ever had.
+         */
+        $other = $this->addNode('pve-02');
+        $job = $this->createJob(attributes: ['status' => ProvisioningJobStatus::Failed, 'failure_class' => FailureClass::Permanent]);
+
+        NodeCapacityReservation::query()->create([
+            'reservation_key' => $job->idempotency_key, 'node_id' => $this->node->id, 'service_id' => $job->service_id,
+            'customer_id' => $job->customer_id, 'vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 40,
+            'released_at' => now()->subHour(),
+        ]);
+        NodeCapacityReservation::query()->create([
+            'reservation_key' => $job->idempotency_key, 'node_id' => $other->id, 'service_id' => $job->service_id,
+            'customer_id' => $job->customer_id, 'vcpu' => 4, 'memory_mib' => 8192, 'disk_gib' => 80,
+            'released_at' => now()->subMinute(),
+        ]);
+
+        $cluster = (string) $this->cluster->id;
+        $this->hypervisor->atTheMomentOfLook = static function () use ($cluster): void {
+            throw ClusterNotConfiguredException::missingCredentials($cluster, 'pve-kw');
+        };
+
+        $this->adoptAsOperator($job, '4242')->assertOk();
+
+        $live = $this->liveReservation();
+        $this->assertSame((string) $other->id, $live->node_id, 'The commitment was taken again from the first release, not the last.');
+        $this->assertSame([4, 8192, 80], [$live->vcpu, $live->memory_mib, $live->disk_gib]);
+        $this->assertCommitted($other, vms: 1, memoryMib: 8192, diskGib: 80);
+        $this->assertCommitted($this->node, vms: 0, memoryMib: 0, diskGib: 0);
+    }
+
+    #[Test]
+    public function a_database_error_in_the_lookup_is_not_taken_for_a_hypervisor_that_cannot_be_asked(): void
+    {
+        /*
+         * Any failure to ask the hypervisor leaves the commitment where it is
+         * and the adoption goes on. A failure of the platform's own database
+         * is not that: the adoption's transaction cannot go on, and it is
+         * rolled back rather than recorded over a lookup that never ran.
+         */
+        $this->addNode('pve-02');
+        $job = $this->createJob();
+        $this->runWorker($job);
+        $this->assertSame(ProvisioningJobStatus::NeedsReview, $job->refresh()->status);
+        $machine = $this->hypervisor->everyMachine()[0];
+
+        $this->hypervisor->atTheMomentOfLook = static function (): void {
+            throw new QueryException('pgsql', 'select 1', [], new PDOException('SQLSTATE[08006]: connection failure'));
+        };
+
+        $this->withoutExceptionHandling();
+
+        try {
+            $this->adoptAsOperator($job, $machine->providerId);
+            $this->fail('A database error in the adoption lookup was swallowed.');
+        } catch (QueryException) {
+            // Re-thrown, as it should be.
+        }
+
+        $this->assertSame(ProvisioningJobStatus::NeedsReview, $job->refresh()->status, 'The adoption was recorded over a database error.');
+        $this->assertArrayNotHasKey('adoption', $job->result ?? []);
     }
 
     private function liveReservation(): NodeCapacityReservation

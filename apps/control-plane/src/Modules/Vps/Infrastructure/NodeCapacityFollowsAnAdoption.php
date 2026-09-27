@@ -38,7 +38,17 @@ use Throwable;
  * Not found, or the hypervisor cannot be asked for any reason, and the commitment is left
  * where it is, and the adoption's record says so: the adoption is the
  * operator's statement that the machine is theirs, and refusing it for want
- * of a hypervisor answer would leave the machine unbilled for longer.
+ * of a hypervisor answer would leave the machine unbilled for longer. A
+ * failure of the platform's own database is not a hypervisor that cannot be
+ * asked: it is re-thrown and the adoption rolls back.
+ *
+ * A build whose commitment was already given back - released on a failure
+ * taken for "nothing was built" - holds none to move. Its machine is
+ * committed again, at the shape the build last held, on the node it is found
+ * on (or, not found, on the node it was last placed on), as
+ * RestateNodeCommitment writes one for a machine with no live reservation.
+ * An adoption that found nothing live used to commit nothing, and the
+ * machine was charged to no node until its next resize.
  */
 final readonly class NodeCapacityFollowsAnAdoption implements ReservationsFollowAnAdoption
 {
@@ -60,10 +70,26 @@ final readonly class NodeCapacityFollowsAnAdoption implements ReservationsFollow
             ->whereNull('released_at')
             ->first();
 
-        /** @var ComputeNode|null $holding */
-        $holding = $held === null ? null : ComputeNode::query()->find($held->node_id);
+        /*
+         * None live: the build's commitment was given back (a failure taken
+         * for "nothing was built") before the machine was found and adopted.
+         * The last one it held says what shape the machine was committed at
+         * and where it was placed.
+         */
+        /** @var NodeCapacityReservation|null $released */
+        $released = $held !== null ? null : NodeCapacityReservation::query()
+            ->where('reservation_key', $job->idempotency_key)
+            ->whereNotNull('released_at')
+            ->orderByDesc('released_at')
+            ->orderByDesc('id')
+            ->first();
 
-        if ($held === null || $holding === null) {
+        $last = $held ?? $released;
+
+        /** @var ComputeNode|null $holding */
+        $holding = $last === null ? null : ComputeNode::query()->find($last->node_id);
+
+        if ($last === null || $holding === null) {
             return [];
         }
 
@@ -75,6 +101,9 @@ final readonly class NodeCapacityFollowsAnAdoption implements ReservationsFollow
         if ($cluster === null) {
             return ['node' => $holding->provider_name, 'moved' => false, 'reason' => 'the build\'s cluster is gone'];
         }
+
+        $found = null;
+        $unasked = null;
 
         try {
             $found = $this->whereItIs($cluster, $providerReference, $holding, $identity?->nodes ?? []);
@@ -92,11 +121,15 @@ final readonly class NodeCapacityFollowsAnAdoption implements ReservationsFollow
              * stayed unadopted for want of a lookup the adoption does not
              * need.
              */
-            return [
-                'node' => $holding->provider_name,
-                'moved' => false,
-                'reason' => 'the hypervisor could not be asked where the machine is: '.$this->redactor->redactString($e->getMessage()),
-            ];
+            $unasked = 'the hypervisor could not be asked where the machine is: '.$this->redactor->redactString($e->getMessage());
+        }
+
+        if ($released !== null) {
+            return $this->commitAgain($released, $found ?? $holding, $found === null ? ($unasked ?? 'the machine was not found on any node of the cluster') : null, $job);
+        }
+
+        if ($unasked !== null) {
+            return ['node' => $holding->provider_name, 'moved' => false, 'reason' => $unasked];
         }
 
         if ($found === null) {
@@ -108,10 +141,10 @@ final readonly class NodeCapacityFollowsAnAdoption implements ReservationsFollow
         }
 
         $moved = $this->commitment->execute(
-            reservationKey: $held->reservation_key,
+            reservationKey: $last->reservation_key,
             node: $found,
-            storageId: $this->poolOn($found, $held),
-            shape: $held->resources(),
+            storageId: $this->poolOn($found, $last),
+            shape: $last->resources(),
             refuseWhatDoesNotFit: false,
         );
 
@@ -120,6 +153,38 @@ final readonly class NodeCapacityFollowsAnAdoption implements ReservationsFollow
             'moved' => true,
             'moved_from' => $holding->provider_name,
             'storage_id' => $moved->storage_id,
+        ];
+    }
+
+    /**
+     * A machine adopted after its build's commitment was given back is
+     * committed again, at the shape the build last held, on the node it was
+     * found on - or, when it could not be found or the hypervisor could not
+     * be asked, on the node the build was last placed on, and the record says
+     * why. Recorded, never refused (RestateNodeCommitment writes a new row
+     * when none is live): the machine exists, and an adoption that committed
+     * nothing left it charged to no node until its next resize.
+     *
+     * @return array<string, mixed>
+     */
+    private function commitAgain(NodeCapacityReservation $released, ComputeNode $node, ?string $reason, ProvisioningJob $job): array
+    {
+        $committed = $this->commitment->execute(
+            reservationKey: $released->reservation_key,
+            node: $node,
+            storageId: $this->poolOn($node, $released),
+            shape: $released->resources(),
+            refuseWhatDoesNotFit: false,
+            serviceId: $released->service_id ?? $job->service_id,
+            customerId: $released->customer_id ?? $job->customer_id,
+        );
+
+        return [
+            'node' => $node->provider_name,
+            'moved' => false,
+            'recommitted' => true,
+            'storage_id' => $committed->storage_id,
+            ...($reason === null ? [] : ['reason' => $reason.'; committed on the node the build was last placed on']),
         ];
     }
 

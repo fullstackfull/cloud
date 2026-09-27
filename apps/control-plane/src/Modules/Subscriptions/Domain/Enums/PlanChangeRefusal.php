@@ -101,11 +101,13 @@ enum PlanChangeRefusal: string
     case NotDeliverable = 'not_deliverable';
 
     /**
-     * The last change was paid for and is still being delivered: its
-     * invoice is paid and its settlement has not yet been heard
-     * (PlanChangeDelivery::aPaidChangeAwaitsDelivery()). A change made in
-     * that window used to be accepted, and made the paid one look superseded
-     * when the subscription ended (X1).
+     * The last change was paid for and has not been delivered: its invoice
+     * is paid and its settlement has not been heard
+     * (PlanChangeDelivery::aPaidChangeAwaitsDelivery()) - normally minutes,
+     * but for ever, within the period, when the settlement's listener
+     * exhausts its retries. A change made in that window used to be
+     * accepted, and made the paid one look superseded when the subscription
+     * ended (X1).
      */
     case PreviousChangePending = 'previous_change_pending';
 

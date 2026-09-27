@@ -41,9 +41,13 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  * {@see refusal()} is asked by {@see QuotePlanChange} (so the options screen
  * and the change refuse the same plan) and, for a change already accepted, by
  * the payment of its proration invoice ({@see refusalForTheInvoice()}), as an
- * order is asked again when it is paid. What it asks is what
- * {@see QueuePlanChangeAtProvider} needs to queue the change, per product,
- * and nothing more:
+ * order is asked again when it is paid, and by the settlement of that
+ * payment ({@see refusalForTheChange()}), which returns a change it refuses.
+ * What it asks, per product, is the following - part of what
+ * {@see QueuePlanChangeAtProvider} needs to queue the change (a hosting
+ * service with no account, on which it also queues nothing, is not asked
+ * about), and for a VPS the capacity question the resize itself asks after
+ * it is queued:
  *
  *  - Shared Hosting: the target plan resolves to exactly one package on sale
  *    ({@see HostingPackageForPlan}) - the answer checkout's placement is given
@@ -161,7 +165,18 @@ final readonly class PlanChangeDelivery
         /** @var PlanChange|null $change */
         $change = PlanChange::query()->where('proration_invoice_id', $invoice->getKey())->first();
 
-        if ($change === null || $change->to_plan_id === null) {
+        return $change === null ? null : $this->refusalForTheChange($change);
+    }
+
+    /**
+     * The same question for a recorded plan change: asked when its invoice is
+     * paid (refusalForTheInvoice()), and again when that payment's settlement
+     * is heard ({@see ResizeOnPlanChangeSettlement}), because a card payment
+     * is captured after it was opened and the answer can change in between.
+     */
+    public function refusalForTheChange(PlanChange $change): ?string
+    {
+        if ($change->to_plan_id === null) {
             return null;
         }
 
@@ -208,8 +223,11 @@ final readonly class PlanChangeDelivery
      * settled before that was recorded, or an invoice with no recorded change
      * - queued the resize (or the package change) it paid for, under the key
      * the settlement gives it (`plan-change:<subscription>:<plan>:invoice:<id>`,
-     * {@see QueuePlanChangeAtProvider}). No key a customer chooses reaches a
-     * provisioning job (U-1), so no job of theirs can answer this.
+     * {@see QueuePlanChangeAtProvider}). Since U-1 no key a customer chooses
+     * reaches a provisioning job. A job written before that fix ended in the
+     * customer's raw Idempotency-Key, and one whose key the customer spelled
+     * `invoice:<id>` for this invoice would still answer this; nothing
+     * rewrites those rows.
      */
     public function wasDelivered(string $subscriptionId, string $invoiceId): bool
     {
@@ -246,6 +264,7 @@ final readonly class PlanChangeDelivery
         $paid = PlanChange::query()
             ->where('subscription_id', $subscription->getKey())
             ->whereNull('delivered_at')
+            ->whereNull('returned_at')
             ->whereNotNull('proration_invoice_id')
             ->where('changed_at', '>=', $subscription->current_period_start)
             ->whereExists(static fn ($invoice) => $invoice
@@ -270,12 +289,17 @@ final readonly class PlanChangeDelivery
      * Whether a plan change recorded after this one has been settled - it
      * owed nothing, or its invoice was paid - and so decided the machine's
      * shape itself. A later change still waiting on its invoice (or whose
-     * invoice was voided) has not.
+     * invoice was voided) has not, and nor has one paid and then returned at
+     * its settlement (`returned_at`): it delivered nothing and its money went
+     * back, so an earlier paid change it would have superseded is still
+     * undelivered - built by its settlement, or returned when the
+     * subscription ends (ReturnAnUpgradeTheEndPrevented).
      */
     public function aLaterChangeWasSettled(PlanChange $change): bool
     {
         return PlanChange::query()
             ->where('subscription_id', $change->subscription_id)
+            ->whereNull('returned_at')
             ->where(static fn ($later) => $later
                 ->where('changed_at', '>', $change->changed_at)
                 ->orWhere(static fn ($same) => $same

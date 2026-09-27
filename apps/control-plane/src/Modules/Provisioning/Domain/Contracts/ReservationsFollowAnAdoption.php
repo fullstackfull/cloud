@@ -15,7 +15,10 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
  * place. A build whose first create landed late on one node, after a retry
  * had moved its commitment to another, is adopted on the first: left alone,
  * the commitment charges a node for a machine it does not run and the node
- * that runs it is charged nothing (D5, round six). Which rows those are, and
+ * that runs it is charged nothing (D5, round six). And a job whose
+ * reservations were already given back - released on a failure taken for
+ * "nothing was built" - holds none to move: they are taken again where the
+ * resource is, or the resource is charged to nothing. Which rows those are, and
  * how to find where the resource is, belongs to the module that reserved
  * them, as release and quarantine do (ResourceReservationReleaser).
  */
