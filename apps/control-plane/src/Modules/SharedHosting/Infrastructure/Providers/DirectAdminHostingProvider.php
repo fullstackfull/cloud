@@ -351,16 +351,24 @@ final class DirectAdminHostingProvider implements HostingProvider
          * drift and an alert, from a body that plainly named one. It is
          * refused, as any other unreadable read is.
          *
-         * So is a list with an element that is not one account name. One that
-         * is not a string — `list[][]=bob`, `list[0][name]=bob` — used to be
-         * dropped without a word, which made those bodies an empty node; and
-         * one that is two names joined — `list[]=bob,alice`, a newline
-         * between them — was read as a single account nobody has, so both
-         * real ones went missing and a stranger stood in for them. An element
-         * is read as a name only when, once trimmed, it is empty (nothing
-         * there, as `list[]=` says) or passes isAccountName(). Anything else
-         * refuses the whole listing: dropping the element instead is the
-         * silent under-reading this exists to stop.
+         * So is a list with an element that could be more than one account,
+         * or none. One that is not a string — `list[][]=bob`,
+         * `list[0][name]=bob` — used to be dropped without a word, which made
+         * those bodies an empty node; and one that is two names joined —
+         * `list[]=bob,alice`, a newline between them — was read as a single
+         * account nobody has, so both real ones went missing and a stranger
+         * stood in for them. Either refuses the whole listing: dropping the
+         * element instead is the silent under-reading this exists to stop.
+         *
+         * What is refused is the ambiguous, not the unusual
+         * ({@see self::isOneName()}). A single token — `Admin`, `web_1`,
+         * `a.b`, a name longer than the platform would make — is read as that
+         * account; if the platform does not know it, reconciliation reports
+         * it as drift, which an operator sees. Refused, it would instead make
+         * the node's whole listing unreadable over one odd name. A refusal
+         * is not silent either: ReconcileHostingNodes logs it, keeps it on
+         * the node for the operator's node list, and moves the node behind
+         * the others rather than asking it first again.
          */
         $list = $body['list'] ?? null;
 
@@ -382,7 +390,7 @@ final class DirectAdminHostingProvider implements HostingProvider
                 continue;
             }
 
-            if ($name === null || ! self::isAccountName($name)) {
+            if ($name === null || ! self::isOneName($name)) {
                 throw HostingProviderException::unexpectedResponse(
                     self::NAME,
                     'list_accounts',
@@ -404,21 +412,24 @@ final class DirectAdminHostingProvider implements HostingProvider
     }
 
     /**
-     * Whether a listed name can be one DirectAdmin account name: lowercase
-     * letters and digits, beginning with a letter, no longer than
-     * HostingPanel::DirectAdmin->maxUsernameLength(). That is the shape the
-     * names this platform generates have (CreateHostingAccountHandler::
-     * usernameFor), and it holds no separator — no comma, whitespace, newline
-     * or punctuation — that could join two names in one. It is not a claim
-     * about every name a panel will ever list; a listing carrying a name
-     * outside it is refused as unreadable rather than guessed at, which costs
-     * a reconciliation pass on that node and never reports an account
-     * missing.
+     * Whether a trimmed, non-empty listed element is one name rather than
+     * several run together: it holds no whitespace, no control character, and
+     * none of the separators a list could be joined with (`,` `;` `|`), and
+     * it is valid UTF-8 — bytes that cannot be read as text cannot be shown
+     * to hold none of those either.
+     *
+     * Deliberately not a rule about what a DirectAdmin account name may be.
+     * Nobody here has established that, and the names the platform itself
+     * makes are not a bound on what a panel holds: an operator makes accounts
+     * by hand, and a requested username is passed through to the panel as
+     * asked. Case, length, digits and punctuation other than those separators
+     * are all read as a name, and the comparison decides whether it is one
+     * the platform knows.
      */
-    private static function isAccountName(string $name): bool
+    private static function isOneName(string $name): bool
     {
-        return strlen($name) <= HostingPanel::DirectAdmin->maxUsernameLength()
-            && preg_match('/\A[a-z][a-z0-9]*\z/', $name) === 1;
+        return preg_match('/[\s\p{Cc},;|]/u', $name) !== 1
+            && preg_match('//u', $name) === 1;
     }
 
     public function nodeHealth(HostingNode $node): NodeHealth

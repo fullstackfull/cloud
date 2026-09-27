@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\SharedHosting\Application\Actions;
 
+use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Provisioning\Application\Actions\RecordDrift;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
@@ -72,14 +73,36 @@ final readonly class ReconcileHostingNodes
         foreach ($this->reachableNodes() as $node) {
             try {
                 $listed = $this->providers->for($node)->listAccounts($node);
-            } catch (HostingProviderException) {
+            } catch (HostingProviderException $e) {
                 /*
                  * A panel that will not answer is not drift. Nothing is
                  * concluded — a sweep that recorded "missing at the panel" for
                  * every account on a node whose API was down would report an
                  * outage as data loss, and bury the one real missing account
                  * in the middle of it.
+                 *
+                 * But it is recorded, and it goes to the back. This used to
+                 * be a bare `continue`: no log, nothing on the node, and
+                 * `reconciled_at` left as it was — which, null or old, is
+                 * what put the node at the front of the next sweep, so a
+                 * batch's worth of unreadable nodes held the front for ever
+                 * and no other node was compared again. The attempt is
+                 * stamped (it is what the sweep orders by), the refusal is
+                 * kept on the node where the operator's node list shows it,
+                 * and a warning is logged. `reconciled_at` is not touched:
+                 * nothing was compared.
                  */
+                $node->forceFill([
+                    'reconcile_attempted_at' => now(),
+                    'reconcile_error' => $e->getMessage(),
+                ])->save();
+
+                Log::warning('A hosting node\'s account listing could not be read, so its accounts were not compared.', [
+                    'node' => $node->slug,
+                    'panel' => $node->panel->value,
+                    'error' => $e->getMessage(),
+                ]);
+
                 continue;
             }
 
@@ -95,7 +118,11 @@ final readonly class ReconcileHostingNodes
             $drifts += $this->compare($node, $rows, $listed);
             $drifts += $this->checkCapacity($node, $rows);
 
-            $node->forceFill(['reconciled_at' => now()])->save();
+            $node->forceFill([
+                'reconciled_at' => now(),
+                'reconcile_attempted_at' => now(),
+                'reconcile_error' => null,
+            ])->save();
         }
 
         return ['nodes' => $nodes, 'accounts' => $accounts, 'drifts' => $drifts];
@@ -270,6 +297,10 @@ final readonly class ReconcileHostingNodes
      * as drift would fill an operator's queue with the consequences of their
      * own maintenance window.
      *
+     * Least recently asked first — by the attempt, not by the last successful
+     * comparison, so a node that could not be read waits its turn behind the
+     * others instead of being asked first on every run.
+     *
      * @return list<HostingNode>
      */
     private function reachableNodes(): array
@@ -277,6 +308,7 @@ final readonly class ReconcileHostingNodes
         /** @var list<HostingNode> $nodes */
         $nodes = HostingNode::query()
             ->whereIn('status', [HostingNodeStatus::Active->value, HostingNodeStatus::Draining->value])
+            ->orderByRaw('reconcile_attempted_at asc nulls first')
             ->orderByRaw('reconciled_at asc nulls first')
             ->limit(max(1, (int) config('hosting.reconcile_batch', 25)))
             ->get()

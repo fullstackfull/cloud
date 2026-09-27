@@ -2305,6 +2305,9 @@ return [
             'disk_total_mib' => ['type' => ['integer', 'null']],
             'load_average' => ['type' => ['string', 'null']],
             'last_synced_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'reconciled_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'reconcile_attempted_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'reconcile_error' => ['type' => ['string', 'null'], 'description' => 'Why the reconciliation sweep\'s last attempt could not read this node\'s account listing, if it could not; null once one is read. While it is set, nothing on the node is being compared with the platform\'s records. `reconciled_at` is when they last were; `reconcile_attempted_at` is when the sweep last asked, and the sweep asks the least recently asked node first.'],
         ],
     ],
     'AdminService' => [

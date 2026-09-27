@@ -141,7 +141,45 @@ final class DirectAdminReadsMustAnswerTheCommandTest extends TestCase
         yield 'two names joined by a comma in one element' => ['list[]=bob,alice'];
         yield 'two names joined by a newline in one element' => ['list[]=bob%0Aalice'];
         yield 'two names joined by a space in one element' => ['list[]=bob%20alice'];
-        yield 'a name the panel could not have made' => ['list[]=alice&list[]=bob;rm'];
+        yield 'two names joined by a tab in one element' => ['list[]=bob%09alice'];
+        yield 'two names joined by a carriage return in one element' => ['list[]=bob%0Dalice'];
+        yield 'two names joined by a semicolon in one element' => ['list[]=alice&list[]=bob;carol'];
+        yield 'two names joined by a bar in one element' => ['list[]=bob%7Calice'];
+        yield 'a control character inside a name' => ['list[]=bob%00alice'];
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function unusualButSingleNames(): iterable
+    {
+        yield 'capital letters' => ['Admin', 'Admin'];
+        yield 'an underscore' => ['web_1', 'web_1'];
+        yield 'a leading digit' => ['1abc', '1abc'];
+        yield 'a dot' => ['a.b', 'a.b'];
+        yield 'a hyphen' => ['a-b', 'a-b'];
+        yield 'longer than any panel limit the platform names' => [str_repeat('a', 40), str_repeat('a', 40)];
+        yield 'surrounding whitespace, trimmed' => ['%20bob%0A', 'bob'];
+    }
+
+    /**
+     * The other side of the refusal: what is refused is what is ambiguous — an
+     * element that is not a string, or a name holding a separator, whitespace
+     * or a control character, which could be two names read as one. A single
+     * token is one name, however unusual, and is read as that account: if
+     * the platform does not know it, reconciliation shows it as drift, which
+     * an operator sees. Refusing it instead used to make the whole node's
+     * listing unreadable over one oddly named account.
+     */
+    #[Test]
+    #[DataProvider('unusualButSingleNames')]
+    public function a_single_name_however_unusual_is_read_as_that_account(string $encoded, string $name): void
+    {
+        $this->fakeBodies(['CMD_API_SHOW_USERS' => 'list[]=alice&list[]='.$encoded]);
+
+        $accounts = (new DirectAdminHostingProvider(new SecretRedactor))->listAccounts($this->node());
+
+        $this->assertSame(['alice', $name], array_map(static fn ($a): string => $a->username, $accounts));
     }
 
     /**
