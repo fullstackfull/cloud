@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\SharedHosting;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Database\DeadlockException;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
@@ -25,6 +26,8 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Mockery;
 use Monolog\Handler\TestHandler;
 use Monolog\LogRecord;
+use PDOException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
 use Tests\TestCase;
@@ -105,7 +108,7 @@ final class AFailureWhileReconcilingOneNodeStopsOnlyThatNodeTest extends TestCas
         // Run one asks the least recently asked node, and its comparison fails.
         $first = app(ReconcileHostingNodes::class)->execute();
 
-        $this->assertSame(['nodes' => 0, 'accounts' => 0, 'drifts' => 0], $first);
+        $this->assertSame(['nodes' => 0, 'accounts' => 0, 'drifts' => 0, 'unread' => 0, 'failed' => 1], $first);
         $stopped = $failing->fresh();
         $this->assertSame('2026-09-10 12:00:00', $stopped?->reconcile_attempted_at?->format('Y-m-d H:i:s'), 'The failed node was not stamped, so it is asked first again.');
         $this->assertSame('2026-09-01 00:00:00', $stopped->reconciled_at?->format('Y-m-d H:i:s'), 'A comparison that failed was recorded as made.');
@@ -135,7 +138,7 @@ final class AFailureWhileReconcilingOneNodeStopsOnlyThatNodeTest extends TestCas
 
         $outcome = app(ReconcileHostingNodes::class)->execute();
 
-        $this->assertSame(['nodes' => 1, 'accounts' => 0, 'drifts' => 1], $outcome);
+        $this->assertSame(['nodes' => 1, 'accounts' => 0, 'drifts' => 1, 'unread' => 0, 'failed' => 1], $outcome);
         $this->assertNotNull($failing->fresh()?->reconcile_error);
         $this->assertSame('2026-09-10 12:00:00', $fine->fresh()?->reconciled_at?->format('Y-m-d H:i:s'));
         $this->assertSame(1, ResourceDrift::query()->where('provider_reference', 'stranger')->count());
@@ -187,18 +190,131 @@ final class AFailureWhileReconcilingOneNodeStopsOnlyThatNodeTest extends TestCas
         $this->assertSame('2026-09-10 12:00:00', $fine->fresh()?->reconciled_at?->format('Y-m-d H:i:s'));
     }
 
+    #[Test]
+    public function a_failed_node_is_read_again_before_it_is_stamped_so_the_failed_success_stamp_is_not_written(): void
+    {
+        // The comparison succeeds; the node's own success stamp is refused.
+        DB::unprepared(<<<'SQL'
+            create function r7_refuse_success_stamp() returns trigger language plpgsql as $$
+            begin
+                if new.reconciled_at is distinct from old.reconciled_at and new.reconcile_error is null then
+                    raise exception 'refused for this test' using errcode = '23514';
+                end if;
+                return new;
+            end
+            $$;
+            create trigger r7_refuse_success_stamp before update on hosting_nodes
+                for each row execute function r7_refuse_success_stamp();
+            SQL);
+
+        $node = $this->node('node-stamp', '2026-09-01 00:00:00');
+        $this->listings(['node-stamp' => 'list[]=']);
+
+        $outcome = app(ReconcileHostingNodes::class)->execute();
+
+        $this->assertSame(1, $outcome['failed']);
+        $stopped = $node->fresh();
+        $this->assertSame('2026-09-01 00:00:00', $stopped?->reconciled_at?->format('Y-m-d H:i:s'), 'The failed comparison\'s success stamp was written beside its error.');
+        $this->assertSame('2026-09-10 12:00:00', $stopped->reconcile_attempted_at?->format('Y-m-d H:i:s'));
+        $this->assertNotNull($stopped->reconcile_error);
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function concurrencyFailures(): iterable
+    {
+        // PostgreSQL's own words for each.
+        yield 'a deadlock' => ['40P01', 'deadlock detected'];
+        yield 'a serialization failure' => ['40001', 'could not serialize access due to concurrent update'];
+    }
+
+    /**
+     * Inside a caller's transaction (here, the test's), Laravel does not roll
+     * a nested transaction back to its savepoint on a concurrency failure: the
+     * caller's transaction is aborted. Stamping the node would fail with
+     * 25P02 and hide what happened; the original is let out instead. With no
+     * caller's transaction it is recorded on the node like any other failure
+     * ({@see AConcurrencyFailureWithNoCallersTransactionStopsOnlyThatNodeTest}).
+     */
+    #[Test]
+    #[DataProvider('concurrencyFailures')]
+    public function a_concurrency_failure_inside_a_callers_transaction_is_let_out_as_it_was_thrown(string $sqlState, string $message): void
+    {
+        $this->refuseDriftNamed('poison', $sqlState, $message);
+        $this->node('node-fails', '2026-09-01 00:00:00');
+        $this->listings(['node-fails' => 'list[]=poison']);
+
+        try {
+            app(ReconcileHostingNodes::class)->execute();
+            $this->fail('A concurrency failure inside a caller\'s transaction was swallowed.');
+        } catch (PDOException $e) {
+            $states = [];
+            for ($link = $e; $link !== null; $link = $link->getPrevious()) {
+                if ($link instanceof QueryException) {
+                    $states[] = $link->errorInfo[0] ?? null;
+                }
+            }
+            $this->assertSame([$sqlState], array_values(array_unique($states)), 'The original failure was hidden: '.$e->getMessage());
+        }
+    }
+
+    #[Test]
+    public function a_concurrency_failure_on_the_way_to_the_listing_inside_a_callers_transaction_is_let_out_too(): void
+    {
+        $node = $this->node('node-fault', '2026-09-01 00:00:00');
+        $deadlock = new DeadlockException('SQLSTATE[40P01]: Deadlock detected: 7 ERROR:  deadlock detected');
+        $panel = Mockery::mock(HostingProvider::class);
+        $panel->shouldReceive('listAccounts')->andThrow($deadlock);
+        $this->app->singleton(HostingProviderFactory::class);
+        app(HostingProviderFactory::class)->swap($node, $panel);
+
+        try {
+            app(ReconcileHostingNodes::class)->execute();
+            $this->fail('A concurrency failure inside a caller\'s transaction was swallowed.');
+        } catch (DeadlockException $e) {
+            $this->assertSame($deadlock, $e);
+        }
+    }
+
+    #[Test]
+    public function the_command_fails_when_a_node_failed_after_comparing_every_other(): void
+    {
+        $this->refuseDriftNamed('poison');
+        $this->node('node-fails', '2026-09-01 00:00:00');
+        $fine = $this->node('node-fine', '2026-09-02 00:00:00');
+        $this->listings(['node-fails' => 'list[]=poison', 'node-fine' => 'list[]=']);
+
+        $this->artisan('hosting:reconcile')
+            ->expectsOutputToContain('1 nodes checked, 0 accounts compared, 0 disagreements recorded, 0 listings not read, 1 nodes failed.')
+            ->assertFailed();
+
+        $this->assertSame('2026-09-10 12:00:00', $fine->fresh()?->reconciled_at?->format('Y-m-d H:i:s'));
+    }
+
+    #[Test]
+    public function the_command_still_succeeds_when_a_listing_was_only_refused(): void
+    {
+        $this->node('node-refused', '2026-09-01 00:00:00');
+        $this->listings(['node-refused' => 'list[]=bob,alice']);
+
+        $this->artisan('hosting:reconcile')
+            ->expectsOutputToContain('0 nodes checked, 0 accounts compared, 0 disagreements recorded, 1 listings not read, 0 nodes failed.')
+            ->assertSuccessful();
+    }
+
     /**
      * A real database refusal, raised inside the insert of one drift: the
      * shape of the varchar overflow, without depending on a column width.
      * Created inside the test's transaction, so it is gone with it.
      */
-    private function refuseDriftNamed(string $reference): void
+    private function refuseDriftNamed(string $reference, string $sqlState = '22001', string $message = 'value too long for this test'): void
     {
         DB::unprepared(<<<SQL
             create function r7_refuse_drift() returns trigger language plpgsql as \$\$
             begin
                 if new.provider_reference = '{$reference}' then
-                    raise exception 'value too long for this test' using errcode = '22001';
+                    raise exception '{$message}' using errcode = '{$sqlState}';
                 end if;
                 return new;
             end

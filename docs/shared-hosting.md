@@ -143,8 +143,19 @@ node, not the sweep. The node's comparison is one transaction, so what it had re
 is rolled back and no alert goes out for it (a drift is announced only once it is
 committed); the attempt is stamped, `reconcile_error` names the failure by its class and
 says the log has the detail, the whole exception is logged as an error, and the sweep
-moves on to the next node. A failure the rollback or the stamp itself cannot survive —
-the database gone — still ends the sweep.
+moves on to the next node. Three failures still end the sweep, as they were thrown: a
+deadlock or serialization failure while a caller holds a transaction around the sweep
+(Laravel leaves that transaction aborted, and it is the caller's to retry; the scheduled
+command holds none, so there it is recorded on the node like any other), a statement
+refused because the transaction was already aborted, and a failure of the node's stamp
+itself — the database gone.
+
+`hosting:reconcile` prints how many nodes were compared, how many listings were not
+read, and how many nodes failed, and exits non-zero when any node failed, after every
+other node in the batch has been compared. A listing that was refused or not answered
+does not fail the command: it is the adapter declining an answer it cannot use, kept
+on the node and logged as a warning, and it never has; a panel that is down is the
+health sync's to report.
 
 **Nothing is repaired.** Not at the panel and not in the platform's own rows.
 An account whose provenance nobody knows must not be handed to a customer as

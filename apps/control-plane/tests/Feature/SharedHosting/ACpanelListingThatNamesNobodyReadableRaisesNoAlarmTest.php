@@ -73,6 +73,7 @@ final class ACpanelListingThatNamesNobodyReadableRaisesNoAlarmTest extends TestC
         $outcome = app(ReconcileHostingNodes::class)->execute();
 
         $this->assertSame(0, $outcome['nodes']);
+        $this->assertSame(1, $outcome['unread']);
         $this->assertSame(0, ResourceDrift::query()->count(), 'Drift was concluded from a listing that named nobody readable.');
         $read = $node->fresh();
         $this->assertStringContainsString('cannot be read as the accounts on the node', (string) $read?->reconcile_error);
@@ -100,7 +101,7 @@ final class ACpanelListingThatNamesNobodyReadableRaisesNoAlarmTest extends TestC
 
         $outcome = app(ReconcileHostingNodes::class)->execute();
 
-        $this->assertSame(['nodes' => 1, 'accounts' => 1, 'drifts' => 0], $outcome);
+        $this->assertSame(['nodes' => 1, 'accounts' => 1, 'drifts' => 0, 'unread' => 0, 'failed' => 0], $outcome);
         $this->assertSame('2026-09-10 12:00:00', $node->fresh()?->reconciled_at?->format('Y-m-d H:i:s'));
     }
 

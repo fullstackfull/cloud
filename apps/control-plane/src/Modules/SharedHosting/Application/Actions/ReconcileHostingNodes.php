@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\SharedHosting\Application\Actions;
 
+use Illuminate\Database\ConcurrencyErrorDetector;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Provisioning\Application\Actions\RecordDrift;
@@ -16,6 +17,7 @@ use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingProviderException;
 use Lynomia\Modules\SharedHosting\Infrastructure\HostingProviderFactory;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
+use PDOException;
 use Throwable;
 
 /**
@@ -64,13 +66,19 @@ final readonly class ReconcileHostingNodes
     ) {}
 
     /**
-     * @return array{nodes: int, accounts: int, drifts: int}
+     * `nodes` counts the nodes whose accounts were compared; `unread` those
+     * whose listing the adapter refused or the panel did not answer; `failed`
+     * those whose reconciliation failed any other way ({@see self::stopped()}).
+     *
+     * @return array{nodes: int, accounts: int, drifts: int, unread: int, failed: int}
      */
     public function execute(): array
     {
         $nodes = 0;
         $accounts = 0;
         $drifts = 0;
+        $unread = 0;
+        $failed = 0;
 
         foreach ($this->reachableNodes() as $node) {
             try {
@@ -105,12 +113,17 @@ final readonly class ReconcileHostingNodes
                     'error' => $e->getMessage(),
                 ]);
 
+                $unread++;
+
                 continue;
             } catch (Throwable $e) {
                 // Anything else on the way to the listing — a node whose
                 // credential is not configured, a fault in an adapter — stops
                 // this node, not the sweep: see the comparison below.
+                self::rethrowWhatAbortsTheCallersTransaction($e);
+
                 $this->stopped($node, $e, 'asking for its account listing');
+                $failed++;
 
                 continue;
             }
@@ -129,9 +142,15 @@ final readonly class ReconcileHostingNodes
                  * nothing half-concluded is left behind and the connection is
                  * usable again (a statement that failed inside a transaction
                  * leaves every later one refused until it is rolled back), and
-                 * it is kept on the node, logged, and the sweep moves on. A
-                 * failure the rollback or the stamp cannot survive is not
-                 * caught here: it leaves execute() as it did.
+                 * it is kept on the node, logged, and the sweep moves on.
+                 *
+                 * Not every failure: {@see self::rethrowWhatAbortsTheCallersTransaction()}
+                 * lets out, as it was thrown, a deadlock or serialization
+                 * failure while a caller's transaction is open, and a
+                 * statement refused because the transaction was already
+                 * aborted; it says why. And a failure of the stamp in
+                 * stopped() itself is not caught: it leaves execute() as any
+                 * failure did before.
                  */
                 [$counted, $found] = DB::transaction(function () use ($node, $listed): array {
                     /** @var list<HostingAccount> $rows */
@@ -151,7 +170,10 @@ final readonly class ReconcileHostingNodes
                     return [count($rows), $found];
                 });
             } catch (Throwable $e) {
+                self::rethrowWhatAbortsTheCallersTransaction($e);
+
                 $this->stopped($node, $e, 'comparing its account listing with the platform\'s accounts');
+                $failed++;
 
                 continue;
             }
@@ -161,7 +183,45 @@ final readonly class ReconcileHostingNodes
             $drifts += $found;
         }
 
-        return ['nodes' => $nodes, 'accounts' => $accounts, 'drifts' => $drifts];
+        return ['nodes' => $nodes, 'accounts' => $accounts, 'drifts' => $drifts, 'unread' => $unread, 'failed' => $failed];
+    }
+
+    /**
+     * A failure no node-level record can survive, let out as it was thrown.
+     *
+     * Two kinds, looked for in the exception and every exception it wraps.
+     *
+     * A deadlock (40P01) or serialization failure (40001) while a caller's
+     * transaction is open. When Laravel recognises a concurrency failure in a
+     * nested transaction it rethrows it (as a DeadlockException wrapping it)
+     * without rolling back to the savepoint, so the caller's transaction is
+     * left aborted, every later statement on it is refused with 25P02, and
+     * stamping the node would hide the original behind that. Whether this
+     * particular one was rolled back or not, a concurrency failure inside a
+     * caller's transaction is the caller's to retry. With no caller's
+     * transaction, the node's own transaction was the outermost and was rolled
+     * back whole, so the failure is recorded on the node like any other.
+     *
+     * And a statement refused because the transaction was already aborted
+     * (25P02), at any level: there is nothing the node could be stamped with.
+     */
+    private static function rethrowWhatAbortsTheCallersTransaction(Throwable $e): void
+    {
+        $detector = new ConcurrencyErrorDetector;
+
+        for ($link = $e; $link !== null; $link = $link->getPrevious()) {
+            $sqlState = $link instanceof PDOException ? (string) ($link->errorInfo[0] ?? $link->getCode()) : null;
+
+            if ($sqlState === '25P02') {
+                throw $e;
+            }
+
+            $concurrency = $detector->causedByConcurrencyError($link) || in_array($sqlState, ['40P01', '40001'], true);
+
+            if ($concurrency && DB::transactionLevel() > 0) {
+                throw $e;
+            }
+        }
     }
 
     /**
@@ -171,6 +231,11 @@ final readonly class ReconcileHostingNodes
      * its class only — the message can carry a statement and its values, and
      * the log is where those go; and the whole of it logged. `reconciled_at`
      * is not touched: nothing was concluded.
+     *
+     * The node is read again first. The comparison's own success stamp
+     * (`reconciled_at` now, `reconcile_error` null) was filled in on this
+     * copy before its save failed, and the rollback does not unfill it; saved
+     * as it stands, this would write that `reconciled_at` beside the error.
      */
     private function stopped(HostingNode $node, Throwable $e, string $while): void
     {

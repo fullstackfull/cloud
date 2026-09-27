@@ -159,6 +159,27 @@ final class ACpanelListingThatNamesNobodyReadableIsRefusedTest extends TestCase
     }
 
     /**
+     * An integer is a name written as its digits: JSON can carry a `user` as a
+     * number, and the digits are one unambiguous name. Anything else that is
+     * not a string is not a name.
+     */
+    #[Test]
+    public function an_integer_is_read_as_the_name_its_digits_spell(): void
+    {
+        $this->assertSame('1234', ListedAccountName::from(1234));
+        $this->assertNull(ListedAccountName::from(12.5));
+        $this->assertNull(ListedAccountName::from(true));
+        $this->assertNull(ListedAccountName::from(null));
+
+        Http::fake(['*' => Http::response(['metadata' => ['result' => 1], 'data' => ['acct' => [['user' => 1234]]]], 200)]);
+
+        $this->assertSame(['1234'], array_map(
+            static fn (RemoteAccount $account): string => $account->username,
+            (new CpanelHostingProvider(new SecretRedactor))->listAccounts($this->cpanelNode()),
+        ));
+    }
+
+    /**
      * @return array<string, callable(): list<RemoteAccount>>
      */
     private function readers(): array
