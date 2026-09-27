@@ -14,7 +14,9 @@ declare(strict_types=1);
  *  - cancel: nothing more (an immediate cancellation);
  *  - change: the plan id, the price id and the id of the user making it;
  *  - void:   an invoice id (the operator's VoidInvoice);
- *  - settle: an invoice id, then a capture's id (SettleInvoice of it).
+ *  - settle: an invoice id, then a capture's id (SettleInvoice of it);
+ *  - resize: a paid proration invoice's id (ResizeOnPlanChangeSettlement
+ *            hearing its InvoicePaid).
  * Optionally paused: with RACER_PAUSE_AFTER (a regular expression) and
  * RACER_PAUSE_LOCK (an advisory lock key) in the environment, the racer stops
  * after the first statement matching the expression until the test releases
@@ -32,6 +34,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
+use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
@@ -40,6 +43,7 @@ use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\CancelSubscription;
 use Lynomia\Modules\Subscriptions\Application\Actions\RenewSubscription;
+use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 
 require __DIR__.'/../../../vendor/autoload.php';
@@ -51,10 +55,10 @@ $app->make(Kernel::class)->bootstrap();
 // A downgrade queues a resize; nothing here is about the queue.
 config(['queue.default' => 'null']);
 
-// For `void` and `settle` the second argument is the invoice's id.
+// For `void`, `settle` and `resize` the second argument is the invoice's id.
 [$action, $subscriptionId] = [$argv[1], $argv[2]];
 
-$subscription = in_array($action, ['void', 'settle'], true) ? null : Subscription::query()->findOrFail($subscriptionId);
+$subscription = in_array($action, ['void', 'settle', 'resize'], true) ? null : Subscription::query()->findOrFail($subscriptionId);
 
 $pauseAfter = getenv('RACER_PAUSE_AFTER');
 $pauseLock = getenv('RACER_PAUSE_LOCK');
@@ -81,6 +85,17 @@ try {
         'cancel' => $app->make(CancelSubscription::class)->execute($subscription, immediately: true),
         'void' => $app->make(VoidInvoice::class)->execute(Invoice::query()->findOrFail($subscriptionId), 'an operator withdrew it'),
         'settle' => $app->make(SettleInvoice::class)->execute(Invoice::query()->findOrFail($subscriptionId), Transaction::query()->findOrFail($argv[3])),
+        'resize' => (static function () use ($app, $subscriptionId): void {
+            $invoice = Invoice::query()->findOrFail($subscriptionId);
+
+            $app->make(ResizeOnPlanChangeSettlement::class)->handle(new InvoicePaid(
+                invoiceId: (string) $invoice->getKey(),
+                customerId: (string) $invoice->customer_id,
+                orderId: null,
+                subscriptionId: (string) $invoice->subscription_id,
+                paidAt: CarbonImmutable::now(),
+            ));
+        })(),
         'change' => $app->make(ApplyPlanChange::class)->execute(
             $subscription,
             Plan::query()->findOrFail($argv[3]),

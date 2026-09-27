@@ -11,6 +11,7 @@ use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Payments\Domain\Enums\TransactionKind;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use PHPUnit\Framework\Attributes\Test;
@@ -198,6 +199,65 @@ final class PayingAnInvoiceFromCreditTest extends WalletApiTestCase
             ->assertJsonPath('data.status', InvoiceStatus::Paid->value);
 
         $this->assertSame(1, WalletTransaction::query()->where('invoice_id', $invoice->getKey())->where('kind', WalletTransactionKind::Payment->value)->count());
+    }
+
+    #[Test]
+    public function a_raw_key_match_on_an_entry_that_is_not_a_payment_is_not_replayed(): void
+    {
+        /*
+         * The raw-key fallback answers a replay only for a wallet Payment of
+         * the same invoice. A platform credit recorded against the invoice -
+         * a top-up (captured money diverted to the wallet) or an adjustment -
+         * whose key the customer's happens to equal is not this request's,
+         * and the payment goes through.
+         */
+        [$customer, $owner] = $this->accountWithOwner();
+
+        foreach ([WalletTransactionKind::Topup, WalletTransactionKind::Adjustment] as $kind) {
+            $invoice = Invoice::factory()->create([
+                'customer_id' => $customer->getKey(),
+                'currency' => 'KWD',
+                'subtotal_minor' => 4_000,
+                'total_minor' => 4_000,
+            ]);
+
+            $key = 'raw-'.$kind->value.'-0001';
+
+            if ($kind === WalletTransactionKind::Topup) {
+                // A top-up against an open invoice is captured money the
+                // settlement diverted: the capture is on the invoice too.
+                Transaction::factory()->amount(Money::ofMinor(1_000, 'KWD'))->create([
+                    'customer_id' => $customer->getKey(),
+                    'invoice_id' => $invoice->getKey(),
+                ]);
+            }
+
+            $this->ledger()->credit(
+                wallet: $this->walletFor($customer),
+                amount: Money::ofMinor($kind === WalletTransactionKind::Topup ? 1_000 : 4_000, 'KWD'),
+                kind: $kind,
+                description: 'a platform credit against the invoice',
+                actor: $owner,
+                idempotencyKey: $key,
+                invoiceId: (string) $invoice->getKey(),
+            );
+
+            if ($kind === WalletTransactionKind::Topup) {
+                $this->credit($this->walletFor($customer), 3_000);
+            }
+
+            $this->actingAs($owner)
+                ->withHeaders($this->key($key))
+                ->postJson("/api/v1/invoices/{$invoice->getKey()}/wallet-credit")
+                ->assertOk()
+                ->assertJsonPath('data.status', InvoiceStatus::Paid->value);
+
+            $this->assertSame(
+                1,
+                WalletTransaction::query()->where('invoice_id', $invoice->getKey())->where('kind', WalletTransactionKind::Payment->value)->count(),
+                'A '.$kind->value.' under the same raw key was answered as the replay of a payment.',
+            );
+        }
     }
 
     #[Test]
