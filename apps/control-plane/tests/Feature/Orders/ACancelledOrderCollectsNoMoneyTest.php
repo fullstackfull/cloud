@@ -243,6 +243,43 @@ final class ACancelledOrderCollectsNoMoneyTest extends OrdersApiTestCase
     }
 
     #[Test]
+    public function a_customer_idempotency_key_shaped_like_the_cancellation_credit_key_cannot_block_it(): void
+    {
+        /*
+         * OX-1, round four's re-audit: the customer's Idempotency-Key shared
+         * the wallet ledger's key space with the system's
+         * invoice:<id>:cancelled-order:<minor>. A wallet payment under that key
+         * made the cancelled order's credit a conflicting "replay" of the
+         * customer's debit, and the money stayed spent. Customer keys are
+         * namespaced; the credit posts under its own key.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $order = $this->placedOrder($customer);
+        $invoice = $this->invoiceFor($order);
+
+        $ledger = app(WalletLedger::class);
+        $ledger->credit(
+            wallet: $ledger->walletFor($customer, 'KWD'),
+            amount: Money::ofMinor($invoice->total_minor, 'KWD'),
+            kind: WalletTransactionKind::Topup,
+            description: 'Top-up by card ending 4242',
+        );
+
+        Queue::fake();
+
+        $this->actingAs($user)
+            ->withHeaders(['Idempotency-Key' => sprintf('invoice:%s:cancelled-order:%d', $invoice->getKey(), $invoice->total_minor)])
+            ->postJson('/api/v1/invoices/'.$invoice->getKey().'/wallet-credit')
+            ->assertOk()
+            ->assertJsonPath('data.status', InvoiceStatus::Paid->value);
+
+        $this->assertSame(0, $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits());
+
+        $this->assertSame($invoice->total_minor, app(CreditWhatACancelledOrderPaid::class)->execute((string) $order->getKey()));
+        $this->assertSame($invoice->total_minor, $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits());
+    }
+
+    #[Test]
     public function a_partly_paid_order_is_refused_as_paid_and_its_invoice_is_left_alone(): void
     {
         /*

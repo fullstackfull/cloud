@@ -323,6 +323,49 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
     }
 
     #[Test]
+    public function a_customer_idempotency_key_shaped_like_the_lapse_key_cannot_block_the_renewal(): void
+    {
+        /*
+         * OX-1, round four's re-audit: the customer's Idempotency-Key went
+         * into the wallet ledger's key space raw, beside the system's own
+         * predictable keys (invoice:<id>:lapsed-upgrade:<minor>). A wallet
+         * payment of the upgrade under exactly that key made the lapse's
+         * credit a "replay" of the customer's debit - refused as a conflict -
+         * so every renewal threw, and the service ran on unbilled. The
+         * customer's key is namespaced now; the lapse posts under its own.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+
+        $this->changePlan($user, $subscription, $this->large, 'ox1-up-1')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        $ledger = app(WalletLedger::class);
+        $ledger->credit(wallet: $ledger->walletFor($customer, 'KWD'), amount: Money::ofMinor(1_000, 'KWD'), kind: WalletTransactionKind::Topup, description: 'top-up');
+
+        $this->actingAs($user)
+            ->withHeader('Idempotency-Key', sprintf('invoice:%s:lapsed-upgrade:1000', $upgrade->id))
+            ->postJson("/api/v1/invoices/{$upgrade->id}/wallet-credit", [])
+            ->assertOk();
+        $this->assertSame(1_000, $upgrade->fresh()?->amount_paid_minor);
+
+        $line = $this->renewalLineAfterThePeriod($subscription);
+
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status, 'The upgrade lapsed.');
+        $this->assertSame(1_000, $this->walletOf($customer), 'What it held went back to the wallet.');
+        $this->assertSame($this->small->id, $subscription->fresh()?->plan_id);
+        $this->assertSame(9_000, $line->unit_amount_minor, 'And the renewal billed.');
+
+        // The same key replayed by the customer is still their own replay.
+        $this->actingAs($user)
+            ->withHeader('Idempotency-Key', sprintf('invoice:%s:lapsed-upgrade:1000', $upgrade->id))
+            ->postJson("/api/v1/invoices/{$upgrade->id}/wallet-credit", [])
+            ->assertOk();
+        $this->assertSame(1_000, $this->walletOf($customer));
+    }
+
+    #[Test]
     public function a_lapse_returns_exactly_what_the_invoice_still_holds_and_only_once(): void
     {
         [$customer, $user] = $this->accountWithOwner();

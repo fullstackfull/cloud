@@ -74,6 +74,16 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
  * re-derives from the transactions attached to the invoice — recomputes the
  * same figure. Two clicks spend one balance once.
  *
+ * It goes there namespaced ({@see self::ledgerKey()}: `wallet-pay:<customer>:<key>`),
+ * never raw. The ledger's key space is shared with the platform's own
+ * postings, whose keys are predictable (`invoice:<id>:lapsed-upgrade:<minor>`,
+ * `invoice:<id>:cancelled-order:<minor>`, `invoice:<id>:subscription-ended:…`,
+ * `invoice:<id>:withdrawn-refund-failed:…`), and a customer who paid under
+ * exactly such a key made the platform's later credit a conflicting "replay"
+ * of their debit: every renewal of the subscription threw and the service ran
+ * on unbilled (OX-1, round four's re-audit). No system key starts with the
+ * prefix, and the request rule cannot produce one that does not.
+ *
  * ---------------------------------------------------------------------------
  * Currencies
  * ---------------------------------------------------------------------------
@@ -95,7 +105,9 @@ final readonly class PayInvoiceFromWallet
      */
     public function execute(Customer $customer, Invoice $invoice, string $idempotencyKey): InvoiceSettlement
     {
-        return DB::transaction(function () use ($customer, $invoice, $idempotencyKey): InvoiceSettlement {
+        $ledgerKey = self::ledgerKey($customer, $idempotencyKey);
+
+        return DB::transaction(function () use ($customer, $invoice, $idempotencyKey, $ledgerKey): InvoiceSettlement {
             /** @var Invoice $locked */
             $locked = Invoice::query()->whereKey($invoice->getKey())->lockForUpdate()->firstOrFail();
 
@@ -114,7 +126,7 @@ final readonly class PayInvoiceFromWallet
              * the question safe to ask: two copies serialise on it.
              */
             if ($wallet !== null) {
-                $replay = $this->ledger->entryPostedUnder($wallet, $idempotencyKey);
+                $replay = $this->ledger->entryPostedUnder($wallet, $ledgerKey);
 
                 if ($replay !== null && (string) $replay->invoice_id !== (string) $locked->getKey()) {
                     // The same key on a different invoice is not a repeat of
@@ -205,7 +217,7 @@ final readonly class PayInvoiceFromWallet
                 kind: WalletTransactionKind::Payment,
                 description: sprintf('Applied to invoice %s', $locked->number),
                 metadata: ['invoice_number' => $locked->number],
-                idempotencyKey: $idempotencyKey,
+                idempotencyKey: $ledgerKey,
                 invoiceId: (string) $locked->getKey(),
                 // The two rows point at each other, so a statement line can be
                 // traced to the invoice it paid and back again.
@@ -226,6 +238,16 @@ final readonly class PayInvoiceFromWallet
 
             return $this->settle->execute($locked, $charge);
         });
+    }
+
+    /**
+     * The ledger key a customer's Idempotency-Key is posted under: in a
+     * namespace of its own, per customer, so it can never be one of the
+     * platform's keys (see the class docblock, OX-1).
+     */
+    public static function ledgerKey(Customer $customer, string $idempotencyKey): string
+    {
+        return sprintf('wallet-pay:%s:%s', $customer->getKey(), $idempotencyKey);
     }
 
     /**
