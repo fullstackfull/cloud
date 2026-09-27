@@ -102,7 +102,10 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  * restores - and it lapses only an invoice it locked before
  * the subscription: an upgrade that appeared after its unlocked read ends the
  * attempt unrenewed, for the next sweep, since locking it after the
- * subscription deadlocked with an operator's void of it); an ended
+ * subscription deadlocked with an operator's void of it); a customer's
+ * withdrawal of an unpaid plan change, WithdrawAnUnpaidPlanChange (the same
+ * as the lapse: the invoice while it is open, the subscription, the wallet,
+ * then the plan the void restores); an ended
  * subscription's wind-up (its open invoices, the subscription, its paid
  * upgrades, then the wallet - every invoice it touches before the wallet);
  * ResizeOnPlanChangeSettlement (the subscription, then - returning an
