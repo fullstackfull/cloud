@@ -1,0 +1,12 @@
+<?php
+
+// Read by EveryEnumCaseHasAProducerTest::restrictingRules() over TicketPriority
+// (low, normal, high, urgent). Three rules are read here, each refusing urgent.
+
+use Illuminate\Validation\Rule;
+
+return [
+    'short' => ['required', Rule::in(['low', 'normal', 'high'])],
+    'qualified' => ['required', \Illuminate\Validation\Rule::in('low', 'normal', 'high',)],
+    'long-form' => ['required', rule::IN(array('low', 'normal'))],
+];

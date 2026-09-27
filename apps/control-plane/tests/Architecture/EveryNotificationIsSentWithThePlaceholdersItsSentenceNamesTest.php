@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Architecture;
 
 use Illuminate\Support\Facades\Lang;
+use Lynomia\Modules\Notifications\Application\Actions\RenderNotification;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
+use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
 use PhpParser\Node;
 use PhpParser\Node\Arg;
 use PhpParser\Node\Expr;
@@ -74,11 +76,20 @@ use Tests\TestCase;
  * Arabic sentence reads too: "your server"). A translatable phrase is sent as
  * {"en": ..., "ar": ...}, which RenderNotification reads in the reader's
  * language, and a name the customer chose (a label, a domain) is not a
- * literal.
+ * literal. For the same placeholders, a value written at the top level of the
+ * data array as a literal RenderNotification cannot use is reported too
+ * ({@see unusableLiterals()} says exactly which): a literal `null` and an
+ * array literal that is not a translated name, both of which it drops, so the
+ * placeholder is shown as written; and a translated name that names no `en`
+ * or no `ar`, whose reader in that language gets the fallback locale's text
+ * when the map has it and otherwise the placeholder (a map with no `en`, the
+ * fallback being English). A test holds the dropped verdicts against
+ * RenderNotification itself.
  *
- * What it does not know: whether a value computed at run time is null or
- * empty (RenderNotification drops a null, and the placeholder then
- * survives), or whether it reads well in the sentence.
+ * What it does not know: whether a value computed at run time is null, empty
+ * or an array RenderNotification drops (then the placeholder survives), what
+ * an array with a spread or a computed key holds, or whether a value reads
+ * well in the sentence.
  */
 final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest extends TestCase
 {
@@ -114,23 +125,13 @@ final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest exten
                     continue;
                 }
 
-                [$types, $keys, $literals] = $pair;
+                [$types, $keys, $literals, $unusable] = $pair;
 
                 foreach ($types as $case) {
                     $sent[$case] = true;
                     $type = constant(NotificationType::class.'::'.$case);
 
-                    foreach ($literals as $key => $value) {
-                        if (! $this->aSentenceNames($type, $key)) {
-                            continue;
-                        }
-
-                        if ($value === '') {
-                            $literal[] = sprintf('%s sends %s with :%s as an empty string; the sentence reads a gap', $this->where($file, $call), $type->value, $key);
-                        } elseif (preg_match('/[A-Za-z]/', $value) === 1) {
-                            $literal[] = sprintf('%s sends %s with :%s as the English text "%s", read inside the Arabic sentence too', $this->where($file, $call), $type->value, $key, $value);
-                        }
-                    }
+                    $literal = [...$literal, ...$this->literalFindings($this->where($file, $call), $type, $literals, $unusable)];
 
                     foreach (['en', 'ar'] as $locale) {
                         foreach (['title', 'body'] as $part) {
@@ -147,10 +148,119 @@ final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest exten
 
         $this->assertSame([], $unresolved, 'A producer this gate cannot read.');
         $this->assertSame([], $missing, 'A notification is sent without a fact its sentence names; the customer reads the placeholder.');
-        $this->assertSame([], $literal, 'A notification fills a placeholder with a literal that is empty, or English in every language.');
+        $this->assertSame([], $literal, 'A notification fills a placeholder with a literal that is empty, English in every language, dropped by RenderNotification, or missing a language.');
 
         $unsent = array_values(array_diff(array_map(static fn (NotificationType $t): string => $t->name, NotificationType::cases()), array_keys($sent)));
         $this->assertSame([], $unsent, 'A type no producer this gate read sends.');
+    }
+
+    /**
+     * The literal reading behind the third assertion, on data written here,
+     * and held against RenderNotification itself: of the values that can be
+     * rendered, the ones reported as dropped are exactly the ones whose
+     * `:plan` survives rendering, in English or in Arabic.
+     */
+    #[Test]
+    public function a_literal_the_renderer_cannot_use_is_reported_and_nothing_else(): void
+    {
+        $rendered = [
+            'null' => null,
+            'empty' => [],
+            'unkeyed' => ['Large', 'كبير'],
+            'integer keys' => [3 => 'Large'],
+            'not a locale' => ['english' => 'Large', 'arabic' => 'كبير'],
+            'null text' => ['en' => 'Large', 'ar' => null],
+            'a number' => ['en' => 'Large', 'ar' => 1],
+            'a signed number' => ['en' => 'Large', 'ar' => -1],
+            'no english' => ['ar' => 'كبير'],
+            'true' => ['en' => 'Large', 'ar' => true],
+            'nested' => ['en' => ['Large'], 'ar' => 'كبير'],
+            'no arabic' => ['en' => 'Large'],
+            'a map' => ['en' => 'Large', 'ar' => 'كبير'],
+            'a map with a third language' => ['en' => 'Large', 'ar' => 'كبير', 'fr' => 'Grand'],
+            'text' => 'Large',
+            'a number at the top' => 3,
+        ];
+
+        $source = "<?php\nreturn [\n".implode('', array_map(
+            static fn (string $key, mixed $value): string => var_export($key, true).' => '.var_export($value, true).",\n",
+            array_keys($rendered),
+            $rendered,
+        ))."'upper-case null' => NULL,\n'unkeyed, written short' => ['Large', 'كبير'],\n"
+            ."'a map computed' => ['en' => \$name['en'], 'ar' => \$name['ar']],\n'spread' => [...\$name],\n"
+            ."'computed key' => [\$locale => 'Large'],\n'variable' => \$name,\n];\n";
+
+        $return = (new ParserFactory)->createForHostVersion()->parse($source)[0] ?? null;
+        $this->assertInstanceOf(Return_::class, $return);
+        $this->assertInstanceOf(Array_::class, $return->expr);
+
+        $unusable = self::unusableLiterals($return->expr);
+
+        $this->assertSame(
+            ['null', 'empty', 'unkeyed', 'integer keys', 'not a locale', 'null text', 'a number', 'a signed number', 'no english', 'true', 'nested', 'no arabic', 'upper-case null', 'unkeyed, written short'],
+            array_keys($unusable),
+        );
+        $this->assertStringContainsString('reads the fallback', $unusable['no arabic']);
+        $this->assertStringContainsString('drops', $unusable['no english']);
+
+        $this->assertSame(
+            ['here sends '.NotificationType::PlanChangeCompleted->value.' with :plan as '.$unusable['null']],
+            $this->literalFindings('here', NotificationType::PlanChangeCompleted, [], ['plan' => $unusable['null'], 'not_in_the_sentence' => $unusable['empty']]),
+            'A literal the renderer cannot use is reported for a placeholder the sentence names, and only for one.',
+        );
+
+        $render = new RenderNotification;
+
+        foreach ($rendered as $key => $value) {
+            $notification = (new Notification)->forceFill([
+                'type' => NotificationType::PlanChangeCompleted,
+                'data' => ['service' => 'Web', 'plan' => $value],
+            ]);
+
+            $survives = str_contains($render->execute($notification, 'en')->title, ':plan')
+                || str_contains($render->execute($notification, 'ar')->title, ':plan');
+
+            $this->assertSame(
+                $survives,
+                str_contains($unusable[$key] ?? '', 'drops'),
+                sprintf('"%s": RenderNotification %s :plan, and this %s it as dropped.', $key, $survives ? 'leaves' : 'fills', $survives ? 'does not report' : 'reports'),
+            );
+        }
+    }
+
+    /**
+     * What the third assertion reports for one producer's type: its string
+     * literals that are empty or hold a Latin letter, and its literals
+     * {@see unusableLiterals()} finds, each only for a placeholder the type's
+     * English or Arabic title or body names.
+     *
+     * @param  array<string, string>  $literals
+     * @param  array<string, string>  $unusable
+     * @return list<string>
+     */
+    private function literalFindings(string $where, NotificationType $type, array $literals, array $unusable): array
+    {
+        $findings = [];
+
+        foreach ($literals as $key => $value) {
+            if (! $this->aSentenceNames($type, $key)) {
+                continue;
+            }
+
+            if ($value === '') {
+                $findings[] = sprintf('%s sends %s with :%s as an empty string; the sentence reads a gap', $where, $type->value, $key);
+            } elseif (preg_match('/[A-Za-z]/', $value) === 1) {
+                $findings[] = sprintf('%s sends %s with :%s as the English text "%s", read inside the Arabic sentence too', $where, $type->value, $key, $value);
+            }
+        }
+
+        foreach ($unusable as $key => $why) {
+            if ($this->aSentenceNames($type, $key)) {
+                $findings[] = sprintf('%s sends %s with :%s as %s', $where, $type->value, $key, $why);
+            }
+        }
+
+        return $findings;
     }
 
     private function parseSources(): void
@@ -217,7 +327,7 @@ final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest exten
      * Each (types, keys) pair the arguments can carry, or a string saying why
      * one could not be read.
      *
-     * @return list<array{list<string>, list<string>, array<string, string>}|string>
+     * @return list<array{list<string>, list<string>, array<string, string>, array<string, string>}|string>
      */
     private function pairs(string $file, ?ClassMethod $method, Expr $type, ?Expr $data, int $depth): array
     {
@@ -270,7 +380,7 @@ final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest exten
             return [$keys];
         }
 
-        return [[$types, $keys, $data === null ? [] : $this->literals($data)]];
+        return [[$types, $keys, $data === null ? [] : $this->literals($data), $data === null ? [] : self::unusableLiterals($data)]];
     }
 
     /**
@@ -293,6 +403,147 @@ final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest exten
         }
 
         return $literals;
+    }
+
+    /**
+     * The values written in the data array, at its top level, as a literal
+     * the sentence cannot use, by key, each with why:
+     *
+     *  - `null` (the constant, in any case): RenderNotification drops a null,
+     *    and the placeholder is shown as written;
+     *  - an array literal RenderNotification drops, because it is not a
+     *    translated name (a non-empty map of two-lowercase-letter locale to
+     *    text): an empty array, an item with no key or an integer key, a
+     *    key that is not two lowercase letters, or a value written as a
+     *    literal that is not a string (`null`, `true`, a number, signed or
+     *    not, an array);
+     *  - an array literal RenderNotification keeps as a translated name but
+     *    that names no `en` or no `ar`. It reads the reader's locale, then
+     *    the fallback locale (`app.fallback_locale`), then null: a reader in
+     *    a missing locale reads the fallback locale's text inside their
+     *    sentence when the map has it, and otherwise gets null, which it
+     *    drops, so the placeholder is shown - as an English reader does of a
+     *    map with no `en` while the fallback is English.
+     *
+     * An array with a spread, or with a key that is not a string literal, is
+     * not read. A value computed any other way (a variable, a call, an item
+     * whose value is not a literal) is not judged here, except that one item
+     * that makes an array dropped is enough whatever the others are.
+     *
+     * @return array<string, string>
+     */
+    public static function unusableLiterals(Expr $data): array
+    {
+        $unusable = [];
+
+        if (! $data instanceof Array_) {
+            return [];
+        }
+
+        foreach ($data->items as $item) {
+            if ($item === null || ! $item->key instanceof String_) {
+                continue;
+            }
+
+            $why = self::unusable($item->value);
+
+            if ($why !== null) {
+                $unusable[$item->key->value] = $why;
+            }
+        }
+
+        return $unusable;
+    }
+
+    private static function unusable(Expr $value): ?string
+    {
+        if (self::isNullConstant($value)) {
+            return 'a literal null, which RenderNotification drops, so the placeholder is shown';
+        }
+
+        if (! $value instanceof Array_) {
+            return null;
+        }
+
+        if ($value->items === []) {
+            return 'an empty array, which RenderNotification drops, so the placeholder is shown';
+        }
+
+        $locales = [];
+        $readable = true;
+
+        foreach ($value->items as $item) {
+            if ($item === null || $item->unpack) {
+                return null;
+            }
+
+            if ($item->key === null || $item->key instanceof Node\Scalar\Int_) {
+                return 'an array with an integer key, which is not a translated name; RenderNotification drops it, so the placeholder is shown';
+            }
+
+            if (! $item->key instanceof String_) {
+                $readable = false;
+
+                continue;
+            }
+
+            if (preg_match('/\A[a-z]{2}\z/', $item->key->value) !== 1) {
+                return sprintf('an array keyed "%s", which is not a translated name; RenderNotification drops it, so the placeholder is shown', $item->key->value);
+            }
+
+            $locales[] = $item->key->value;
+
+            if (self::isNullConstant($item->value) || $item->value instanceof Array_ || self::isNumber($item->value) || self::isBoolConstant($item->value)) {
+                return sprintf('an array whose "%s" is not text, which is not a translated name; RenderNotification drops it, so the placeholder is shown', $item->key->value);
+            }
+        }
+
+        if (! $readable) {
+            return null;
+        }
+
+        // RenderNotification reads $value[$locale] ?? $value[fallback] ?? null.
+        $fallback = (string) config('app.fallback_locale');
+        $dropped = [];
+        $fallsBack = [];
+
+        foreach (array_diff(['en', 'ar'], $locales) as $absent) {
+            if ($absent !== $fallback && in_array($fallback, $locales, true)) {
+                $fallsBack[] = $absent;
+            } else {
+                $dropped[] = $absent;
+            }
+        }
+
+        if ($dropped !== []) {
+            return sprintf('a translated name with no "%s" and no text in the fallback locale "%s", so for a reader in "%s" it is null, which RenderNotification drops, so the placeholder is shown', implode('" or "', $dropped), $fallback, implode('" or "', $dropped));
+        }
+
+        if ($fallsBack !== []) {
+            return sprintf('a translated name with no "%s", so a reader in "%s" reads the fallback locale "%s" text inside their sentence', implode('" or "', $fallsBack), implode('" or "', $fallsBack), $fallback);
+        }
+
+        return null;
+    }
+
+    /** An integer or float literal, signed or not. */
+    private static function isNumber(Expr $expr): bool
+    {
+        if ($expr instanceof Expr\UnaryMinus || $expr instanceof Expr\UnaryPlus) {
+            $expr = $expr->expr;
+        }
+
+        return $expr instanceof Node\Scalar\Int_ || $expr instanceof Node\Scalar\Float_;
+    }
+
+    private static function isNullConstant(Expr $expr): bool
+    {
+        return $expr instanceof Expr\ConstFetch && strtolower($expr->name->toString()) === 'null';
+    }
+
+    private static function isBoolConstant(Expr $expr): bool
+    {
+        return $expr instanceof Expr\ConstFetch && in_array(strtolower($expr->name->toString()), ['true', 'false'], true);
     }
 
     /**
