@@ -227,5 +227,5 @@ confirmed unnumbered items are listed there.
 |---|---|---|---|
 | A | an unverified resize leaving the row stale (a downgrade credited with no resize); a resize answered with a running task; a missing disk figure growing twice; the withdraw route's permission oracle; a per-customer limit exceeded on a return | fixing | — |
 | B | interleaved invitations re-roling an operator; `roles: []` on a customer login; the promoted customer's reset mail | fixing | — |
-| C | a failed scheduled run counted twice; the scheduler and backup runbooks; overlapping hosting sweeps deadlocking | fixing | — |
+| C | a failed scheduled run counted twice; the scheduler and backup runbooks; overlapping hosting sweeps deadlocking | upheld after one closing pass (an overlap race recorded as a success; the lock oracle read other databases' locks; the rule comment omitted file restores); merged `ce1452d` | `2cd5b0d` |
 | E | the `NodeStatus` spelled excuses; `docs/api.md`; the `/activity` schema; the clock gate's callable sentence and its equality list | fixing | — |
