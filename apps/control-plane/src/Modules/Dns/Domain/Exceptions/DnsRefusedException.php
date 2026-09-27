@@ -186,6 +186,25 @@ final class DnsRefusedException extends DomainException
             ->withStatus(503);
     }
 
+    /**
+     * A production estate that holds too little of its own names takes no
+     * claims until it does.
+     *
+     * The same refusal as an unreadable reservation, for the same reason: it
+     * is the platform's condition and not the claimant's, and which names the
+     * platform answers on, or how its configuration falls short, is not the
+     * caller's to know. The code, status and sentence are that refusal's, so
+     * a customer sees one condition whichever of the two it is; the operator
+     * is told which by ClaimZone's log line and by the estate preflight's
+     * `dns.reserved_zones`, blocked (F-26).
+     */
+    public static function reservationIncomplete(): self
+    {
+        return (new self('New zones cannot be added right now. Try again later.'))
+            ->as('dns.zone.unavailable')
+            ->withStatus(503);
+    }
+
     public static function providerCannotCreateZones(): self
     {
         return (new self('This deployment is not configured to create zones.'))

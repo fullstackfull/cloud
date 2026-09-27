@@ -265,7 +265,8 @@ on their real names is covered without saying so twice. The shipped
 configuration has not: both addresses are on `localhost`, which is not a
 domain name, so **nothing is reserved until an estate is given its names** —
 and the estate preflight says so: as a warning in a rehearsal, and as a
-blocker in a production preflight.
+blocker in a production preflight. In production it is also a refusal: see
+*A production estate that holds too little*, below.
 
 A host contributes itself, not its registrable domain — the registrable domain
 of `panel.example.co.uk` cannot be worked out without a public-suffix list, and
@@ -339,6 +340,22 @@ not held, and a pass says so.
 It names variables and counts entries. It never quotes a reserved name or a
 configured value. The count is of entries, so a name and a host beneath it are
 two although the first covers the second.
+
+#### A production estate that holds too little
+
+The preflight's `blocked` is not only a report. Nothing runs `infra:preflight`
+before a deploy, so a verdict nobody reads guarded nothing: a production estate
+on the shipped empty list took `www.` and `mail.` beside its own control plane
+from any account. So, **in production**, while the reservation is in either
+state the preflight blocks on — nothing reserved at all, or a platform host of
+three or more labels with nothing reserved above it and not itself listed —
+every claim by every account is refused with the same platform condition as an
+unreadable list: 503 `dns.zone.unavailable`, "New zones cannot be added right
+now. Try again later.", with nothing about the configuration in it. Each such
+refusal is logged at error level with the number of listed entries and the
+variables that contributed a host, never a name. A host listed exactly with
+nothing above it is still only a warning, and does not refuse claims. Outside
+production nothing changes: a rehearsal is warned, not stopped.
 
 A change to the reservation applies to the next claim. It does not reach back
 to zones already held: nothing re-checks existing zones when the reservation

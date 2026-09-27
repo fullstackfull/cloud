@@ -1828,6 +1828,7 @@
     "deletionRequestedOn": "Deletion asked for {{date}}",
     "files": "Files",
     "filesUnsupported": "This backup's provider cannot open archives file by file. The whole server can still be restored.",
+    "filesUnreadable": "The datastore read this backup back and it did not come back. Its files cannot be opened or restored.",
     "browser": {
       "title": "Files in the backup taken {{date}}",
       "explainer": "Browse the backup, download a single file, or choose files and folders to put back on the server. A link (symlink) is shown and never followed.",

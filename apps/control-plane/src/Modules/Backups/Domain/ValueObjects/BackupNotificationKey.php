@@ -22,16 +22,18 @@ final readonly class BackupNotificationKey
     /**
      * One restore attempt's outcome.
      *
-     * Scoped to the provider task and not only to the backup row, because a
+     * Scoped to the attempt and not only to the backup row, because a
      * customer can restore the same backup again next month and that is a
      * second event they are owed a word about.
      *
-     * A restore whose provider call never returned a handle has none to scope
-     * to. It lands in `NeedsReview`, and since a person can now settle that
-     * row and the customer can restore it again (F-09), a second handle-less
-     * attempt is a second event: such an attempt is scoped to when it started
-     * instead, which is fixed for the life of the attempt and is not a clock
-     * read at the moment of sending.
+     * The attempt is its provider task and when it started. The start is the
+     * part every attempt has — `restore_started_at`, written by the transition
+     * that begins it, fixed for the life of the attempt and not a clock read
+     * at the moment of sending — so two attempts never share a key even when
+     * one has no handle (its call never answered) or a provider hands out a
+     * handle it has used before. The task alone used to be the scope, and a
+     * second restore polled on the first one's stale handle produced the first
+     * one's key, so its message was swallowed as a duplicate (F-09).
      */
     public static function restore(
         string $backupId,
@@ -42,7 +44,11 @@ final readonly class BackupNotificationKey
         $task = trim((string) $restoreTaskId);
 
         if ($task === '') {
-            $task = $attemptStartedAt === null ? 'no-task' : 'no-task@'.$attemptStartedAt;
+            $task = 'no-task';
+        }
+
+        if ($attemptStartedAt !== null) {
+            $task .= '@'.$attemptStartedAt;
         }
 
         return sprintf('restore:%s:%s:%s', $backupId, $task, $outcome);

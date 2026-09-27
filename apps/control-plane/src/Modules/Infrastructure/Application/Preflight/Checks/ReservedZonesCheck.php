@@ -17,15 +17,25 @@ use Lynomia\Modules\Shared\Domain\Enums\BlockerReason;
  * account — one finding, `dns.reserved_zones`, for the whole deployment.
  *
  * ===========================================================================
- * WHY A REPORT RATHER THAN A REFUSAL
+ * A REPORT, AND IN PRODUCTION A REFUSAL AS WELL
  * ===========================================================================
  *
- * The guard that refuses a claim is silent whenever it has nothing to refuse,
- * and "nothing is reserved" is the state a deployment starts in. Refusing to
- * boot on it would be wrong: it is the shipped configuration's state. Saying
+ * "Nothing is reserved" is the state a deployment starts in. Refusing to boot
+ * on it would be wrong: it is the shipped configuration's state. Saying
  * nothing would be wrong too. So it is reported, in the one place an operator
  * already reads before calling an estate ready — and a production estate is
  * not called ready while it holds too little (below).
+ *
+ * The report is not the only consequence, because nothing runs this before a
+ * deploy and a verdict nobody consumes guards nothing (F-26). In production,
+ * the states this blocks on — nothing reserved, or a platform host with
+ * claimable names beside it — are the states in which the Dns module's
+ * ClaimZone refuses every claim, as the platform's condition
+ * (`dns.zone.unavailable`), and logs why. The guard asks
+ * `ReservedZones::holdsTooLittle()`, which reads the same list through the
+ * same reader and the same `namesBeside()` this check does, and a test holds
+ * the guard's answer and this check's production verdict together case by
+ * case. Anywhere else the guard is unchanged and this is a warning.
  *
  * ===========================================================================
  * WHAT IS ASKED OF EACH PLATFORM HOST

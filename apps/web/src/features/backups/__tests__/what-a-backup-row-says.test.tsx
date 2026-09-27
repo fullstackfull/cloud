@@ -106,6 +106,10 @@ function restoreButton(): HTMLButtonElement {
   return screen.getAllByRole('button', { name: 'Restore' })[0] as HTMLButtonElement
 }
 
+function filesButton(): HTMLButtonElement {
+  return screen.getAllByRole('button', { name: 'Files' })[0] as HTMLButtonElement
+}
+
 describe('what a backup row says', () => {
   it('says a verified backup was restore tested, and offers the restore', async () => {
     renderWith(backup({ verified: true, verified_at: '2026-03-01T01:00:00+00:00' }))
@@ -125,6 +129,25 @@ describe('what a backup row says', () => {
 
     // And it says why, rather than leaving a greyed-out button to be guessed at.
     expect(restoreButton().title).toContain('did not come back')
+  })
+
+  it('does not offer the files of an unreadable backup either, and says why', async () => {
+    // The server refuses a file restore of this archive as it refuses the
+    // whole restore, and says `files.supported: false`. The button agrees on
+    // the verdict itself, so a row rendered from any payload that carries
+    // `verified: false` never offers to write unreadable data back.
+    renderWith(backup({ verified: false, is_restorable: false, files: { supported: true, reason: null } }))
+
+    expect(await screen.findByText('Unreadable')).toBeInTheDocument()
+    await waitFor(() => { expect(filesButton()).toBeDisabled() })
+    expect(filesButton().title).toContain('did not come back')
+  })
+
+  it('offers the files of an unchecked backup', async () => {
+    renderWith(backup({ verified: null }))
+
+    expect(await screen.findByText('Not tested')).toBeInTheDocument()
+    await waitFor(() => { expect(filesButton()).not.toBeDisabled() })
   })
 
   it('says an unchecked backup is untested, and still offers the restore', async () => {

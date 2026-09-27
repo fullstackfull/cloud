@@ -169,12 +169,24 @@ export function BackupsForMachine({ vm }: { vm: VirtualMachine }) {
             * Disabled with the reason as its title when the provider cannot
             * open the archive: a button that is there and says why beats one
             * that is missing and leaves the customer wondering.
+            *
+            * An archive the datastore could not read back is refused for a
+            * file restore as for a whole one, and the server already says
+            * `files.supported: false` for it. The verdict is read here too,
+            * with its own words, so this button and the Restore beside it
+            * never disagree about the same archive.
             */}
           <Button
             size="sm"
             variant="ghost"
-            disabled={!b.files.supported}
-            title={b.files.supported ? undefined : (b.files.reason ?? t('backups.filesUnsupported'))}
+            disabled={!b.files.supported || b.verified === false}
+            title={
+              b.verified === false
+                ? t('backups.filesUnreadable')
+                : b.files.supported
+                  ? undefined
+                  : (b.files.reason ?? t('backups.filesUnsupported'))
+            }
             onClick={() => { setBrowsing(b); }}
           >
             {t('backups.files')}

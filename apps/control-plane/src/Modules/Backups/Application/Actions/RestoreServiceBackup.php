@@ -163,6 +163,18 @@ final readonly class RestoreServiceBackup
                 // polled; the backup's own poll history says nothing about it.
                 'last_polled_at' => null,
                 'poll_count' => 0,
+                // Cleared in the same compare-and-set that moves the row, so
+                // no reader ever sees `restoring` beside a previous attempt's
+                // handle. An archive can be restored more than once, and the
+                // previous restore's task finished long ago: a sweep that
+                // polled it between this write and the handle's — or after a
+                // crash between the two — read "OK", wrote `Restored` and
+                // released the machine while this restore was writing it
+                // (F-09). Without a handle the row is left for the handle to
+                // arrive, or for its own clock to hand it to a person.
+                'restore_task_id' => null,
+                // This attempt has restored nothing yet.
+                'restored_at' => null,
             ]);
 
             return $locked;
@@ -189,8 +201,10 @@ final readonly class RestoreServiceBackup
                 /*
                  * A compare-and-set refusal. Nothing in this module moves a
                  * `restoring` row that has no restore task yet — the poller
-                 * leaves it for `max_poll_hours` — so this would be something
-                 * new; the row as it now stands is the answer.
+                 * leaves it for `max_poll_hours` after `restore_started_at`,
+                 * and the transition above cleared any previous attempt's
+                 * handle so there is none to poll by mistake — so this would
+                 * be something new; the row as it now stands is the answer.
                  */
                 if (! $raced->wasRaced()) {
                     throw $raced;

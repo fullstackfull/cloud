@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupDeletionRefusedException;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
+use Lynomia\Modules\Backups\Infrastructure\Models\BackupFileRestore;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 
@@ -109,6 +110,21 @@ final readonly class RequestBackupDeletion
         // A restore reads the archive it restores from. Removing it mid-restore
         // leaves a machine half-written from a source that is no longer there.
         if ($backup->state === BackupState::Restoring) {
+            throw BackupDeletionRefusedException::becauseARestoreIsRunning($id);
+        }
+
+        /*
+         * And a file restore reads it just the same, from a row of its own
+         * rather than from this row's state — which is why this used to be
+         * missed: a customer's DELETE was accepted, and the retention sweep
+         * marked the archive, while named files were being written back from
+         * it. In review counts too: nobody has seen that restore end.
+         *
+         * Read under this row's lock, which RestoreBackupFiles also takes
+         * before it writes its row, so a file restore and a deletion of one
+         * archive are two serialised steps and never both.
+         */
+        if (BackupFileRestore::query()->readingFrom($id)->exists()) {
             throw BackupDeletionRefusedException::becauseARestoreIsRunning($id);
         }
 
