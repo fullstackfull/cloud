@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Feature\Vps;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Lynomia\Modules\Compute\Application\Actions\RestateNodeCommitment;
 use Lynomia\Modules\Compute\Domain\Contracts\ComputeProvider;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\Enums\NodeStatus;
@@ -20,6 +19,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use Lynomia\Modules\Vps\Application\Handlers\ResizeVpsHandler;
+use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -169,7 +169,7 @@ final class ResizeVpsHandlerTest extends TestCase
      */
     private function resize(array $target): ProvisioningResult
     {
-        $handler = new ResizeVpsHandler($this->providers, app(SecretRedactor::class), app(RestateNodeCommitment::class));
+        $handler = new ResizeVpsHandler($this->providers, app(SecretRedactor::class), app(MachineCommitment::class));
 
         /** @var ProvisioningJob $job */
         $job = ProvisioningJob::factory()->create([

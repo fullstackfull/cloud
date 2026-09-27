@@ -52,6 +52,14 @@ use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
  * docblock): the reservation row, then both nodes ascending by id, then both
  * pools ascending by id (CapacityLocks), and every figure is computed from
  * the rows as locked.
+ *
+ * whyItWouldNotFit() asks the refusal alone, without a lock or a write: the
+ * same reservation, the same gains (plan()) and the same checks
+ * (refuseWhatDoesNotFit()), read as the rows stand. It is what the plan-change
+ * quote asks before money moves (PlanChangeDelivery, through the machine's
+ * commitment in the Vps module), so the quote and the resize refuse the same
+ * growth. It is a courtesy read, as a quote is: the answer that holds is the
+ * resize's own, under the locks.
  */
 final readonly class RestateNodeCommitment
 {
@@ -103,19 +111,8 @@ final readonly class RestateNodeCommitment
             }
 
             $shape = $shape instanceof Closure ? $shape($held) : $shape;
-
-            $sameNode = $from === $to;
-            $samePool = $held !== null && $fromStorage === $storageId;
-
-            // What the target node and pool gain (negative: give back).
-            $was = $held !== null && $sameNode ? $held->resources() : null;
-            $gain = [
-                'vcpu' => $shape->vcpu - ($was?->vcpu ?? 0),
-                'memory' => $shape->memoryMib - ($was?->memoryMib ?? 0),
-                'disk' => $shape->diskGib - ($was?->diskGib ?? 0),
-            ];
-            $poolGain = $shape->diskGib - ($held !== null && $samePool ? $held->disk_gib : 0);
             $targetPool = $storageId === null ? null : ($locked['storages'][$storageId] ?? null);
+            ['same_node' => $sameNode, 'same_pool' => $samePool, 'gain' => $gain, 'pool_gain' => $poolGain] = $this->plan($held, $to, $storageId, $shape);
 
             if ($refuseWhatDoesNotFit) {
                 $this->refuseWhatDoesNotFit($target, $gain, $targetPool, $poolGain);
@@ -157,6 +154,66 @@ final readonly class RestateNodeCommitment
                 'customer_id' => $customerId,
             ]);
         });
+    }
+
+    /**
+     * Why execute() with $refuseWhatDoesNotFit would refuse this, as the rows
+     * stand now; null when it would not. Nothing is locked or written.
+     *
+     * @param  VmResources|Closure(NodeCapacityReservation|null): VmResources  $shape
+     */
+    public function whyItWouldNotFit(string $reservationKey, ComputeNode $node, ?string $storageId, VmResources|Closure $shape): ?string
+    {
+        /** @var NodeCapacityReservation|null $held */
+        $held = NodeCapacityReservation::query()
+            ->where('reservation_key', $reservationKey)
+            ->whereNull('released_at')
+            ->first();
+
+        /** @var ComputeNode|null $target */
+        $target = ComputeNode::query()->find($node->getKey());
+
+        if ($target === null) {
+            return 'the machine\'s node is no longer recorded';
+        }
+
+        /** @var ComputeStorage|null $pool */
+        $pool = $storageId === null ? null : ComputeStorage::query()->find($storageId);
+        $shape = $shape instanceof Closure ? $shape($held) : $shape;
+        $plan = $this->plan($held, (string) $target->getKey(), $storageId, $shape);
+
+        try {
+            $this->refuseWhatDoesNotFit($target, $plan['gain'], $pool, $plan['pool_gain']);
+        } catch (NodeCapacityExceededException $e) {
+            return $e->getMessage();
+        }
+
+        return null;
+    }
+
+    /**
+     * What the target node and pool gain from restating $held as $shape on
+     * them (negative: give back), the one arithmetic execute() applies and
+     * whyItWouldNotFit() asks about.
+     *
+     * @return array{same_node: bool, same_pool: bool, gain: array{vcpu: int, memory: int, disk: int}, pool_gain: int}
+     */
+    private function plan(?NodeCapacityReservation $held, string $to, ?string $storageId, VmResources $shape): array
+    {
+        $sameNode = $held !== null && (string) $held->node_id === $to;
+        $samePool = $held !== null && $held->storage_id === $storageId;
+        $was = $sameNode ? $held->resources() : null;
+
+        return [
+            'same_node' => $sameNode,
+            'same_pool' => $samePool,
+            'gain' => [
+                'vcpu' => $shape->vcpu - ($was?->vcpu ?? 0),
+                'memory' => $shape->memoryMib - ($was?->memoryMib ?? 0),
+                'disk' => $shape->diskGib - ($was?->diskGib ?? 0),
+            ],
+            'pool_gain' => $shape->diskGib - ($samePool ? $held->disk_gib : 0),
+        ];
     }
 
     /**

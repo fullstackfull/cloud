@@ -4,16 +4,10 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Vps\Application\Handlers;
 
-use Closure;
-use Lynomia\Modules\Compute\Application\Actions\RestateNodeCommitment;
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Domain\Exceptions\NodeCapacityExceededException;
-use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
-use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
-use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
-use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ProvisioningHandler;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
@@ -21,6 +15,7 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\ValueObjects\ProvisioningResult;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
+use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
 
 /**
  * Makes a machine the size the customer now pays for.
@@ -78,7 +73,7 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  *
  * Nothing serialises two resizes of one machine, which is why the settling
  * restatements read the row under the lock rather than use the model this
- * job holds (asRecorded()).
+ * job holds (MachineCommitment::asRecorded()).
  *
  * The reservation row carries the machine's shape throughout, so the destroy
  * (which gives back what the row records) gives back what is held.
@@ -90,16 +85,17 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * and when the attempts run out the job stops in review, never failed: the
  * upgrade stays on the operator's list and on lynomia_plan_change_total until
  * a person grows the machine or returns the money. It is never reported done
- * and never grown onto room the node does not have. Refusing the upgrade
- * before the money moves is the plan-change quote's to decide, not this
- * handler's.
+ * and never grown onto room the node does not have. The plan-change quote
+ * asks the same refusal before the money moves (PlanChangeDelivery, through
+ * MachineCommitment::whyTheGrowthWouldNotFit()), so this is reached only when
+ * the room went between the quote and the resize.
  */
 final readonly class ResizeVpsHandler implements ProvisioningHandler
 {
     public function __construct(
         private ComputeProviderFactory $computeProviders,
         private SecretRedactor $redactor,
-        private RestateNodeCommitment $commitment,
+        private MachineCommitment $commitment,
     ) {}
 
     public function kind(): ProvisioningJobKind
@@ -169,8 +165,6 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
             diskGib: $diskGrowth,
         );
 
-        $held = $this->heldCommitment($machine, $node);
-
         if ($request->isEmpty()) {
             /*
              * The machine is already the shape the plan sells — a retry after
@@ -179,8 +173,8 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
              * that exists. A commitment left raised by an earlier attempt
              * that stopped after the machine was written is settled to it.
              */
-            if ($held !== null) {
-                $this->restate($held, $machine, $node, $this->asRecorded($machine), refuse: false);
+            if ($this->commitment->heldBy($machine, $node) !== null) {
+                $this->commitment->restate($machine, $node, $this->commitment->asRecorded($machine), refuse: false);
             }
 
             return ProvisioningResult::succeeded(
@@ -190,24 +184,13 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
 
         /*
          * The growth is committed before anything grows: the larger of what
-         * is held and the target, so neither the old shape nor the new one
-         * is ever running on room nobody committed.
+         * is held (as locked) and the target, so neither the old shape nor
+         * the new one is ever running on room nobody committed
+         * (MachineCommitment::ceiling(), the growth the plan-change quote
+         * asks about too).
          */
-        $recorded = $this->shapeOf($machine);
-        $ceiling = static function (?NodeCapacityReservation $locked) use ($recorded, $targetVcpu, $targetMemory, $targetDisk): VmResources {
-            // What is held as locked, not as read before the lock: another
-            // resize of this machine may have raised it since.
-            $current = $locked === null ? $recorded : $locked->resources();
-
-            return new VmResources(
-                vcpu: max($current->vcpu, $targetVcpu ?? $recorded->vcpu),
-                memoryMib: max($current->memoryMib, $targetMemory ?? $recorded->memoryMib),
-                diskGib: max($current->diskGib, $targetDisk ?? $recorded->diskGib),
-            );
-        };
-
         try {
-            $this->restate($held, $machine, $node, $ceiling, refuse: true);
+            $this->commitment->restate($machine, $node, $this->commitment->ceiling($machine, $targetVcpu, $targetMemory, $targetDisk), refuse: true);
         } catch (NodeCapacityExceededException $e) {
             // See the class docblock for what this comes to for a paid upgrade.
             return ProvisioningResult::failed(
@@ -233,7 +216,7 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
              * commitment goes back to the machine as recorded.
              */
             if (! $e->isIndeterminate()) {
-                $this->restate($this->heldCommitment($machine, $node), $machine, $node, $this->asRecorded($machine), refuse: false);
+                $this->commitment->restate($machine, $node, $this->commitment->asRecorded($machine), refuse: false);
             }
 
             return ProvisioningResult::failed(
@@ -265,7 +248,7 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
         // The commitment is now the machine as the hypervisor confirmed it:
         // a shrink gives its difference back here. Recorded, not refused -
         // the machine is this size whatever the node says.
-        $this->restate($this->heldCommitment($machine, $node), $machine, $node, $this->asRecorded($machine), refuse: false);
+        $this->commitment->restate($machine, $node, $this->commitment->asRecorded($machine), refuse: false);
 
         return ProvisioningResult::succeeded(
             remoteJobId: $operation->taskId,
@@ -277,105 +260,6 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
                 'disk_gib' => $machine->disk_gib,
             ],
         );
-    }
-
-    /**
-     * The machine's live reservation: found by its service, as the destroy
-     * finds it (DestroyVpsHandler::releaseTheCapacity()), preferring the one
-     * on the machine's node. Null when none is live.
-     */
-    private function heldCommitment(VirtualMachine $machine, ComputeNode $node): ?NodeCapacityReservation
-    {
-        if ($machine->service_id === null) {
-            return null;
-        }
-
-        /** @var NodeCapacityReservation|null $held */
-        $held = NodeCapacityReservation::query()
-            ->where('service_id', $machine->service_id)
-            ->whereNull('released_at')
-            ->orderByRaw('case when node_id = ? then 0 else 1 end', [(string) $node->getKey()])
-            ->orderBy('id')
-            ->first();
-
-        return $held;
-    }
-
-    /**
-     * @param  VmResources|Closure(NodeCapacityReservation|null): VmResources  $shape
-     *
-     * @throws NodeCapacityExceededException when $refuse and the node or pool cannot hold an increase
-     */
-    private function restate(?NodeCapacityReservation $held, VirtualMachine $machine, ComputeNode $node, VmResources|Closure $shape, bool $refuse): void
-    {
-        $this->commitment->execute(
-            // A machine with no live commitment (given back when its build
-            // failed, then adopted) is committed under a key of its own.
-            reservationKey: $held !== null ? $held->reservation_key : 'machine:'.$machine->getKey(),
-            node: $node,
-            storageId: $this->poolFor($held, $machine, $node),
-            shape: $shape,
-            refuseWhatDoesNotFit: $refuse,
-            serviceId: $machine->service_id,
-            customerId: $held?->customer_id,
-        );
-    }
-
-    /**
-     * The pool the commitment is held in: the reservation's own when it can
-     * be seen from the machine's node, otherwise the pool the machine's disk
-     * is recorded on.
-     */
-    private function poolFor(?NodeCapacityReservation $held, VirtualMachine $machine, ComputeNode $node): ?string
-    {
-        if ($held !== null && $held->storage_id !== null) {
-            $pool = ComputeStorage::query()->find($held->storage_id);
-
-            if ($pool !== null && ($pool->node_id === null || $pool->node_id === (string) $node->getKey())) {
-                return (string) $pool->getKey();
-            }
-        }
-
-        if ($machine->storage_name === null || $machine->storage_name === '') {
-            return null;
-        }
-
-        $pool = ComputeStorage::query()
-            ->where('cluster_id', $node->cluster_id)
-            ->where('provider_name', $machine->storage_name)
-            ->where(static fn ($query) => $query->whereNull('node_id')->orWhere('node_id', $node->getKey()))
-            ->orderBy('id')
-            ->first();
-
-        return $pool === null ? null : (string) $pool->getKey();
-    }
-
-    /**
-     * The machine's shape as its row says, read under the commitment's locks
-     * (RestateNodeCommitment). Not the model this job holds: nothing
-     * serialises two resizes of one machine, and every one writes the row
-     * before it restates, so a read under the lock is after the other's
-     * write or the other's restatement comes after this one - either way the
-     * last restatement is the machine's shape. Settled from the model in
-     * memory, a resize that ran whole between this one's write and its
-     * settle left the machine at 16384 MiB and the commitment at 8192 (B1).
-     *
-     * @return Closure(NodeCapacityReservation|null): VmResources
-     */
-    private function asRecorded(VirtualMachine $machine): Closure
-    {
-        $id = (string) $machine->getKey();
-
-        return function () use ($id, $machine): VmResources {
-            $row = VirtualMachine::query()->find($id);
-
-            return $this->shapeOf($row ?? $machine);
-        };
-    }
-
-    private function shapeOf(VirtualMachine $machine): VmResources
-    {
-        return new VmResources($machine->vcpu, $machine->memory_mib, $machine->disk_gib);
     }
 
     private function intOrNull(mixed $value): ?int
