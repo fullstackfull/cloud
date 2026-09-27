@@ -11,6 +11,7 @@ use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Payments\Application\Actions\IngestWebhookEvent;
 use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
+use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
 use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
 use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
@@ -32,8 +33,8 @@ use Tests\TestCase;
  * refunded figure.
  *
  * The controlled provider answers `pending` for a refund whose amount ends in
- * 05 and sends `refund.updated` through emitRefundUpdate(), signed like any
- * other webhook.
+ * 05 and sends the refund's event through emitWebhook() with the refund's
+ * status, signed like any other webhook.
  */
 final class ARefundThePendingProviderSettlesLaterIsBookedTest extends TestCase
 {
@@ -49,7 +50,7 @@ final class ARefundThePendingProviderSettlesLaterIsBookedTest extends TestCase
         $this->assertSame(RefundStatus::Pending, $refund->status);
         $this->assertSame(0, $invoice->refresh()->amount_refunded_minor, 'Precondition: nothing is booked while it is pending.');
 
-        $update = (new FakePaymentProvider)->emitRefundUpdate((string) $refund->provider_reference, RefundStatus::Succeeded, Money::ofMinor(5_005, 'KWD'));
+        $update = (new FakePaymentProvider)->emitWebhook(ProviderEventKind::RefundSucceeded, (string) $refund->provider_reference, Money::ofMinor(5_005, 'KWD'), refundStatus: RefundStatus::Succeeded);
 
         app(IngestWebhookEvent::class)->execute('fake', $update->rawPayload, $update->headers);
 
@@ -60,7 +61,7 @@ final class ARefundThePendingProviderSettlesLaterIsBookedTest extends TestCase
 
         // A redelivery, or a second copy of the event, books nothing more.
         app(IngestWebhookEvent::class)->execute('fake', $update->rawPayload, $update->headers);
-        $again = (new FakePaymentProvider)->emitRefundUpdate((string) $refund->provider_reference, RefundStatus::Succeeded, Money::ofMinor(5_005, 'KWD'));
+        $again = (new FakePaymentProvider)->emitWebhook(ProviderEventKind::RefundSucceeded, (string) $refund->provider_reference, Money::ofMinor(5_005, 'KWD'), refundStatus: RefundStatus::Succeeded);
         app(IngestWebhookEvent::class)->execute('fake', $again->rawPayload, $again->headers);
 
         $this->assertSame(5_005, $invoice->refresh()->amount_refunded_minor);
@@ -74,7 +75,7 @@ final class ARefundThePendingProviderSettlesLaterIsBookedTest extends TestCase
         $refund = app(IssueRefund::class)->execute($capture, Money::ofMinor(5_005, 'KWD'), 'customer asked');
         $this->assertTrue($capture->refresh()->refundableAmount()->isZero(), 'Precondition: the pending refund reserves the capture.');
 
-        $update = (new FakePaymentProvider)->emitRefundUpdate((string) $refund->provider_reference, RefundStatus::Failed, Money::ofMinor(5_005, 'KWD'));
+        $update = (new FakePaymentProvider)->emitWebhook(ProviderEventKind::RefundSucceeded, (string) $refund->provider_reference, Money::ofMinor(5_005, 'KWD'), refundStatus: RefundStatus::Failed);
         app(IngestWebhookEvent::class)->execute('fake', $update->rawPayload, $update->headers);
 
         $this->assertSame(RefundStatus::Failed, $refund->refresh()->status);
@@ -82,7 +83,7 @@ final class ARefundThePendingProviderSettlesLaterIsBookedTest extends TestCase
         $this->assertSame(5_005, $capture->refresh()->refundableAmount()->minorUnits(), 'No money moved, so the capture is refundable again.');
 
         // And a late "succeeded" for a refund already closed changes nothing.
-        $late = (new FakePaymentProvider)->emitRefundUpdate((string) $refund->provider_reference, RefundStatus::Succeeded, Money::ofMinor(5_005, 'KWD'));
+        $late = (new FakePaymentProvider)->emitWebhook(ProviderEventKind::RefundSucceeded, (string) $refund->provider_reference, Money::ofMinor(5_005, 'KWD'), refundStatus: RefundStatus::Succeeded);
         app(IngestWebhookEvent::class)->execute('fake', $late->rawPayload, $late->headers);
 
         $this->assertSame(RefundStatus::Failed, $refund->refresh()->status);
@@ -94,7 +95,7 @@ final class ARefundThePendingProviderSettlesLaterIsBookedTest extends TestCase
     {
         [$invoice] = $this->paidInvoice(5_005);
 
-        $update = (new FakePaymentProvider)->emitRefundUpdate('fake_re_nobody_knows', RefundStatus::Succeeded, Money::ofMinor(5_005, 'KWD'));
+        $update = (new FakePaymentProvider)->emitWebhook(ProviderEventKind::RefundSucceeded, 'fake_re_nobody_knows', Money::ofMinor(5_005, 'KWD'), refundStatus: RefundStatus::Succeeded);
         app(IngestWebhookEvent::class)->execute('fake', $update->rawPayload, $update->headers);
 
         $this->assertSame(0, Refund::query()->count());

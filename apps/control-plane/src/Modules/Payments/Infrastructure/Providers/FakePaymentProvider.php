@@ -80,7 +80,7 @@ final class FakePaymentProvider implements PaymentProvider
     /**
      * The amount suffix a refund is answered `pending` for, as a real
      * provider answers some refunds: accepted, and settled later by a
-     * `refund.updated` event (emitRefundUpdate()). Clear of DECLINE_CODES, so
+     * refund event (emitWebhook() with a refund status). Clear of DECLINE_CODES, so
      * a payment of such an amount still succeeds.
      */
     private const int PENDING_REFUND_SUFFIX = 5;
@@ -328,30 +328,6 @@ final class FakePaymentProvider implements PaymentProvider
     }
 
     /**
-     * The event a provider sends when a refund it answered `pending` settles
-     * (or fails): `refund.updated`, naming the refund and where it now stands,
-     * signed like every other webhook.
-     */
-    public function emitRefundUpdate(string $refundReference, RefundStatus $status, Money $amount, ?string $eventId = null): SignedWebhookPayload
-    {
-        $payload = [
-            'id' => $eventId ?? 'evt_fake_'.Str::lower((string) Str::ulid()),
-            'type' => 'refund.updated',
-            'created' => time(),
-            'data' => [
-                'reference' => $refundReference,
-                'refund_reference' => $refundReference,
-                'refund_status' => $status->value,
-                'amount_minor' => $amount->minorUnits(),
-                'currency' => $amount->currency(),
-                'metadata' => [],
-            ],
-        ];
-
-        return $this->signPayload(json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
-    }
-
-    /**
      * Build a webhook exactly as the provider would send it, signature and all.
      *
      * @param  array<string, string>  $metadata
@@ -366,6 +342,7 @@ final class FakePaymentProvider implements PaymentProvider
         ?string $eventId = null,
         ?int $timestamp = null,
         ?string $failureCode = null,
+        ?RefundStatus $refundStatus = null,
     ): SignedWebhookPayload {
         $payload = [
             'id' => $eventId ?? 'evt_fake_'.Str::lower((string) Str::ulid()),
@@ -373,6 +350,14 @@ final class FakePaymentProvider implements PaymentProvider
             'created' => $timestamp ?? time(),
             'data' => [
                 'reference' => $reference,
+                /*
+                 * A refund event names the refund and where it now stands,
+                 * as a provider's `refund.updated` does when a refund it
+                 * answered pending settles or fails: the reference is then
+                 * the refund's own, the one refund() returned.
+                 */
+                'refund_reference' => $refundStatus !== null ? $reference : null,
+                'refund_status' => $refundStatus?->value,
                 'amount_minor' => $amount->minorUnits(),
                 'currency' => $amount->currency(),
                 'metadata' => $metadata,
@@ -645,7 +630,7 @@ final class FakePaymentProvider implements PaymentProvider
         return match ($type) {
             'payment.succeeded' => ProviderEventKind::PaymentSucceeded,
             'payment.failed' => ProviderEventKind::PaymentFailed,
-            'refund.succeeded', 'refund.updated' => ProviderEventKind::RefundSucceeded,
+            'refund.succeeded' => ProviderEventKind::RefundSucceeded,
             default => ProviderEventKind::Unknown,
         };
     }
