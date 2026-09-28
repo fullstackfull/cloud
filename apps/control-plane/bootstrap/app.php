@@ -290,11 +290,16 @@ $app = Application::configure(basePath: dirname(__DIR__))
 
             // Unhandled: report it, and give the client a correlation ID rather
             // than a stack trace. The details live in the structured log.
+            //
+            // Whatever APP_DEBUG says. This used to send the exception's own
+            // message in debug mode, and APP_DEBUG is true in every example
+            // environment file: the operator invitation's column overflow
+            // answered with the SQLSTATE, the statement and its bound values
+            // (X9-2, re-audit after round eight).
+            // AnUnhandledFailureDisclosesNothingInDebugModeTest.
             return ApiError::make(
                 'server.error',
-                app()->hasDebugModeEnabled()
-                    ? $e->getMessage()
-                    : ErrorCatalogue::message('server.error', [], 'An unexpected error occurred. Quote the request id when contacting support.'),
+                ErrorCatalogue::message('server.error', [], 'An unexpected error occurred. Quote the request id when contacting support.'),
                 500,
             )->toResponse($request);
         });
