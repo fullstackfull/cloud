@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Rbac\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Lynomia\Http\Rules\ALoginAddressThatDelivers;
 use Lynomia\Modules\Rbac\Application\Actions\InviteOperator;
 
 final class InviteOperatorRequest extends FormRequest
@@ -22,7 +23,7 @@ final class InviteOperatorRequest extends FormRequest
     {
         return [
             'email' => [
-                'required', 'string', 'email', 'max:255',
+                'required', 'string', 'email', 'max:255', new ALoginAddressThatDelivers,
                 /*
                  * An address that already holds a staff role is refused rather
                  * than quietly re-roled: this endpoint reads as "add an

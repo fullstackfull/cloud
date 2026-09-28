@@ -86,18 +86,49 @@ use Normalizer;
  * code point, …) is kept as typed except for ASCII letters, lowercased
  * (strtolower()), which UTS #46 would lowercase too: it is refused again on
  * a second pass, and no lowercasing or composing of ours turns it into a
- * domain that resolves.
+ * domain that resolves. So is a domain UTS #46 accepts but maps to
+ * something holding an `@`, a separator or a control character: `＠`
+ * (U+FF20) and `﹫` (U+FE6B) map to `@`, which would have moved the stored
+ * address's last `@` (`ops@company.test＠evil.test` stored as
+ * `ops@company.test@evil.test`), and a no-break or other Unicode space maps
+ * to U+0020, which trim() took off the end on a second pass (verifier of
+ * round eight, on 2698318). Kept as typed, such an address splits where it
+ * was written and normalises the same twice; deliversAsWritten() says it
+ * does not deliver, and every route that takes a login address refuses it
+ * for that (Lynomia\Http\Rules\ALoginAddressThatDelivers).
  *
  * Measured, for every code point placed in four label contexts (4,448,124
- * domains): wherever UTS #46 accepts the domain as typed (593,791), the
- * stored domain has the same ASCII form; wherever it refuses it, it refuses
- * the stored one too.
+ * domains), the stored address read at its own last `@`: wherever UTS #46
+ * accepts the domain as typed and maps it to no `@`, separator or control
+ * character (593,507), the stored domain has the same ASCII form; where it
+ * maps it to one (284), deliversAsWritten() refuses every one; wherever UTS
+ * #46 refuses the domain as typed, it refuses the stored one too. The
+ * address as a whole is trimmed (trim()) before any of this, so an ASCII
+ * space at its end is not part of the domain.
+ *
+ * ---------------------------------------------------------------------------
+ * ext-intl
+ * ---------------------------------------------------------------------------
+ *
+ * The spellings described here are ICU's: Normalizer and idn_to_ascii() /
+ * idn_to_utf8() from ext-intl (ICU 74.2 where this was measured). Without
+ * the extension nothing fails — symfony/polyfill-intl-normalizer and
+ * symfony/polyfill-intl-idn, installed because symfony/mime, symfony/string
+ * and egulias/email-validator require them, define both — but the polyfill's IDNA tables are not ICU's,
+ * and a domain could be stored in another spelling. The extension is
+ * provisioned by the php_fpm role (`php_fpm_extensions` in
+ * infrastructure/ansible/roles/php_fpm/defaults/main.yml) and named in the
+ * setup-php steps of .github/workflows/ci.yml, and
+ * TheLoginAddressSpellingHasTheExtensionItIsWrittenAgainstTest goes red
+ * wherever the suite runs without it. composer.json does not require it;
+ * adding that is a dependency change, proposed rather than made here.
  *
  * ---------------------------------------------------------------------------
  *
  * Normalising a normalised address changed nothing in every case measured:
- * every code point in five contexts, the domain included (the round-eight
- * verifier's brute force, norm2.php), 2,077,050 addresses built from a code
+ * every code point in five contexts, the domain included, and in nine,
+ * five of them in the domain (the round-eight verifier's brute forces,
+ * norm2.php and norm3.php), 2,077,050 addresses built from a code
  * point of the Latin, Greek, Cyrillic, Armenian, Georgian, Cherokee,
  * Glagolitic or full-width Latin blocks with one or two combining marks, in
  * the local part and in the domain, and the samples in
@@ -106,6 +137,9 @@ use Normalizer;
 final class LoginAddress
 {
     private const int IDNA_OPTIONS = IDNA_NONTRANSITIONAL_TO_ASCII | IDNA_NONTRANSITIONAL_TO_UNICODE;
+
+    /** An `@`, a separator (\p{Z}) or a control character (\p{Cc}): between them, every byte trim() strips. */
+    private const string SPLITS_OR_TRIMS = '/[@\p{Z}\p{Cc}]/u';
 
     public static function normalise(string $address): string
     {
@@ -130,15 +164,54 @@ final class LoginAddress
             $ascii = idn_to_ascii($domain, self::IDNA_OPTIONS, INTL_IDNA_VARIANT_UTS46);
             $unicode = $ascii === false ? false : idn_to_utf8($ascii, self::IDNA_OPTIONS, INTL_IDNA_VARIANT_UTS46);
 
-            if (is_string($unicode)) {
+            // A mapping that holds an `@` or a space is not stored: `＠`
+            // (U+FF20) and `﹫` (U+FE6B) map to `@`, which would move the
+            // address's last `@`, and a no-break or other Unicode space maps
+            // to U+0020, which trim() would take off the end on a second pass.
+            if (is_string($unicode) && preg_match(self::SPLITS_OR_TRIMS, $unicode) !== 1) {
                 return $unicode;
             }
         }
 
-        // Refused by UTS #46: only ASCII letters lowercased (strtolower()
-        // touches nothing else), which UTS #46 does itself — so the result is
-        // refused again, and a second pass leaves it as it is.
+        // Refused by UTS #46, or mapped to something that would split or
+        // trim differently: only ASCII letters lowercased (strtolower()
+        // touches nothing else), which UTS #46 does itself — so a second pass
+        // takes this same path and leaves it as it is.
         return strtolower($domain);
+    }
+
+    /**
+     * Whether the address, stored in its one spelling, is delivered where it
+     * was written: a local part, a last `@`, and a domain that is an address
+     * literal (`[192.0.2.1]`, `[IPv6:…]`) or one UTS #46 processing accepts
+     * and whose ASCII form is labels of letters, digits, hyphens and
+     * underscores, joined by dots.
+     *
+     * Not so, for one: an `@` or a space that the domain's mapping produces
+     * (`ops@company.test＠evil.test`, `ops@example.test` + U+00A0), which
+     * `email:rfc,strict` accepts and normalise() keeps as typed. The rule
+     * every route that takes a login address applies
+     * (Lynomia\Http\Rules\ALoginAddressThatDelivers) refuses what this
+     * refuses.
+     */
+    public static function deliversAsWritten(string $address): bool
+    {
+        $normalised = self::normalise($address);
+        $at = strrpos($normalised, '@');
+
+        if ($at === false || $at === 0) {
+            return false;
+        }
+
+        $domain = substr($normalised, $at + 1);
+
+        if (preg_match('/^\[[0-9A-Za-z:.]+\]$/', $domain) === 1) {
+            return true;
+        }
+
+        $ascii = $domain === '' ? false : idn_to_ascii($domain, self::IDNA_OPTIONS, INTL_IDNA_VARIANT_UTS46);
+
+        return is_string($ascii) && preg_match('/^[a-z0-9_-]+(\.[a-z0-9_-]+)*$/', $ascii) === 1;
     }
 
     /**

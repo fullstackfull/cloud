@@ -411,6 +411,9 @@ return [
         'notifications' => [
             'unknown_category_or_channel' => 'Unknown notification category or channel.',
         ],
+        'login_address' => [
+            'undeliverable' => 'That address cannot receive mail as it is written. Check the part after the @ for a stray symbol or space.',
+        ],
     ],
 
 ];
