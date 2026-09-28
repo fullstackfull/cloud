@@ -31,7 +31,11 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  * it with the evidence, in the same transaction. Nothing is asked of a
  * provider and nothing else is written: no money moves, and no reservation or
  * commitment is touched - what the service held is for the service's end to
- * give back, and closing does not check that it did.
+ * give back, and closing does not check that it did. The address reaper
+ * (Ipam's ReapExpiredReservations) releases the reservations of a
+ * `cancelled` job; no kind a close accepts reserves an address (the only
+ * handlers that use the address allocator are the VPS create, the VPS
+ * destroy and the dedicated build), so a close gives it nothing to release.
  *
  * It refuses (CloseRefusedException, 409):
  *

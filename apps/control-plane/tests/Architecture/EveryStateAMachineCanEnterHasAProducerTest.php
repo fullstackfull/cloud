@@ -6,7 +6,6 @@ namespace Tests\Architecture;
 
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
-use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Shared\Domain\Contracts\StateMachine;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -113,6 +112,12 @@ final class EveryStateAMachineCanEnterHasAProducerTest extends TestCase
      * gave every one of them a production writer; the second test then
      * failed on all nine, as designed, and the entries went.
      *
+     * Nor is `ProvisioningJobStatus::Cancelled`, the table's "give up". It was
+     * excused here as a capability the platform described and did not have,
+     * until the close of a job whose service has ended
+     * (CloseAJobWhoseServiceEnded, X9-1) wrote it; this test then failed on
+     * it, as designed, and the entry went.
+     *
      * @var array<string, string>
      */
     private const array UNPRODUCED = [
@@ -127,26 +132,6 @@ final class EveryStateAMachineCanEnterHasAProducerTest extends TestCase
          * declare it prepared belongs to the Billing module's owner.
          */
         InvoiceStatus::class.'::Uncollectible' => 'No write-off exists: nothing moves an open invoice to uncollectible, and SettleInvoice::PAYABLE reads it. Billing owns the decision.',
-
-        /*
-         * The table's own comment calls it "give up": a legal target from
-         * `queued` and from `needs_review`, terminal, read by
-         * `AdoptOrphanResource` as a settled status that blocks adoption, and
-         * written only by tests. Giving up on a provisioning job is an operator
-         * capability the platform describes and does not have; building it is
-         * new capability outside this programme, and the choice between
-         * deleting the case, wiring a cancel action and declaring the state
-         * prepared belongs to the Provisioning module's owner, not to this gate.
-         *
-         * A fifth reader raises the cost of the "just delete the case" option:
-         * `ReapExpiredReservations.php:71` declares TERMINAL_FAILURE_STATUSES =
-         * ['failed', 'cancelled'] and `:104` uses it in a `whereIn` over
-         * `provisioning_jobs` to decide which address reservations to reclaim.
-         * Being strings, it is invisible to this classifier in both directions:
-         * delete the case and a string constant would still name a status the
-         * enum no longer has, and nothing would say so.
-         */
-        ProvisioningJobStatus::class.'::Cancelled' => 'No operator action cancels a provisioning job; AdoptOrphanResource.php:134 and ReapExpiredReservations.php:71 read it. Provisioning owns the decision.',
     ];
 
     #[Test]
