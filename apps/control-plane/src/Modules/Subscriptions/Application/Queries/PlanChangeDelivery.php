@@ -307,8 +307,11 @@ final readonly class PlanChangeDelivery
      * (`vps.resize_unverified`, the job in review). While the job is queued,
      * running or in review, QuotePlanChange refuses every change of plan
      * (ServiceBusy), and so does the change itself, which asks the quote's
-     * refusals again. Of what writes a job's status under src/Modules, two
-     * move one out of review: its retry (RetryProvisioningJob), which runs
+     * refusals again. Of what writes a job's status under src/Modules, three
+     * move one out of review, and two of them can reach a resize - the
+     * third, OperationsController's settling of a reinstall, reaches only a
+     * reinstall's job (a VmReinstall's or a DedicatedReinstall's). The two
+     * that can are its retry (RetryProvisioningJob), which runs
      * it - a resize looks at the machine and writes the row - and an
      * adoption (AdoptOrphanResource), which settles it without running it
      * and is refused for a job that builds no resource, a resize among them. `vps.resize_unverified` used to fail the job, which holds
