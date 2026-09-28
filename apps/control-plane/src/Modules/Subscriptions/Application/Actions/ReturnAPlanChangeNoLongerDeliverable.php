@@ -63,7 +63,8 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *  - The subscription goes back to the plan and the recurring amount the
  *    change recorded it came from, as a voided upgrade's does
  *    (RestorePlanOnVoidedUpgrade), when it is still where the change put it
- *    and no change was made after it. The machine or the account never left
+ *    and no change was made after it that was not itself returned
+ *    (restoreThePlan()). The machine or the account never left
  *    that plan's shape. A paid upgrade stops counting its unit against the
  *    plan it left, so that plan may have sold the unit in the window; the
  *    subscription goes back all the same, because that is what it runs. The
@@ -88,8 +89,8 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *  - The customer is told (`billing.plan_change_returned`), once the
  *    transaction commits: the change was not made, so the service was not
  *    changed, and what was returned to the wallet. Not which plan the
- *    subscription is on: it goes back only when nothing was changed after
- *    this change, and the sentence used to say the service "stays on its
+ *    subscription is on: it goes back only when nothing not itself returned
+ *    was changed after this change, and the sentence used to say the service "stays on its
  *    current plan" of a subscription left on the plan it was returned from
  *    (N4, the re-audit after round six).
  */
@@ -125,12 +126,15 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
      * back to the wallet, the subscription goes back to the plan it came from
      * on the same terms as above, the change is stamped `returned_at`, and
      * the audit entry carries the reason HELD_AUDIT_REASON. The customer is
-     * told with `billing.held_plan_change_returned` when the plan was put
-     * back and `billing.held_plan_change_returned_plan_kept` when it was not.
+     * told with `billing.held_plan_change_returned`. ReturnAHeldPaidChange
+     * calls this only for a change whose plan can go back, and rolls the
+     * return back if it did not; it reprices the renewals the change billed
+     * after this, in the same transaction.
      *
-     * The caller holds the job, the subscription and the paid invoice, in
-     * that order; the wallet and the plan are taken here, after them
-     * (WhatAnInvoiceStillHolds, the lock order).
+     * The caller holds the job, any open renewal it reprices, the
+     * subscription and the paid invoices, in that order; the wallet and the
+     * plan are taken here, after them (WhatAnInvoiceStillHolds, the lock
+     * order).
      *
      * @param  Subscription  $locked  the subscription, locked by the caller
      * @return array{credited: int, restored: bool}
@@ -213,11 +217,10 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
             : (is_string($label) && $label !== '' ? $label : (string) $service->getKey());
         $amount = Money::ofMinor($credited, (string) $invoice->currency)->format();
 
-        $type = match (true) {
-            ! $held => NotificationType::PlanChangeReturned,
-            $restored => NotificationType::HeldPlanChangeReturned,
-            default => NotificationType::HeldPlanChangeReturnedPlanKept,
-        };
+        // A held change is returned here only when its plan goes back
+        // (ReturnAHeldPaidChange refuses, or rolls back, anything else); one
+        // taken out of play with its plan kept is told by that action.
+        $type = $held ? NotificationType::HeldPlanChangeReturned : NotificationType::PlanChangeReturned;
 
         DB::afterCommit(function () use ($subscription, $change, $name, $amount, $type): void {
             $this->notify->execute(
@@ -233,7 +236,11 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
 
     /**
      * Back to the plan the change left, when the subscription is still where
-     * the change put it and nothing was changed after it.
+     * the change put it and nothing was changed after it - a later change
+     * that was returned itself counts as no change: it bought nothing, and
+     * its own return put the subscription back where this change had put it.
+     * So a chain of held paid changes returned latest first goes back one
+     * step at a time, to where the first of them started.
      */
     private function restoreThePlan(Subscription $locked, PlanChange $change): bool
     {
@@ -246,6 +253,7 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
 
         $later = PlanChange::query()
             ->where('subscription_id', $change->subscription_id)
+            ->whereNull('returned_at')
             ->where(static fn ($query) => $query
                 ->where('changed_at', '>', $change->changed_at)
                 ->orWhere(static fn ($same) => $same

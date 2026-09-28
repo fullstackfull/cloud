@@ -556,46 +556,73 @@ final readonly class PlanChangeDelivery
     }
 
     /**
-     * Whether the paid plan change this proration invoice bills is still in
-     * play and not delivered: recorded, paid, not returned, and either its
-     * settlement has not been heard (nothing queued, `delivered_at` empty) or
-     * what it queued has not succeeded - queued, running, in review, failed.
+     * Whether the paid plan change this proration invoice bills was not
+     * delivered: it is recorded, its invoice was paid, and it was not
+     * delivered by the reading of wasDeliveredWhileLive() - whether or not it
+     * has been returned or taken out of play since.
      *
-     * Such a change can still be delivered - the settlement queues it, a
-     * retry runs it - and refunding its invoice by hand would leave it in
-     * play: the subscription on the new plan and billed at its price, a job
-     * in review holding every plan change (`service_busy`), a later downgrade
-     * crediting the refunded money a second time, and a retry that could
-     * deliver a change already paid back (B1, the verification of round ten
-     * M). The raw refund route is refused for it; an operator returns it with
-     * ReturnAHeldPaidChange, which takes it out of play.
+     * The raw refund route is refused for such an invoice (B1, the
+     * verification of round ten M). While the change is in play - its
+     * settlement not heard, or its job queued, running, in review or failed
+     * - a refund by hand moved the money and left it there: the subscription
+     * on the new plan and billed at its price, a job in review holding every
+     * plan change (`service_busy`), a later downgrade crediting the refunded
+     * money a second time, a retry able to deliver a change already paid
+     * back. An operator returns it with ReturnAHeldPaidChange instead. And
+     * once it is out of play the invoice either holds nothing (it was
+     * returned in full) or holds what a later plan change was priced on and
+     * still draws on (it was taken out of play with nothing returned, O1 of
+     * the same verification): refunding that by hand paid the same money
+     * twice - once by hand and again as the later change's credit. What an
+     * undelivered change's invoice holds goes back by the return, by the end
+     * of the service (ReturnAnUpgradeTheEndPrevented), or by a later change's
+     * credit; not by hand.
+     *
+     * A delivered change's invoice, a renewal, and a proration invoice with
+     * no recorded change are not refused: they are an operator's to refund.
      */
-    public function aPaidChangeIsInPlay(Invoice $invoice): bool
+    public function aPaidChangeWasNotDelivered(Invoice $invoice): bool
     {
         if ($invoice->status !== InvoiceStatus::Paid || $invoice->subscription_id === null) {
             return false;
         }
 
-        /** @var PlanChange|null $change */
-        $change = PlanChange::query()->where('proration_invoice_id', $invoice->getKey())->first();
-
-        if ($change === null || $change->returned_at !== null) {
+        if (! PlanChange::query()->where('proration_invoice_id', $invoice->getKey())->exists()) {
             return false;
         }
 
-        $jobs = $this->deliveringJobs((string) $invoice->subscription_id, (string) $invoice->getKey())->get(['status'])->all();
+        return ! $this->wasDeliveredWhileLive((string) $invoice->subscription_id, (string) $invoice->getKey());
+    }
+
+    /**
+     * Whether this paid proration invoice's change was delivered, read
+     * strictly, as it stands on a live service: what its settlement queued
+     * under the invoice's key succeeded; or it queued nothing and its
+     * settlement was heard (`delivered_at`) - nothing needed changing, or a
+     * later change already decided the machine. A job queued, running, in
+     * review, failed or cancelled has not delivered it.
+     *
+     * wasDelivered() answers the end's question, and counts a job still able
+     * to run as delivering; this one asks whether it did.
+     */
+    public function wasDeliveredWhileLive(string $subscriptionId, string $invoiceId): bool
+    {
+        $jobs = $this->deliveringJobs($subscriptionId, $invoiceId)->get(['status'])->all();
 
         if ($jobs === []) {
-            return $change->delivered_at === null;
+            return PlanChange::query()
+                ->where('proration_invoice_id', $invoiceId)
+                ->whereNotNull('delivered_at')
+                ->exists();
         }
 
         foreach ($jobs as $job) {
-            if ($job->status === ProvisioningJobStatus::Succeeded || $job->status === ProvisioningJobStatus::Cancelled) {
-                return false;
+            if ($job->status === ProvisioningJobStatus::Succeeded) {
+                return true;
             }
         }
 
-        return true;
+        return false;
     }
 
     /**

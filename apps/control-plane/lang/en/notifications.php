@@ -81,11 +81,11 @@ return [
         ],
         'held_plan_change_returned' => [
             'title' => 'The plan change for :service was cancelled',
-            'body' => 'Our team could not complete the plan change for :service, so it has been cancelled. What you paid for the change and had not already been refunded, :amount, has been returned to your wallet. Your subscription is back on the plan it was on before the change, and is billed at that plan\'s price.',
+            'body' => 'Our team could not complete the plan change for :service, so it has been cancelled. What you paid for the change and had not already been refunded, :amount, has been returned to your wallet. Your subscription is back on the plan it was on before the change, and is billed at that plan\'s price: a renewal already issued at the new plan\'s price has been corrected, and anything you paid on it beyond that price has been returned to your wallet.',
         ],
         'held_plan_change_returned_plan_kept' => [
             'title' => 'The plan change for :service was cancelled',
-            'body' => 'Our team could not complete the plan change for :service, so it has been cancelled. What you paid for the change and had not already been refunded, :amount, has been returned to your wallet. Your subscription was not moved back to its earlier plan, because it has been changed again since or has ended.',
+            'body' => 'Our team could not complete the plan change for :service, so it has been cancelled. Your plan was changed again after it, and that later change was priced from this one, so nothing is returned now: what you paid for this change counts towards the plan you are on. If :service ends before a later plan change is completed, what is left of that payment is returned to your wallet.',
         ],
         'plan_change_returned_at_the_end' => [
             'title' => 'The plan change for :service was not completed',

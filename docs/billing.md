@@ -110,27 +110,60 @@ settlement - a resize or package change that fails outright or stops in review -
 when its settlement's listener exhausts its retries: the money is held for an operator to
 complete the change (retry the job) or return it, once its job has stopped
 (`POST /api/admin/provisioning/jobs/{job}/return-payment`, `ReturnAHeldPaidChange`, behind
-`payment.refund`; the steps in `docs/runbooks/provisioning-stuck.md` §6). The return is one
-transaction: what the proration invoice still holds goes back to the wallet against the
-invoice; the subscription goes back to the plan and recurring amount the change came
-from, unless it was changed again since or has ended; the change is stamped
-`returned_at`; the stopped job is cancelled (`needs_review` or `failed` -> `cancelled`), so
-it leaves the review list, stops holding plan changes (`service_busy`) and cannot be
-retried into delivering what was paid back; the operator's `provisioning.paid_change_returned`
-and a `subscription.plan_changed` entry with the reason
-`held_plan_change_returned_by_an_operator` are audited; and the customer is told
-(`billing.held_plan_change_returned` when the plan went back,
-`billing.held_plan_change_returned_plan_kept` when it did not).
+`payment.refund`; the steps in `docs/runbooks/provisioning-stuck.md` §6). It is one
+transaction, and either way the stopped job is cancelled (`needs_review` or `failed` ->
+`cancelled`), so it leaves the review list, stops holding plan changes (`service_busy`)
+and cannot be retried into delivering what was paid back; the change is stamped
+`returned_at`; and the operator's `provisioning.paid_change_returned` is audited with the
+evidence. What else it does depends on whether the plan was changed again after it:
 
-The raw refund of such a change's capture (`POST /api/admin/transactions/{transaction}/refunds`)
-is refused (409 `provisioning.refund_of_a_paid_change_in_play`) while the change is in play -
-paid, not returned, and either not yet settled or with a job that has not succeeded
-(`PlanChangeDelivery::aPaidChangeIsInPlay()`). It used to be the documented return, and it
-moved the money only: the subscription stayed on the new plan and a renewal billed its
+- **Not changed again** (no later change, or only later changes returned themselves):
+  what the proration invoice still holds goes back to the wallet against the invoice; the
+  subscription goes back to the plan and recurring amount the change came from; every
+  renewal issued since the change at its price is priced again at the old one
+  (`RepriceTheRenewalsAReturnedChangeBilled`: the same quantity, the tax rate on its line,
+  and the subscription's coupon terms when its line was discounted) - an open renewal is
+  withdrawn, what was paid on it going back to the wallet against it
+  (`ReturnWhatAnInvoiceStillHolds::andWithdraw()`), and issued again for the same period at
+  the old price, open; a paid renewal keeps its document and the difference goes back to
+  the wallet as a credit against it. A `subscription.plan_changed` entry with the reason
+  `held_plan_change_returned_by_an_operator` is audited, and the customer is told
+  (`billing.held_plan_change_returned`). The renewals used to be left alone: a renewal
+  issued at 90.000 while the change was held stayed open at 90.000, or at 17.000 owing
+  after 73.000 was paid from the wallet, for a period on the 9.000 plan (N1, the
+  verification of round ten M, `1af8ec1`). The part paid on an open renewal goes to the
+  wallet rather than onto the new invoice: the platform has no idiom that moves a
+  payment between invoices, and the wallet pays the new renewal as it paid the old.
+- **Changed again by a later change that was settled** (it owed nothing, or it was paid
+  and delivered): nothing is credited, and the plan stays where the later change put it.
+  The later change was priced from the plan this one moved onto and drew its credit on
+  this change's invoice, or charged only the difference from it; what this invoice still
+  holds is what the plan the subscription is on still consumes. It stays against the
+  invoice - returned at the service's end if nothing later was delivered, drawn on by a
+  later change's credit, never refunded by hand. A `subscription.plan_changed` entry with
+  the reason `held_plan_change_taken_out_of_play_by_an_operator` is audited, and the
+  customer is told (`billing.held_plan_change_returned_plan_kept`). It used to credit what
+  the invoice held as well, and a later move back to the small plan credited the same
+  money again: 109.000 against 100.000 (O1, the same verification).
+- **Changed again by a later paid change not yet delivered** (awaiting payment, running,
+  held): refused (`provisioning.return_a_later_paid_change_is_pending`). Complete or return
+  the later one first; a chain of held paid changes is returned latest first, each putting
+  the plan back one step.
+
+It is refused, too, while the service or the subscription has ended (the end returns
+it), and when the plan cannot go back (none recorded, or the subscription no longer on the
+plan and price the change moved it to).
+
+The raw refund of a paid change's capture (`POST /api/admin/transactions/{transaction}/refunds`)
+is refused (409 `provisioning.refund_of_an_undelivered_paid_change`) while the change was not
+delivered - whether or not it has been returned or taken out of play since
+(`PlanChangeDelivery::aPaidChangeWasNotDelivered()`). It used to be the documented return, and
+it moved the money only: the subscription stayed on the new plan and a renewal billed its
 price for a machine that never grew, a job in review kept refusing the customer's change
 back as `service_busy`, a downgrade after a failed job credited the refunded upgrade a
 second time (12.000 credited against 3.000 charged), and a retry could still deliver a
-change already paid back (B1, the verification of round ten M).
+change already paid back (B1, the verification of round ten M). A delivered change's
+invoice, a renewal, and a proration invoice with no recorded change stay refundable.
 
 What the settlement cannot see is a room that goes after it: a resize the node can no
 longer hold is retried and then stops in review, never failed, with the money held for an

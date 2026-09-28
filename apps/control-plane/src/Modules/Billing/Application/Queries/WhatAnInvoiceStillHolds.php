@@ -120,8 +120,11 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  * CloseAJobWhoseServiceEnded (the provisioning job, then - returning the
  * paid change it delivered, through ReturnAPaidChangeWhoseDeliveryStopped -
  * the paid invoice and the wallet); an operator's return of a held paid
- * change, ReturnAHeldPaidChange (the provisioning job, the subscription, the
- * paid invoice, the wallet, then the plan the subscription goes back to). A
+ * change, ReturnAHeldPaidChange (the provisioning job; the open renewals it
+ * reprices, while still open, before the subscription, as the renewal and
+ * the wind-up take an open invoice; the subscription; the paid invoices -
+ * the change's and the paid renewals it reprices - in ascending id order;
+ * the wallet; then the plan the subscription goes back to). A
  * provisioning job's row is outside the numbered order, and taken before a
  * subscription or an invoice: the actions that lock a job (the provisioning
  * engine's claim, RetryProvisioningJob, AdoptOrphanResource, DetectStaleJobs,

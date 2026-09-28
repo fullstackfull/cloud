@@ -222,29 +222,50 @@ change is made or returned. Decide which:
    POST /admin/provisioning/jobs/{job}/return-payment   # evidence required
    ```
 
-   In one transaction it returns what the proration invoice still holds to the
-   customer's wallet, puts the subscription back on the plan and price the
-   change came from (unless it was changed again since or has ended - the
-   answer's `plan_restored` says which), records the change returned, and
-   cancels the job: it leaves this list, stops holding the customer's plan
-   changes, and can no longer be retried. The customer is told. It is audited
-   as `provisioning.paid_change_returned` with your evidence, and needs the
-   `payment.refund` permission, because it moves money back out. It is
-   refused (409) for a job that is still queued or running
+   One transaction; the job is cancelled either way, so it leaves this list,
+   stops holding the customer's plan changes, and can no longer be retried.
+   The customer is told. It is audited as `provisioning.paid_change_returned`
+   with your evidence, and needs the `payment.refund` permission, because it
+   moves money back out (`provisioning.retry` alone is not enough). The
+   answer says what it did:
+
+   - `plan_restored: true` - the plan was not changed after it. What the
+     proration invoice still holds went back to the wallet
+     (`returned_to_wallet_minor`), the subscription is back on the plan and
+     price the change came from, and every renewal issued since at the new
+     price was priced again: an open one voided, what was paid on it returned
+     to the wallet, and issued again at the old price (the customer pays it
+     as any renewal); a paid one with the difference returned to the wallet.
+   - `plan_restored: false` - the customer changed plan again after it, and
+     that later change was priced from it. Nothing was credited
+     (`returned_to_wallet_minor: 0`); what the invoice holds counts towards
+     the plan they are on now, and comes back at the service's end if nothing
+     later was delivered. Do not "top it up" by hand.
+
+   It is refused (409) for a job that is still queued or running
    (`provisioning.return_not_stopped` - wait for it), a job that delivers no
-   paid plan change (`provisioning.return_not_a_paid_change`), and a job whose
+   paid plan change (`provisioning.return_not_a_paid_change`), a job whose
    service has ended (`provisioning.return_service_ended` - close it: the end
-   returns the money).
+   returns the money) or whose subscription has ended
+   (`provisioning.return_subscription_ended` - the service's end returns it),
+   a change followed by a later paid change not yet delivered
+   (`provisioning.return_a_later_paid_change_is_pending` - retry or return
+   that later job first; a chain of held paid changes is returned latest
+   first), a change whose plan cannot go back
+   (`provisioning.return_plan_cannot_go_back` - raise it with billing), and a
+   return during which a renewal was issued or paid
+   (`provisioning.return_renewal_moved` - ask again).
 
    Do **not** refund the capture by hand. The raw refund route
    (`POST /admin/transactions/{transaction}/refunds`) refuses a capture whose
-   plan change is still in play (409 `provisioning.refund_of_a_paid_change_in_play`):
-   it would move the money and leave the change in play - the subscription on
-   the new plan and billed at it, the job holding every plan change, a later
+   plan change was not delivered, before or after its return
+   (409 `provisioning.refund_of_an_undelivered_paid_change`): before, it would
+   move the money and leave the change in play - the subscription on the new
+   plan and billed at it, the job holding every plan change, a later
    downgrade crediting the same money again, and a retry able to deliver a
-   change already paid back. The money goes to the wallet, as every return of
-   an undelivered purchase does; a card refund on top of it is held to what
-   the invoice then holds, which is nothing.
+   change already paid back; after a return with `plan_restored: false`, it
+   would pay out what a later change still draws on. The money goes to the
+   wallet, as every return of an undelivered purchase does.
 
 If returning the paid change fails when a job fails on a service that has
 already ended, the job is sent to review instead (its error ends with "close the

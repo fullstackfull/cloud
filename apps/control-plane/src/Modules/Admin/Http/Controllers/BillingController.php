@@ -108,23 +108,23 @@ final class BillingController
         }
 
         /*
-         * A capture that paid for a plan change still in play - not
-         * delivered, not returned - is not refunded here: the refund would
-         * move the money and leave the change in play, the subscription on
-         * the new plan and a retry able to deliver it (B1, the verification
-         * of round ten M). ReturnAHeldPaidChange returns it and takes it out
-         * of play. Read before the refund, outside its locks. A change leaves
-         * play for good - its job succeeds or is cancelled, or it is
-         * returned, and none of those is undone - so a change this read
-         * finds out of play cannot be back in play by the time the refund
-         * runs; one it finds in play and that leaves play meanwhile is
-         * refused, and the operator asks again.
+         * A capture that paid for a plan change that was not delivered is not
+         * refunded here (PlanChangeDelivery::aPaidChangeWasNotDelivered()
+         * says why): its money goes back by ReturnAHeldPaidChange, by the end
+         * of the service, or by a later change's credit (B1 and O1, the
+         * verification of round ten M). Read before the refund and outside
+         * its locks. The one move this read can race is a change being
+         * delivered meanwhile - its job succeeding - and then the refund is
+         * refused although it would now be allowed, and the operator asks
+         * again. No move turns a delivered change back into an undelivered
+         * one, so a refund this read allows is never of an undelivered
+         * change's money.
          */
         /** @var Invoice|null $paidFor */
         $paidFor = $found->invoice_id === null ? null : Invoice::query()->find($found->invoice_id);
 
-        if ($paidFor !== null && app(PlanChangeDelivery::class)->aPaidChangeIsInPlay($paidFor)) {
-            throw PaidChangeReturnRefusedException::becauseARefundWouldLeaveTheChangeInPlay((string) $found->getKey(), (string) $paidFor->getKey());
+        if ($paidFor !== null && app(PlanChangeDelivery::class)->aPaidChangeWasNotDelivered($paidFor)) {
+            throw PaidChangeReturnRefusedException::becauseTheChangeItPaidForWasNotDelivered((string) $found->getKey(), (string) $paidFor->getKey());
         }
 
         $user = $request->user();

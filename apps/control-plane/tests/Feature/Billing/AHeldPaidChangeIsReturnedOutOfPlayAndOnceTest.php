@@ -6,6 +6,7 @@ namespace Tests\Feature\Billing;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Testing\TestResponse;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
@@ -16,6 +17,7 @@ use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
@@ -25,6 +27,7 @@ use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobFailed;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
+use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\Actions\RenewDueSubscriptions;
 use Lynomia\Modules\Subscriptions\Application\Actions\ReturnAHeldPaidChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\ReturnAnUpgradeTheEndPrevented;
@@ -257,6 +260,217 @@ final class AHeldPaidChangeIsReturnedOutOfPlayAndOnceTest extends BillingApiTest
         $this->assertSame((string) $this->resize->idempotency_key, $row->idempotency_key);
     }
 
+    // ------------------------------------- N1: renewals at the new price
+
+    #[Test]
+    public function n2_an_open_renewal_issued_at_the_new_price_is_withdrawn_and_issued_again_at_the_old(): void
+    {
+        $this->aPaidUpgradeSettled();
+        $this->theRoomGoes();
+        $this->runTheResizeUntilItStops();
+        $renewal = $this->renewNow();
+        $this->assertSame(90_000, (int) $renewal->total_minor, 'renewed at the new plan while the change was held');
+
+        $this->returnPayment()->assertOk()->assertJsonPath('data.plan_restored', true);
+
+        $this->assertSame(InvoiceStatus::Void, $renewal->refresh()->status);
+        $reissued = $this->theOpenRenewal();
+        $this->assertSame(9_000, (int) $reissued->total_minor);
+        $this->assertSame($this->periodOf($renewal), $this->periodOf($reissued), 'the same period, at the old price');
+        $this->assertSame(100_000, $this->wallet());
+    }
+
+    #[Test]
+    public function n_a_renewal_paid_in_part_at_the_new_price_has_its_payment_returned_and_is_issued_again_at_the_old(): void
+    {
+        $this->aPaidUpgradeSettled();
+        $this->theRoomGoes();
+        $this->runTheResizeUntilItStops();
+        $renewal = $this->renewNow();
+        $this->actingAs($this->owner)->withHeaders(['Idempotency-Key' => 'r10m-n-renew'])
+            ->postJson('/api/v1/invoices/'.$renewal->id.'/wallet-credit');
+        $this->assertSame(0, $this->wallet(), '73.000 paid against the 90.000 renewal');
+        $this->assertSame(InvoiceStatus::Open, $renewal->refresh()->status);
+
+        $this->returnPayment()->assertOk()->assertJsonPath('data.returned_to_wallet_minor', self::PAID);
+
+        $this->assertSame(InvoiceStatus::Void, $renewal->refresh()->status);
+        $this->assertSame(73_000, $this->returnedAgainst($renewal), 'what was paid on it went back, against it');
+        $this->assertSame(9_000, (int) $this->theOpenRenewal()->total_minor);
+        // 100.000 in the wallet, 9.000 owed for the period on the small plan.
+        $this->assertSame(100_000, $this->wallet());
+    }
+
+    #[Test]
+    public function a_paid_renewal_at_the_new_price_has_the_difference_returned_against_it(): void
+    {
+        $this->aPaidUpgradeSettled();
+        $this->theRoomGoes();
+        $this->runTheResizeUntilItStops();
+        $renewal = $this->renewNow();
+        $ledger = app(WalletLedger::class);
+        $ledger->credit(wallet: $ledger->walletFor($this->customer, 'KWD'), amount: Money::ofMinor(20_000, 'KWD'), kind: WalletTransactionKind::Topup, description: 'test top-up');
+        $this->actingAs($this->owner)->withHeaders(['Idempotency-Key' => 'r10m-paid-renew'])
+            ->postJson('/api/v1/invoices/'.$renewal->id.'/wallet-credit')->assertOk();
+        $this->assertSame(InvoiceStatus::Paid, $renewal->refresh()->status);
+        $this->assertSame(3_000, $this->wallet());
+
+        $this->returnPayment()->assertOk();
+
+        $this->assertSame(InvoiceStatus::Paid, $renewal->refresh()->status, 'a paid renewal keeps its document');
+        $this->assertSame(81_000, $this->returnedAgainst($renewal), '90.000 billed, 9.000 owed');
+        // 120.000 put in, 9.000 owed for the period on the small plan.
+        $this->assertSame(111_000, $this->wallet());
+
+        // Asked again, nothing more.
+        $this->returnPayment()->assertStatus(409);
+        $this->assertSame(111_000, $this->wallet());
+    }
+
+    // ------------------------------ O1: a later change was settled from it
+
+    #[Test]
+    public function o_a_held_change_the_plan_moved_on_from_credits_nothing_and_a_move_back_is_exact(): void
+    {
+        $this->aPaidUpgradeSettled();
+        DB::table('virtual_machines')->where('id', $this->machine->id)->update(['provider_id' => null]);
+        $this->runTheResizeUntilItStops();
+        $medium = $this->plan('medium', ['vcpu' => 4, 'memory_mib' => 8192, 'disk_gib' => 40], 45_000);
+        $this->changeTo($medium, 'r10m-o-1')->assertOk();
+        $this->runEveryResizeUntilItStops();
+        $this->assertSame(88_000, $this->wallet());
+
+        $this->returnPayment()
+            ->assertOk()
+            ->assertJsonPath('data.returned_to_wallet_minor', 0)
+            ->assertJsonPath('data.plan_restored', false);
+
+        $this->assertSame(88_000, $this->wallet(), 'nothing credited: the later change was priced from it');
+        $this->assertSame((string) $medium->id, (string) $this->subscription->refresh()->plan_id);
+        $this->assertNotNull($this->change->refresh()->returned_at);
+        $this->assertSame(ProvisioningJobStatus::Cancelled, $this->resize->refresh()->status);
+        $this->assertSame(1, $this->notices('billing.held_plan_change_returned_plan_kept'));
+        $this->assertSame(1, AuditEntry::query()->where('context->reason', ReturnAHeldPaidChange::OUT_OF_PLAY_AUDIT_REASON)->count());
+
+        // The raw refund of what the invoice still holds is refused too.
+        $this->theRawRefundIsRefused(88_000);
+
+        // Back to small: 12.000 credited, drawn on the upgrade's invoice once.
+        $small = Plan::query()->where('slug', 'small')->sole();
+        $this->changeTo($small, 'r10m-o-2')->assertOk();
+        $this->assertSame(100_000, $this->wallet(), 'exact: the verifier measured 109.000 here');
+    }
+
+    #[Test]
+    public function o_variant_a_held_change_left_for_the_end_is_returned_there_if_nothing_later_was_delivered(): void
+    {
+        $this->aPaidUpgradeSettled();
+        DB::table('virtual_machines')->where('id', $this->machine->id)->update(['provider_id' => null]);
+        $this->runTheResizeUntilItStops();
+        $medium = $this->plan('medium', ['vcpu' => 4, 'memory_mib' => 8192, 'disk_gib' => 40], 45_000);
+        $this->changeTo($medium, 'r10m-ov-1')->assertOk();
+        $this->runEveryResizeUntilItStops();
+        $this->returnPayment()->assertOk()->assertJsonPath('data.returned_to_wallet_minor', 0);
+
+        $this->terminateTheService();
+
+        // The later change failed too: the end returns what the upgrade's
+        // invoice still holds, once.
+        $this->assertSame(100_000, $this->wallet());
+    }
+
+    #[Test]
+    public function o_variant_a_held_change_a_delivered_later_change_moved_on_from_credits_nothing_and_is_kept_at_the_end(): void
+    {
+        $this->aPaidUpgradeSettled();
+        $provider = DB::table('virtual_machines')->where('id', $this->machine->id)->value('provider_id');
+        DB::table('virtual_machines')->where('id', $this->machine->id)->update(['provider_id' => null]);
+        $this->runTheResizeUntilItStops();
+        DB::table('virtual_machines')->where('id', $this->machine->id)->update(['provider_id' => $provider]);
+        $medium = $this->plan('medium', ['vcpu' => 4, 'memory_mib' => 8192, 'disk_gib' => 40], 45_000);
+        $this->changeTo($medium, 'r10m-od-1')->assertOk();
+        $this->runEveryResizeUntilItStops();
+        $this->assertSame(8192, $this->machine->refresh()->memory_mib, 'the later change was delivered');
+        $this->assertSame(88_000, $this->wallet());
+
+        $this->returnPayment()->assertOk()->assertJsonPath('data.returned_to_wallet_minor', 0);
+        $this->assertSame(88_000, $this->wallet(), 'medium for ten days, delivered: 12.000 net, exactly its price');
+
+        $this->terminateTheService();
+        $this->assertSame(88_000, $this->wallet(), 'superseded by a delivered change: kept');
+    }
+
+    #[Test]
+    public function o_variant_a_later_paid_change_not_yet_delivered_is_returned_first_then_the_earlier_one(): void
+    {
+        $b = $this->twoPaidUpgradesThatBothFailed();
+        $bJob = ProvisioningJob::query()->where('idempotency_key', 'like', '%:invoice:'.$b->id)->sole();
+
+        $this->returnPayment()
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'provisioning.return_a_later_paid_change_is_pending');
+        $this->assertSame(43_000, $this->wallet());
+
+        // Latest first: each goes back one step.
+        $this->returnPayment($bJob)->assertOk()->assertJsonPath('data.plan_restored', true);
+        $this->assertSame((string) Plan::query()->where('slug', 'large')->sole()->id, (string) $this->subscription->refresh()->plan_id);
+        $this->returnPayment()->assertOk()->assertJsonPath('data.plan_restored', true);
+
+        $this->assertSame(100_000, $this->wallet());
+        $this->assertSame((string) Plan::query()->where('slug', 'small')->sole()->id, (string) $this->subscription->refresh()->plan_id);
+        $this->assertSame(9_000, $this->subscription->recurring_amount_minor);
+    }
+
+    // ------------------------------------------ permission and lock order
+
+    #[Test]
+    public function the_return_needs_payment_refund_and_not_provisioning_retry(): void
+    {
+        $this->aPaidUpgradeSettled();
+        $this->theRoomGoes();
+        $this->runTheResizeUntilItStops();
+
+        // Noc may retry and close, and may not move money back out.
+        $noc = $this->operator();
+        $noc->syncRoles([Role::Noc->value]);
+        $this->assertTrue($noc->can('provisioning.retry'));
+        $this->returnPayment(null, $noc)->assertForbidden();
+        $this->assertSame(100_000 - self::PAID, $this->wallet());
+
+        // Finance may refund, and may not retry: it may return.
+        $finance = $this->operator();
+        $finance->syncRoles([Role::Finance->value]);
+        $this->assertFalse($finance->can('provisioning.retry'));
+        $this->returnPayment(null, $finance)->assertOk();
+        $this->assertSame(100_000, $this->wallet());
+    }
+
+    #[Test]
+    public function the_return_with_a_renewal_to_reprice_takes_open_invoices_before_the_subscription_and_the_wallet_before_the_plan(): void
+    {
+        $this->aPaidUpgradeSettled();
+        $this->theRoomGoes();
+        $this->runTheResizeUntilItStops();
+        $renewal = $this->renewNow();
+
+        $locked = [];
+        DB::listen(static function ($query) use (&$locked): void {
+            if (str_contains(strtolower($query->sql), 'for update') && preg_match('/from\s+"([a-z_]+)"/i', $query->sql, $m) === 1) {
+                $locked[] = $m[1];
+            }
+        });
+
+        app(ReturnAHeldPaidChange::class)->execute($this->resize, 'test');
+
+        $order = implode(', ', $locked);
+        $first = static fn (string $table): int => (int) array_search($table, $locked, true);
+        $this->assertSame(['provisioning_jobs', 'invoices', 'subscriptions'], array_slice($locked, 0, 3), 'the job, the open renewal, then the subscription: '.$order);
+        $this->assertContains('wallets', $locked, $order);
+        $this->assertContains('plans', $locked, $order);
+        $this->assertLessThan($first('plans'), $first('wallets'), 'the wallet before the plan: '.$order);
+        $this->assertSame(InvoiceStatus::Void, $renewal->refresh()->status);
+    }
+
     // ---------------------------------------------------------------- B2
 
     #[Test]
@@ -410,17 +624,58 @@ final class AHeldPaidChangeIsReturnedOutOfPlayAndOnceTest extends BillingApiTest
 
     // ----------------------------------------------------------- helpers
 
-    private function theRawRefundIsRefused(): void
+    private function theRawRefundIsRefused(int $walletIs = 100_000 - self::PAID): void
     {
         /** @var Transaction $charge */
         $charge = Transaction::query()->where('invoice_id', $this->invoice->id)->where('provider', 'wallet')->sole();
 
         $this->actingAs($this->operator())
-            ->postJson('/api/admin/transactions/'.$charge->id.'/refunds', ['amount_minor' => self::PAID, 'reason' => 'Held change returned by hand.'])
+            ->postJson('/api/admin/transactions/'.$charge->id.'/refunds', ['amount_minor' => 1_000, 'reason' => 'Held change returned by hand.'])
             ->assertStatus(409)
-            ->assertJsonPath('error.code', 'provisioning.refund_of_a_paid_change_in_play');
+            ->assertJsonPath('error.code', 'provisioning.refund_of_an_undelivered_paid_change');
 
-        $this->assertSame(100_000 - self::PAID, $this->wallet(), 'the refused refund moved nothing');
+        $this->assertSame($walletIs, $this->wallet(), 'the refused refund moved nothing');
+    }
+
+    private function returnPayment(?ProvisioningJob $job = null, ?User $as = null): TestResponse
+    {
+        return $this->actingAs($as ?? $this->operator())
+            ->postJson('/api/admin/provisioning/jobs/'.($job ?? $this->resize)->id.'/return-payment', ['evidence' => 'The change will not be made.']);
+    }
+
+    private function changeTo(Plan $plan, string $key): TestResponse
+    {
+        return $this->actingAs($this->owner)->withHeader('Idempotency-Key', $key)
+            ->postJson("/api/v1/subscriptions/{$this->subscription->id}/plan", ['plan_id' => $plan->id, 'price_id' => $this->priceOf($plan)->id]);
+    }
+
+    /** The period ends, and the sweep renews: the renewal it issued. */
+    private function renewNow(): Invoice
+    {
+        $subscription = $this->subscription->refresh();
+        $this->travelTo(CarbonImmutable::instance($subscription->current_period_end)->addMinute());
+        app(RenewDueSubscriptions::class)->execute();
+
+        return $this->theOpenRenewal();
+    }
+
+    private function theOpenRenewal(): Invoice
+    {
+        return Invoice::query()
+            ->where('subscription_id', $this->subscription->id)
+            ->where('status', InvoiceStatus::Open->value)
+            ->whereHas('items', static fn ($items) => $items->where('kind', InvoiceItemKind::Plan->value))
+            ->sole();
+    }
+
+    /**
+     * @return array{string, string}
+     */
+    private function periodOf(Invoice $invoice): array
+    {
+        $line = InvoiceItem::query()->where('invoice_id', $invoice->id)->where('kind', InvoiceItemKind::Plan->value)->sole();
+
+        return [(string) $line->period_start, (string) $line->period_end];
     }
 
     private function assertTheHeldReturnWasRecordedOnce(string $notice): void

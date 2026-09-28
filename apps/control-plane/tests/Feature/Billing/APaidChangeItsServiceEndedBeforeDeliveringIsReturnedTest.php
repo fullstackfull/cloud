@@ -157,7 +157,7 @@ final class APaidChangeItsServiceEndedBeforeDeliveringIsReturnedTest extends Bil
         $this->actingAs($this->operator())
             ->postJson('/api/admin/transactions/'.$charge->id.'/refunds', ['amount_minor' => self::PAID, 'reason' => 'Paid resize failed; returned by hand.'])
             ->assertStatus(409)
-            ->assertJsonPath('error.code', 'provisioning.refund_of_a_paid_change_in_play');
+            ->assertJsonPath('error.code', 'provisioning.refund_of_an_undelivered_paid_change');
         $this->actingAs($this->operator())
             ->postJson('/api/admin/provisioning/jobs/'.$this->resize->id.'/return-payment', ['evidence' => 'Paid resize failed; returned by an operator.'])
             ->assertOk();

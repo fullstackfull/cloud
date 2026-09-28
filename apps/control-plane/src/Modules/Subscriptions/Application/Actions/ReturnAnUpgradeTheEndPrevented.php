@@ -104,9 +104,12 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * A change its settlement found could no longer be delivered was returned
  * there (ReturnAPlanChangeNoLongerDeliverable), and a held change an operator
  * returned on a live service was returned by ReturnAHeldPaidChange: the
- * invoice holds nothing more, and asked again here it credits nothing. A raw
- * refund of a paid change still in play is refused
- * (PlanChangeDelivery::aPaidChangeIsInPlay()).
+ * invoice holds nothing more, and asked again here it credits nothing. A held
+ * change an operator took out of play with nothing returned, because a later
+ * change was settled from it, still holds what it held: returned here if
+ * that later change was not delivered either, kept if it was. A raw refund of
+ * an undelivered paid change is refused
+ * (PlanChangeDelivery::aPaidChangeWasNotDelivered()).
  *
  * A return that credits something is recorded as that one does: the change's
  * `returned_at` and `return_reason`; a `subscription.plan_changed` audit
