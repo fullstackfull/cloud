@@ -70,7 +70,7 @@ gives another, so a figure here cannot go stale unnoticed:
     than its opening line, which is what would end the item:
 
       grep -nE '^ *([-*+]|[0-9]+[.)]) +(`{3,}|~{3,})' docs/runbooks/*.md | wc -l    # 0
-      grep -hcE '^ {1,3}(`{3,}|~{3,})' docs/runbooks/*.md | awk '{ n += $1 } END { print n }'    # 16
+      grep -hcE '^ {1,3}(`{3,}|~{3,})' docs/runbooks/*.md | awk '{ n += $1 } END { print n }'    # 18
       awk 'FNR == 1 { open = 0 } /^  ? ?(```|~~~)/ { if (open) open = 0; else { open = 1; ind = match($0, /[`~]/) - 1 }; next } open && NF && match($0, /[^ ]/) - 1 < ind { n++ } END { print n + 0 }' docs/runbooks/*.md   # 0
 
 The other way round -- text a renderer shows as something other than a code
