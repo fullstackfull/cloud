@@ -157,13 +157,6 @@ export function useAdoptProvisioningJob() {
 }
 
 /**
- * Move a VPS create off a provider identity somebody else's machine holds.
- *
- * Refused by the server in every case where that could build a second
- * machine; the refusal is shown rather than pre-empted, because only the
- * server can tell whose the machine at the identity is.
- */
-/**
  * Take a job off the review list, without running it, because its service
  * has ended (X9-1). The server refuses any job it would not close; the
  * evidence is required and audited.
@@ -183,6 +176,13 @@ export function useCloseProvisioningJob() {
   })
 }
 
+/**
+ * Move a VPS create off a provider identity somebody else's machine holds.
+ *
+ * Refused by the server in every case where that could build a second
+ * machine; the refusal is shown rather than pre-empted, because only the
+ * server can tell whose the machine at the identity is.
+ */
 export function useRepointProvisioningJob() {
   const queryClient = useQueryClient()
 
