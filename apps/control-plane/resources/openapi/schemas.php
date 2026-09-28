@@ -2194,6 +2194,7 @@ return [
             'reserved_cluster_id' => ['type' => ['string', 'null']],
             'reserved_provider_nodes' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Every node an attempt under the reserved id was placed on: every node a create under it was sent to, and any node an attempt was placed on that ended before sending one.'],
             'reserved_provider_hostnames' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Every name a create under the reserved id was sent with.'],
+            'closable' => ['type' => 'boolean', 'description' => 'Whether the close route would take the job off the review list now: it is in `needs_review`, it is a power change, a resize or a package change, and its service has ended.'],
             'correlation_id' => ['type' => ['string', 'null']],
             'started_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'finished_at' => ['$ref' => '#/components/schemas/Timestamp'],
@@ -2806,6 +2807,15 @@ return [
         ],
     ],
     'AdminAdoptedJob' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'status' => ['type' => ['string', 'null']],
+            'service_id' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'AdminClosedJob' => [
         'type' => 'object',
         'additionalProperties' => false,
         'properties' => [

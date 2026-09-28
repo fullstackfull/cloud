@@ -37,7 +37,7 @@ final class OrphanAdoptionRejectedException extends DomainException
      */
     public static function becauseTheJobBuildsNothing(string $jobId, ProvisioningJobKind $kind): self
     {
-        $exception = new self('Only a job that builds a resource can adopt one; this kind of job changes a resource that already exists. Retry it instead.');
+        $exception = new self('Only a job that builds a resource can adopt one; this kind of job changes a resource that already exists. Retry it instead; a power change, a resize or a package change whose service has ended is closed.');
 
         return $exception->withContext(['provisioning_job_id' => $jobId, 'kind' => $kind->value])
             ->as('provisioning.adoption_not_a_build');

@@ -62,7 +62,9 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  *    behind can now be ended (F-19, EndAnUnbuiltService), and its failed build
  *    job is still on the review screen with this button beside it. Running it
  *    would build a machine for a service that is over: unbilled, unowned, and
- *    holding an address.
+ *    holding an address. A resize, a package change or a power change in
+ *    review on such a service is refused here too, and by an adoption (it
+ *    builds nothing); it is closed instead (CloseAJobWhoseServiceEnded, X9-1).
  *
  * What it deliberately does NOT refuse is a failure by its class. A timed-out
  * build with no provider task recorded is requeued here; the engine's own
@@ -71,9 +73,11 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  * EvidenceOfABuild reads the build history itself for exactly that reason.
  *
  * There is deliberately no way to force past any of them. An operator who
- * knows better than the platform has adoption for the second case and the
- * operation's own review verdict for the third; both of those record what the
- * person saw, which "force" never does.
+ * knows better than the platform has adoption for the second case, the
+ * operation's own review verdict for the third, and for the fourth, where
+ * the job is a power change, a resize or a package change in review,
+ * closing it; each of those records what the person saw, which "force"
+ * never does.
  *
  * ---------------------------------------------------------------------------
  * One attempt, not a new budget

@@ -513,7 +513,8 @@ final class RunProvisioningJob implements ShouldQueue
          * their own finding when they move a job to review, and an adoption —
          * recorded as an attempt — moves the finding it resolved into its own
          * record. An operator's verdict on a rebuild makes no attempt and
-         * leaves the last attempt's finding where it is.
+         * leaves the last attempt's finding where it is, and so does a close
+         * of a job whose service has ended (CloseAJobWhoseServiceEnded).
          *
          * The attempt number, the handler's `reason` and the provider identity
          * the finding is about are carried because what reads the finding

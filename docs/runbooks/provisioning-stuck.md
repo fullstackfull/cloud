@@ -143,7 +143,58 @@ needed — usually a risk hold, or a dedicated server with no matching hardware 
 Resolve the underlying question, then move it on with a recorded reason. Never move an
 order out of review without one; the next person needs to know why it was released.
 
-## 6. If nothing above fits
+## 6. A job that changes a machine or an account, stuck in review
+
+Not every job in review is a build. A resize, a package change or a power
+change (start, stop, restart) acts on something that already exists, and
+**adopt is refused for all of them** (`provisioning.adoption_not_a_build`):
+there is nothing to adopt. The finding codes for a resize are in
+`provider-indeterminate.md`.
+
+**A resize whose task cannot be asked about.** The job's `result` holds
+`resize_task_in_flight` (the task's UPID and node; an attempt that found the
+task running named it in its error message too), and its attempts ran out on
+`compute.provider_request_failed`: the hypervisor was never able to say what
+became of the task.
+
+```sql
+SELECT result->'resize_task_in_flight' FROM provisioning_jobs WHERE id = '<JOB_ULID>';
+```
+
+Before retrying, look for that task on that node:
+
+- **It is still running:** wait for it to finish, then retry.
+- **It finished, or the node has no such task:** retry. The retry asks about
+  the task once more, and if that fails too it gives up on the task — recorded
+  on the job as `resize_task_unaskable` and logged — and looks at the machine:
+  a machine already the shape asked for is recorded as it is and the job
+  succeeds; what is still missing is asked for, measured from what the
+  hypervisor reports.
+
+Retrying while the task is in fact still running, with a disk growth not yet
+landed, grows the disk twice: the look sees the old disk. That is why you look
+for the task first.
+
+**A job whose service has ended.** A resize, a package change or a power change
+in review on a service that is `terminated` cannot be retried
+(`provisioning.retry_after_the_service_ended`) or adopted. Close it:
+
+```
+POST /admin/provisioning/jobs/{job}/close      # evidence required
+```
+
+The needs-review list marks such a job `closable`, and the portal offers
+**Close the job** on it. Closing moves the job to `cancelled` without running
+it, records who closed it on the job and in the audit trail
+(`provisioning.closed`, with your evidence), asks nothing of any provider and
+moves no money. It is refused (409) for a job not in review
+(`provisioning.close_not_in_review`), for a build, a destroy, a rebuild or a
+WordPress job (`provisioning.close_not_for_this_kind` — a build or a destroy
+may have left a resource: §4), and while the service has not ended
+(`provisioning.close_service_not_ended` — retry it instead). It needs the
+`provisioning.retry` permission, as retry and adopt do.
+
+## 7. If nothing above fits
 
 Pull every log line for the request that created the order:
 

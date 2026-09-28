@@ -798,7 +798,7 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
 
     /**
      * What bounds mass assignment: the admin surface for provisioning jobs,
-     * exactly — two reads, three acts that take nothing from the request but
+     * exactly — two reads, four acts that take nothing from the request but
      * evidence and a reference, and ONE route that writes onto a job a value
      * the request supplies.
      *
@@ -831,6 +831,7 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
             'GET api/admin/provisioning/jobs',
             'GET api/admin/provisioning/needs-review',
             'POST api/admin/provisioning/jobs/{job}/adopt',
+            'POST api/admin/provisioning/jobs/{job}/close',
             'POST api/admin/provisioning/jobs/{job}/repoint',
             'POST api/admin/provisioning/jobs/{job}/retry',
         ], array_values(array_diff($routes, [self::THE_ONE_ROUTE_THAT_WRITES_WHAT_A_REQUEST_SUPPLIES])));

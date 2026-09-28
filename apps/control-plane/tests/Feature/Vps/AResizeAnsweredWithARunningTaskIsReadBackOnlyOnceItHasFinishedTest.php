@@ -7,6 +7,8 @@ namespace Tests\Feature\Vps;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
 use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
@@ -149,7 +151,13 @@ final class AResizeAnsweredWithARunningTaskIsReadBackOnlyOnceItHasFinishedTest e
         $this->assertStringContainsString($first, (string) $resize->last_error, 'The review list cannot see which task the job waits on.');
 
         $this->theTasksFinish();
+        Log::spy();
         $this->runWorker($resize);
+
+        // Logged as well as recorded (the log line was unpinned: the re-audit
+        // after round eight, band D).
+        Log::shouldHaveReceived('warning')->withArgs(static fn (string $message, array $context): bool => str_contains($message, 'ended in failure')
+            && $context['id'] === $first && $context['node'] === 'pve-01' && $context['status'] === 'failed')->once();
 
         $resize->refresh();
         $failed = $resize->result[ResizeVpsHandler::TASK_FAILED] ?? null;
@@ -164,6 +172,84 @@ final class AResizeAnsweredWithARunningTaskIsReadBackOnlyOnceItHasFinishedTest e
         $this->assertSame(160, $this->fleetDisk($machine), 'A failed growth landed, or the growth was applied twice.');
         $this->assertSame(ProvisioningJobStatus::Succeeded, $resize->status, (string) $resize->last_error);
         $this->assertSame(160, $machine->refresh()->disk_gib);
+    }
+
+    #[Test]
+    public function a_task_nobody_can_ask_about_is_given_up_on_by_the_operators_retry_which_settles_from_the_machine(): void
+    {
+        /*
+         * A9-2 (the re-audit after round eight): the task an attempt left
+         * running can never be asked about. Every attempt, and every retry,
+         * asked, failed and went back to review; an adoption is refused for a
+         * resize; the service's plan changes were held for ever. The engine's
+         * own attempts still only ask; the operator's retry asks, and when
+         * that fails too it looks at the machine, whose disk the task grew.
+         */
+        $machine = $this->aBuiltMachine();
+        $resize = $this->resizeJob($machine, vcpu: 2, memoryMib: 4096, diskGib: 160);
+
+        $this->runWorker($resize);
+        $task = $resize->refresh()->result[ResizeVpsHandler::TASK_IN_FLIGHT] ?? null;
+        $this->assertIsArray($task);
+
+        $this->theTasksFinish();
+        $this->theTaskCannotBeAskedAbout();
+
+        foreach (range(2, $resize->max_attempts) as $attempt) {
+            $this->runWorker($resize);
+        }
+
+        $resize->refresh();
+        $this->assertSame(ProvisioningJobStatus::NeedsReview, $resize->status);
+        $this->assertSame('compute.provider_request_failed', $resize->result['error']['code'] ?? null);
+        $this->assertSame($task, $resize->result[ResizeVpsHandler::TASK_IN_FLIGHT] ?? null, 'The engine\'s own attempt gave up on the task.');
+        $this->assertSame(40, $machine->refresh()->disk_gib);
+
+        Log::spy();
+        $this->retryAsOperator($resize)->assertOk();
+        DB::table('provisioning_jobs')->where('id', $resize->id)->update(['next_attempt_at' => null]);
+        $this->runWorker($resize);
+
+        $resize->refresh();
+        $this->assertSame(ProvisioningJobStatus::Succeeded, $resize->status, 'The operator\'s retry asked, failed and went back to review: '.$resize->last_error);
+        $this->assertTrue($resize->result['response']['already_correct'] ?? false, 'The retry did not settle from the machine it read.');
+        $this->assertSame(160, $this->fleetDisk($machine), 'The retry grew the disk the task had already grown.');
+        $this->assertSame([2, 4096, 160], $this->rowShape($machine));
+        $this->assertSame([2, 4096, 160], $this->committed());
+        $this->assertArrayNotHasKey(ResizeVpsHandler::TASK_IN_FLIGHT, $resize->result);
+
+        $unaskable = $resize->result[ResizeVpsHandler::TASK_UNASKABLE] ?? null;
+        $this->assertIsArray($unaskable, 'The task the retry gave up on was recorded nowhere.');
+        $this->assertSame([$task['id'], 'pve-01', 'compute.provider_request_failed', $resize->max_attempts + 1], [$unaskable['id'], $unaskable['node'], $unaskable['error_code'], $unaskable['attempt']]);
+        Log::shouldHaveReceived('warning')->withArgs(static fn (string $message, array $context): bool => str_contains($message, 'could not be asked about') && $context['id'] === $task['id'])->once();
+    }
+
+    #[Test]
+    public function a_task_nobody_can_ask_about_that_left_the_machine_unchanged_is_applied_by_the_operators_retry(): void
+    {
+        $machine = $this->aBuiltMachine();
+        config()->set('compute.fake.task_delay_seconds', 0);
+        $this->theTasksFinish();
+        $resize = $this->resizeJob($machine, vcpu: 4, memoryMib: 8192, diskGib: 40);
+        $resize->forceFill(['result' => [ResizeVpsHandler::TASK_IN_FLIGHT => ['id' => 'UPID:pve-01:0000AAAA:0000BBBB:65000000:qmresize:101:root@pam:', 'node' => 'pve-01']]])->save();
+        $this->theTaskCannotBeAskedAbout();
+
+        foreach (range(1, $resize->max_attempts) as $attempt) {
+            DB::table('provisioning_jobs')->where('id', $resize->id)->update(['next_attempt_at' => null]);
+            $this->runWorker($resize);
+        }
+
+        $this->assertSame(ProvisioningJobStatus::NeedsReview, $resize->refresh()->status);
+        $this->assertSame([2, 4096, 40], $this->rowShape($machine));
+
+        $this->retryAsOperator($resize)->assertOk();
+        DB::table('provisioning_jobs')->where('id', $resize->id)->update(['next_attempt_at' => null]);
+        $this->runWorker($resize);
+
+        $this->assertSame(ProvisioningJobStatus::Succeeded, $resize->refresh()->status, (string) $resize->last_error);
+        $this->assertSame([4, 8192, 40], $this->rowShape($machine));
+        $live = $this->hypervisor->fleet->getVm('pve-01', (string) $machine->provider_id);
+        $this->assertSame([4, 8192, 40], [$live?->vcpu, $live?->memoryMib, $live?->diskGib]);
     }
 
     #[Test]
@@ -189,6 +275,14 @@ final class AResizeAnsweredWithARunningTaskIsReadBackOnlyOnceItHasFinishedTest e
         $this->hypervisor = new AnswerLosingComputeProvider(new FakeComputeProvider);
         $this->hypervisor->loseTheAnswerToCreates = false;
         app(ComputeProviderFactory::class)->swap($this->cluster, $this->hypervisor);
+    }
+
+    /** Every ask about a task fails, as for a task the hypervisor no longer knows. */
+    private function theTaskCannotBeAskedAbout(): void
+    {
+        $this->hypervisor->atTheMomentOfTaskAsk = static function (): void {
+            throw ComputeProviderException::requestFailed('fake', 'get_task', ['provider_message' => 'no such task']);
+        };
     }
 
     private function aBuiltMachine(?string $hostname = null): VirtualMachine

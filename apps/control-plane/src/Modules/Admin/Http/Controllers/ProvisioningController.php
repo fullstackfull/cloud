@@ -12,6 +12,7 @@ use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Provisioning\Application\Actions\AdoptOrphanResource;
+use Lynomia\Modules\Provisioning\Application\Actions\CloseAJobWhoseServiceEnded;
 use Lynomia\Modules\Provisioning\Application\Actions\RetryProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\SharedHosting\Application\Actions\NameTheDomainAHostingJobWillServe;
@@ -79,7 +80,8 @@ final class ProvisioningController
      * place the reason appeared was `last_error`, which the screen truncates —
      * and the provider identity a create reserved, with every node an attempt
      * under it was placed on and every name a create under it was sent with,
-     * because that is where to look.
+     * because that is where to look. And `closable`: whether close() would
+     * take the job off this list now (CloseAJobWhoseServiceEnded::accepts()).
      *
      * The finding is published only while it is current, in both of the
      * senses `RepointReservedIdentity` requires before it acts on one: it is
@@ -100,6 +102,7 @@ final class ProvisioningController
     public function needingReview(Request $request): JsonResponse
     {
         $jobs = ProvisioningJob::query()
+            ->with('service')
             ->whereIn('status', ['failed', 'needs_review'])
             ->orderByDesc('created_at')
             ->orderByDesc('id')
@@ -124,6 +127,9 @@ final class ProvisioningController
                 'reserved_provider_nodes' => $job->reserved_provider_nodes ?? [],
                 'reserved_provider_hostnames' => $job->reserved_provider_hostnames ?? [],
                 'attempts' => $job->attempts,
+                // Whether close() would accept it now (X9-1): in review, a
+                // kind a close takes, and its service ended.
+                'closable' => CloseAJobWhoseServiceEnded::accepts($job, $job->service),
                 'created_at' => $job->created_at?->toIso8601String(),
             ];
         });
@@ -190,6 +196,54 @@ final class ProvisioningController
                 'attempts' => $requeued->attempts,
                 'max_attempts' => $requeued->max_attempts,
                 'service_id' => $requeued->service_id,
+            ],
+        ]);
+    }
+
+    /**
+     * Take a job off the review list because its service has ended.
+     *
+     * The way out for a resize, a package change or a power change stopped in
+     * review on a service that has since ended, which a retry refuses (the
+     * service is over) and an adoption refuses (it builds nothing) - it used
+     * to stay in review for ever (X9-1). CloseAJobWhoseServiceEnded says what
+     * it accepts and what it writes; nothing here calls a provider. The
+     * evidence is required and audited, as a retry's is.
+     */
+    public function close(Request $request, string $job): JsonResponse
+    {
+        $found = ProvisioningJob::query()->findOrFail($job);
+
+        $validated = $request->validate([
+            'evidence' => ['required', 'string', 'min:3', 'max:1000'],
+        ]);
+
+        $user = $request->user();
+        $closedBy = $user instanceof User
+            ? sprintf('%s <%s>', $user->name, $user->email)
+            : 'system';
+
+        $closed = app(RecordActAtomically::class)->execute(
+            act: static fn (): ProvisioningJob => app(CloseAJobWhoseServiceEnded::class)->execute($found, $closedBy),
+            describe: static fn (ProvisioningJob $job): AuditedAct => new AuditedAct(
+                action: AuditAction::ProvisioningClosed,
+                subject: $job,
+                customerId: $job->customer_id,
+                context: [
+                    'evidence' => $validated['evidence'],
+                    'kind' => $job->kind->value,
+                    'service_id' => $job->service_id,
+                    'last_error' => $job->last_error,
+                    'closed_by' => $closedBy,
+                ],
+            ),
+        );
+
+        return response()->json([
+            'data' => [
+                'id' => $closed->id,
+                'status' => $closed->status->value,
+                'service_id' => $closed->service_id,
             ],
         ]);
     }
