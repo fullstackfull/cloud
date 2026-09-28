@@ -143,7 +143,23 @@ failure of its HTTP class rather than crashing.
 
 ## Pagination
 
-List endpoints are cursor-paginated:
+A collection comes back in one of three envelopes, and `docs/openapi.yaml`
+publishes which for each operation.
+
+**Paged by number.** The list takes `?page=` and `?per_page=` and answers:
+
+```json
+{
+  "data": [ ... ],
+  "meta": { "page": 1, "per_page": 25, "total": 112, "last_page": 5, "max_per_page": 100 }
+}
+```
+
+That `meta` is `PaginationMeta` in the description. The notification inbox
+adds `unread` beside it.
+
+**Walked by cursor.** `GET /api/v1/activity` is the one list paged this way. It
+takes `?cursor=` and `?per_page=` and answers:
 
 ```json
 {
@@ -152,8 +168,15 @@ List endpoints are cursor-paginated:
 }
 ```
 
-Cursors rather than page numbers, because offset pagination over a table that is being
-written to skips and duplicates rows — and these tables are written to constantly.
+That `meta` is `CursorPaginationMeta`. `next_cursor` is passed back as `cursor`
+for the next page and is null on the last one. The feed is a union of the
+account's history that grows at its newest end while it is read, so an offset
+would show one row twice and skip another, and it has no total because
+counting every source would double the cost of each page. A `per_page` outside
+1 to 100 is refused with `validation.failed`.
+
+**Not paged.** The rest return `{ "data": [ ... ] }` in one response. Some add a
+`meta` of their own, such as the DNS zone list's `total`.
 
 ## Money in responses
 
@@ -169,17 +192,25 @@ as an IEEE double, and JSON numbers are doubles in most clients.
 
 ## OpenAPI
 
-There is no generated specification yet, and no generated client. The portal talks to the
-API through a hand-written client in `apps/web/src/lib/api.ts`.
+`docs/openapi.yaml` is the specification: an OpenAPI 3.1 description of every
+route the application registers under `api/` and `webhooks/`, 302 operations
+when this was written. `php artisan openapi:generate` writes it (from the
+repository root, `npm run openapi:generate`), reading the paths, methods and
+path parameters from the route table and the meaning from
+`apps/control-plane/resources/openapi/` (`operations.php`, `components.php`,
+`schemas.php`). The file is not edited by hand: change those and regenerate.
+`php artisan openapi:generate --check` fails, and writes nothing, when the
+committed file is not what the generator produces, and
+`OpenApiSpecificationTest` fails on the same difference in the backend suite.
+`npm run openapi:lint` validates it with Redocly, in CI too.
 
-This is worth stating plainly because the alternative is attractive enough to assume: a
-specification generated from the routes and their form requests, feeding a typed client, so
-that a breaking change to an endpoint fails the frontend's typecheck in CI rather than at
-runtime in front of a customer. That is the intent. It is not the state. Generating it now,
-against an API that is still only the identity surface, would produce a contract that has to
-be thrown away as soon as the business endpoints land — so it is deferred until those
-endpoints exist, and until then nothing in this repository claims a specification it does
-not produce.
+There is no generated client. The portal talks to the API through a
+hand-written client in `apps/web/src/lib/api.ts`, with response types written
+by hand, mostly in `apps/web/src/lib/types.ts`. `TheClientAndTheDescriptionAgreeTest`
+holds them to the description by name: every property of a portal interface
+that shares its name with a published schema (or is paired with one in the
+test's short alias list) must be one that schema declares. It compares names,
+not types.
 
 `packages/shared-types` and `packages/api-client` are empty workspace placeholders reserved
-for that generated output. They export nothing today.
+for generated output. They export nothing today.

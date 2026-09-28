@@ -15,7 +15,9 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Providers\FakeComputeProvider;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Architecture\EveryEnumCaseHasAProducerTest;
 use Tests\TestCase;
 
 /**
@@ -68,6 +70,38 @@ final class AnOperatorPutsADiscoveredNodeIntoServiceTest extends TestCase
         $this->assertSame('maintenance', $entry->context['from'] ?? null);
         $this->assertSame('active', $entry->context['to'] ?? null);
         $this->assertStringContainsString('4411', (string) ($entry->context['reason'] ?? ''));
+    }
+
+    /**
+     * The two statuses {@see EveryEnumCaseHasAProducerTest} excuses as
+     * produced by the declaration of `ChangeComputeNodeStatus::SETTABLE`,
+     * written out here rather than read from that list, so that taking one
+     * out of the list turns this red instead of shrinking the data set.
+     *
+     * @return iterable<string, array{NodeStatus}>
+     */
+    public static function statusesAnOperatorSets(): iterable
+    {
+        yield 'active' => [NodeStatus::Active];
+        yield 'draining' => [NodeStatus::Draining];
+    }
+
+    /**
+     * What holds each of those as produced: an operator with
+     * `node.maintenance` sets it through the route, the node is in it
+     * afterwards, and the audit entry records the move to it.
+     */
+    #[Test]
+    #[DataProvider('statusesAnOperatorSets')]
+    public function an_operator_sets_a_node_to_it_through_the_route(NodeStatus $status): void
+    {
+        $this->actingAs($this->operatorWith(Role::Noc))
+            ->putJson($this->uri(), ['status' => $status->value, 'reason' => 'Rack 7 maintenance window; ticket 5120.'])
+            ->assertOk()
+            ->assertJsonPath('data.status', $status->value);
+
+        $this->assertSame($status, $this->node->refresh()->status);
+        $this->assertSame($status->value, AuditEntry::query()->where('action', AuditAction::ComputeNodeStatusChanged)->sole()->context['to'] ?? null);
     }
 
     #[Test]

@@ -15,7 +15,11 @@ export interface Money {
   amount: string
 }
 
-/** The envelope every collection endpoint returns. */
+/**
+ * The envelope of a collection paged by number (`PaginationMeta`). The
+ * activity feed is walked by cursor instead (`ActivityPage`), and a
+ * collection returned whole has `data` alone or a meta of its own.
+ */
 export interface Paginated<T> {
   data: T[]
   meta: {
@@ -1240,7 +1244,16 @@ export type ActivityCategory = 'cloud' | 'hosting' | 'domains' | 'billing' | 'su
 /** The cursor page the feed returns. Opaque cursors, walked forwards only. */
 export interface ActivityPage {
   data: ActivityItem[]
-  meta: { per_page: number; next_cursor: string | null; has_more: boolean }
+  meta: CursorPaginationMeta
+}
+
+/**
+ * The meta of a collection walked by cursor. `next_cursor` is null on the
+ * last page, and is the only thing that says whether there is another.
+ */
+export interface CursorPaginationMeta {
+  per_page: number
+  next_cursor: string | null
 }
 
 /** One thing the account should look at, in the server's priority order. */

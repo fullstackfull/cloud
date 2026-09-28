@@ -164,9 +164,9 @@ import { describe, expect, it } from 'vitest'
  *  - **4** are blind sites: a query's answer reaches the gate by a route this
  *    file does not follow. All four are correct today, and that is the code's
  *    doing, not this gate's.
- *     - `ActivityPage` `!hasMore || nextCursor === null` and
+ *     - `ActivityPage` `nextCursor === null` and
  *       `NotificationsPage` `unread === 0` read a destructured `data`; their
- *       fallbacks (`?? false`, `?? null`, `?? 0`) shut the control.
+ *       fallbacks (`?? null`, `?? 0`) shut the control.
  *     - `ProvidersPage` `entry === undefined`, where `entry` is
  *       `catalogue?.data.find((candidate) => …)` over a destructured
  *       envelope; an unresolved catalogue finds nothing.

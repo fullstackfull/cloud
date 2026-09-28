@@ -2289,6 +2289,48 @@ final class ByElementTest extends ElementParent
         $this->assertSessionHas($row->stamp, now());
     }
 
+    #[Test]
+    public function found_equality__assertStringContainsStringIgnoringCase__0(): void
+    {
+        $this->assertStringContainsStringIgnoringCase(now(), $row->stamp);
+    }
+
+    #[Test]
+    public function found_equality__assertStringContainsStringIgnoringCase__1(): void
+    {
+        $this->assertStringContainsStringIgnoringCase($row->stamp, now());
+    }
+
+    #[Test]
+    public function found_equality__assertHeader__1(): void
+    {
+        $response->assertHeader('X-Stamp', now()->toIso8601String());
+    }
+
+    #[Test]
+    public function found_equality__assertRedirect__0(): void
+    {
+        $response->assertRedirect('/day/'.now()->toDateString());
+    }
+
+    #[Test]
+    public function found_equality__assertCookie__1(): void
+    {
+        $response->assertCookie('stamp', now()->timestamp);
+    }
+
+    #[Test]
+    public function found_equality__assertViewHas__0(): void
+    {
+        $response->assertViewHas(['day' => today()]);
+    }
+
+    #[Test]
+    public function found_equality__assertViewHas__1(): void
+    {
+        $response->assertViewHas('day', today());
+    }
+
     private function assertStampedHere(object $row): void
     {
         $this->assertEquals(now(), $row->at);

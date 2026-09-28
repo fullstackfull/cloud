@@ -78,6 +78,7 @@ final class NotificationController
                 'per_page' => $notifications->perPage(),
                 'total' => $notifications->total(),
                 'last_page' => $notifications->lastPage(),
+                'max_per_page' => self::MAX_PER_PAGE,
                 // The badge, in the same response as the list, so the portal
                 // does not need a second request on every page load.
                 'unread' => $this->scoped($request)->whereNull('read_at')->count(),

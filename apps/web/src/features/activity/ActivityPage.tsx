@@ -75,7 +75,8 @@ export function ActivityPage() {
   const { data, isPending, error } = useActivity(category, cursor)
 
   const rows = data?.data ?? []
-  const hasMore = data?.meta.has_more ?? false
+  // The server says there is another page by giving its cursor, and says
+  // nothing else about it: null is the last page.
   const nextCursor = data?.meta.next_cursor ?? null
 
   function choose(next: ActivityCategory | null): void {
@@ -161,7 +162,7 @@ export function ActivityPage() {
               <Button
                 size="sm"
                 variant="ghost"
-                disabled={!hasMore || nextCursor === null}
+                disabled={nextCursor === null}
                 onClick={() => {
                   if (nextCursor !== null) showFrom(nextCursor)
                 }}

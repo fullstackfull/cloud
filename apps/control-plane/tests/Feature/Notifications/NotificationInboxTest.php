@@ -43,6 +43,24 @@ final class NotificationInboxTest extends VpsApiTestCase
             ->assertJsonPath('meta.unread', 2);
     }
 
+    /**
+     * `docs/openapi.yaml` publishes the inbox with `PaginationMeta`, which
+     * requires `max_per_page`, and the portal's `Paginated` type reads it;
+     * the inbox adds the unread count beside it.
+     */
+    #[Test]
+    public function the_meta_is_the_published_page_meta_and_the_unread_count(): void
+    {
+        [, $user] = $this->accountWithOwner();
+
+        $meta = $this->actingAs($user)->getJson('/api/v1/notifications?per_page=500')->assertOk()->json('meta');
+
+        $this->assertIsArray($meta);
+        $this->assertEqualsCanonicalizing(['page', 'per_page', 'total', 'last_page', 'max_per_page', 'unread'], array_keys($meta));
+        $this->assertSame(50, $meta['max_per_page']);
+        $this->assertSame(50, $meta['per_page'], 'A request beyond the maximum is clamped and served.');
+    }
+
     #[Test]
     public function the_body_is_rendered_in_the_readers_language(): void
     {

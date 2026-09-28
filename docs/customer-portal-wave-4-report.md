@@ -264,9 +264,12 @@ GET /api/v1/activity?category=&cursor=&per_page=
 - `category` accepts the six values of `ActivityCategory` and nothing else;
   an unknown value is a 422 from the form request rather than a silently
   unfiltered page.
-- `per_page` defaults to 25 and is capped at 100.
+- `per_page` defaults to 25 and must be between 1 and 100: a value outside is
+  refused with a 422 (`validation.failed`), not clamped.
 - `throttle:reads` — 300 requests a minute per user. See AH.
-- The response is `{data: [...], meta: {per_page, next_cursor, has_more}}`.
+- The response is `{data: [...], meta: {per_page, next_cursor}}`, and
+  `next_cursor` is null on the last page. (This line said `has_more` too; the
+  controller has never sent it, and the portal read it until round eight.)
 
 Each row publishes: `id`, `occurred_at`, `category`, `message_code`, `state`,
 `is_terminal`, `needs_attention`, `retry_advice`, `actor` (`{type,
@@ -339,7 +342,8 @@ Cursor pagination with a deterministic tie-breaker:
   satisfy from an index rather than by filtering a sorted result.
 - An unreadable or tampered cursor yields the newest page, not an error: a
   bookmarked link with a mangled query string should show the feed, not a 422.
-- `has_more` is computed by asking for one row beyond the page and dropping it.
+- Whether there is a next page is computed by asking for one row beyond the
+  page and dropping it; the answer is sent as a `next_cursor` or a null one.
 
 Forwards only. A backwards cursor was not built, and the page's "Previous"
 control walks the cursors this session has already visited rather than asking

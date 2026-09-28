@@ -92,7 +92,9 @@ $error = [
 $paginationMeta = [
     'type' => 'object',
     'description' => <<<'TEXT'
-    The same envelope on every collection this API returns.
+    The meta of a collection paged by number (`page` and `per_page`). A
+    collection returned whole is not described by it, and the activity feed is
+    paged by cursor instead (`CursorPaginationMeta`).
 
     `per_page` is what was served, not what was asked for: a request beyond
     `max_per_page` is clamped and served rather than refused, so a client that
@@ -123,6 +125,42 @@ $page = static fn (string $ref): array => [
     ],
 ];
 
+$cursorPaginationMeta = [
+    'type' => 'object',
+    'description' => <<<'TEXT'
+    The meta of a collection walked by an opaque cursor: the activity feed.
+
+    `next_cursor` is passed back as `cursor` to read the next page, and is
+    null on the last one; there is no other way to tell that more exists.
+    There is no page number and no total. The feed grows at its newest end
+    while it is read, so numbered pages would show one row twice and skip
+    another, and counting every source to print a total would double the cost
+    of each page. `per_page` is the size asked for, or the default.
+    TEXT,
+    'required' => ['next_cursor', 'per_page'],
+    'additionalProperties' => false,
+    'properties' => [
+        'next_cursor' => ['type' => ['string', 'null']],
+        'per_page' => ['type' => 'integer', 'minimum' => 1],
+    ],
+];
+
+/**
+ * A collection of one schema walked by cursor.
+ *
+ * @param  string  $ref  the component name of the item schema
+ * @return array<string, mixed>
+ */
+$cursorPage = static fn (string $ref): array => [
+    'type' => 'object',
+    'required' => ['data', 'meta'],
+    'additionalProperties' => false,
+    'properties' => [
+        'data' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/'.$ref]],
+        'meta' => ['$ref' => '#/components/schemas/CursorPaginationMeta'],
+    ],
+];
+
 /**
  * A single resource in the envelope every non-collection response uses.
  *
@@ -136,6 +174,7 @@ $single = static fn (string $ref): array => [
 
 return [
     'page' => $page,
+    'cursorPage' => $cursorPage,
     'single' => $single,
 
     'securitySchemes' => [
@@ -186,6 +225,20 @@ return [
             'required' => false,
             'description' => 'Clamped to the collection\'s maximum rather than refused.',
             'schema' => ['type' => 'integer', 'minimum' => 1, 'default' => 25],
+        ],
+        'cursor' => [
+            'name' => 'cursor',
+            'in' => 'query',
+            'required' => false,
+            'description' => 'The `next_cursor` of the page before. Opaque. One the server cannot read is answered with the newest page rather than refused; one longer than 512 characters is refused with `validation.failed`.',
+            'schema' => ['type' => 'string', 'maxLength' => 512],
+        ],
+        'cursorPerPage' => [
+            'name' => 'per_page',
+            'in' => 'query',
+            'required' => false,
+            'description' => 'Refused with `validation.failed` outside 1 to 100, rather than clamped.',
+            'schema' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 100, 'default' => 25],
         ],
         'customerId' => [
             'name' => 'X-Customer-Id',
@@ -241,5 +294,6 @@ return [
         'Money' => $money,
         'Error' => $error,
         'PaginationMeta' => $paginationMeta,
+        'CursorPaginationMeta' => $cursorPaginationMeta,
     ],
 ];
