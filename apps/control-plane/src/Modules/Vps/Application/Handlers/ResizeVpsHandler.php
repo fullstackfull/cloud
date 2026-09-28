@@ -90,7 +90,8 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  * machine is one shape or the other. The next attempt asks the task
  * (ComputeProvider::getTask()) before it looks at the machine: still running
  * is the same finding again, and an ask that fails is transient as a failed
- * look is, the task staying on the job - either way nothing is asked or
+ * look is, the task staying on the job (on the engine's own attempts; an
+ * operator's retry can give up on it, below) - either way nothing is asked or
  * committed; finished, the task is forgotten and the attempt goes on as any
  * other, looking at the machine the task left. A task that finished in
  * failure is recorded on the job's result first (TASK_FAILED: its id, node,
@@ -99,7 +100,21 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  * again. The task's UPID and node are named in the attempt's message, which
  * is the job's `last_error` on the review list. When the attempts run out
  * with the task still running the job stops in review with the task on it,
- * and an operator's retry asks it first too. The task is not the job's
+ * and an operator's retry asks it first too. So does it when the attempts ran
+ * out on asks that failed; if its own ask fails as well, the task is one
+ * nobody can ask about, and the retry gives up on it (anOperatorRetried()):
+ * the task is recorded on the job's result (TASK_UNASKABLE) and logged, and
+ * the retry looks at the machine and settles from what the hypervisor
+ * reports - the shape asked for already there is a success, with the row and
+ * the commitment written to it, and what is missing is asked for, measured
+ * from the machine as any retry measures it. Such a job used to have no way
+ * out: every retry asked, failed and went back to review, an adoption is
+ * refused for a resize, and the service's plan changes were held for ever
+ * (A9-2, the re-audit after round eight). What the look cannot rule out: a
+ * task that is still running at the hypervisor although it cannot be asked
+ * about, with its disk growth not yet landed, is measured past, and its
+ * growth is asked for again. The runbook (provisioning-stuck) has the
+ * operator look for the task at the hypervisor before retrying. The task is not the job's
  * remote_job_id, which RetryProvisioningJob refuses to retry. A task
  * started by another job is not asked: nothing serialises two resizes of
  * one machine (below); on the customer's path a plan change is refused while
@@ -217,6 +232,9 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
     /** Where on the job's result the last resize task that finished in failure is recorded. */
     public const string TASK_FAILED = 'resize_task_failed';
 
+    /** Where on the job's result a task an operator's retry could not ask about is recorded. */
+    public const string TASK_UNASKABLE = 'resize_task_unaskable';
+
     public function __construct(
         private ComputeProviderFactory $computeProviders,
         private SecretRedactor $redactor,
@@ -286,14 +304,27 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
             $earlier = $this->taskAnEarlierAttemptLeftRunning($job);
 
             if ($earlier !== null) {
-                $task = $provider->getTask($earlier['node'], $earlier['id']);
+                try {
+                    $task = $provider->getTask($earlier['node'], $earlier['id']);
+                } catch (ComputeProviderException $e) {
+                    // Transient, below - unless an operator's retry is asking
+                    // (the class docblock): it gives up on the task and looks.
+                    if (! $this->anOperatorRetried($job)) {
+                        throw $e;
+                    }
 
-                if (! $task->isFinished()) {
+                    $this->giveUpOnTheTask($job, $earlier, $e);
+                    $task = null;
+                }
+
+                if ($task !== null && ! $task->isFinished()) {
                     return $this->stillRunning($machineId, $earlier['id'], $earlier['node']);
                 }
 
                 // Finished: what it did is on the machine the look below reads.
-                $this->forgetTheTask($job, $task);
+                if ($task !== null) {
+                    $this->forgetTheTask($job, $task);
+                }
             }
 
             // Looked at before it is changed (the class docblock).
@@ -619,6 +650,54 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
                 ...$result[self::TASK_FAILED],
             ]);
         }
+
+        $job->forceFill(['result' => $result])->save();
+    }
+
+    /**
+     * Whether this attempt is an operator's retry of a job that used up its
+     * attempts. The engine stops a job in review when its attempts run out
+     * (RunProvisioningJob) and never claims it again; RetryProvisioningJob
+     * requeues it without raising max_attempts, so the attempt it gets is
+     * numbered past them. While a task is kept every finding of the ask (a
+     * task still running, an ask that failed) is transient, so a job whose
+     * asks keep failing reaches review this way. One stopped sooner - a
+     * worker that died mid-attempt, which DetectStaleJobs sends to review -
+     * is given what is left of its attempts by a retry, asking each time,
+     * and the retry after those looks.
+     */
+    private function anOperatorRetried(ProvisioningJob $job): bool
+    {
+        return $job->attempts > $job->max_attempts;
+    }
+
+    /**
+     * An operator's retry could not ask about the task either: the ask failed
+     * on the attempt that used up the job's budget and again now. It is
+     * recorded on the job's result (TASK_UNASKABLE: its id, node, the
+     * failure's code and redacted message, and the attempt), logged, and
+     * forgotten, and the attempt goes on to look at the machine, which
+     * settles the job from what the hypervisor reports (the class docblock).
+     *
+     * @param  array{id: string, node: string}  $task
+     */
+    private function giveUpOnTheTask(ProvisioningJob $job, array $task, ComputeProviderException $e): void
+    {
+        $result = $job->result ?? [];
+        unset($result[self::TASK_IN_FLIGHT]);
+
+        $result[self::TASK_UNASKABLE] = [
+            'id' => $task['id'],
+            'node' => $task['node'],
+            'error_code' => $e->errorCode(),
+            'error' => $this->redactor->redactString($e->getMessage()),
+            'attempt' => $job->attempts,
+        ];
+
+        Log::warning('A resize task could not be asked about on an operator\'s retry; the machine is looked at instead.', [
+            'provisioning_job_id' => (string) $job->getKey(),
+            ...$result[self::TASK_UNASKABLE],
+        ]);
 
         $job->forceFill(['result' => $result])->save();
     }
