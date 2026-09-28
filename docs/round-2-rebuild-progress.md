@@ -253,3 +253,9 @@ The owner decided after the re-audit after round eight: round nine finishes with
 verifier per fix, then one final audit, in which only money, authorization, data loss
 and lockout block; everything else is a documented reservation
 (`docs/round-2-briefs/closure-threshold.md`).
+
+All of round nine merged at `da0e916`. Full backend suite there: 6,172/6,172,
+795 suites `skipped="0"`, exit 0. Also `pint --test`, `openapi:generate --check`
+(303 operations), `npm run openapi:lint`, `make infra-validate`, and in `apps/web`
+vitest 655/655, `npm run typecheck` and `eslint --max-warnings=0`. The final audit
+under `docs/round-2-briefs/closure-threshold.md` is next.
