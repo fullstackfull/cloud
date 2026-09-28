@@ -235,3 +235,16 @@ All of round eight merged at `34b4727`. Full backend suite there: 6,080/6,080,
 (302 operations), `npm run openapi:lint`, `make infra-validate`, and in `apps/web`
 vitest 653/653, `tsc --noEmit` and `eslint --max-warnings=0`. The re-audit after
 round eight is next, against `34b4727`.
+
+### Round nine — fixing what the re-audit after round eight found
+
+The re-audit after round eight against `6c234dc` is recorded in
+`docs/independent-re-audit-after-round-8.md`: no numbered finding reproduces; the
+confirmed unnumbered items are listed there.
+
+| Group | Scope | Status | Commit |
+|---|---|---|---|
+| A | a stale pre-lock reading credits a downgrade; a resize whose task cannot be asked about; a non-build job in review on an ended service; the adoption guard's placement and the failed-task log line pinned | fixing | — |
+| B | a trailing ideographic full stop makes a second login; a normalised address overflowing its column; reset tokens after the address rewrite | fixing | — |
+| C | an overlap skip counted as a failure; a stale capacity count in the hosting sweep; a pending unlisted account as critical drift; timing and alert sentences | fixing | — |
+| E | an unreadable activity cursor; plan-options money nullability; four schema types; response-conformance oracle | fixing | — |
