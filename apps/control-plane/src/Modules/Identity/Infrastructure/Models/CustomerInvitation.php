@@ -7,12 +7,14 @@ namespace Lynomia\Modules\Identity\Infrastructure\Models;
 use Carbon\CarbonImmutable;
 use Database\Factories\CustomerInvitationFactory;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Domain\Enums\InvitationStatus;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 
 /**
  * An offer of membership, made to an email address.
@@ -51,6 +53,22 @@ class CustomerInvitation extends Model
     protected $table = 'customer_invitations';
 
     protected $guarded = ['id'];
+
+    /**
+     * The address, stored in the one spelling login addresses are stored in
+     * (LoginAddress, User::email()), whoever sets it. So the offer's address
+     * and the login's compare by equality — in AcceptInvitation,
+     * DeclineInvitation, InvitationController and InviteMember's cooldown —
+     * and the partial unique index sees one address where there is one.
+     *
+     * @return Attribute<string, string>
+     */
+    protected function email(): Attribute
+    {
+        return Attribute::make(
+            set: static fn (string $value): string => LoginAddress::normalise($value),
+        );
+    }
 
     /**
      * @return array<string, string>

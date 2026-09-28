@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Identity\Infrastructure\Models;
 use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -20,6 +21,7 @@ use Laravel\Sanctum\HasApiTokens;
 use Laravel\Sanctum\PersonalAccessToken;
 use Laravel\Sanctum\TransientToken;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 use Lynomia\Modules\Identity\Infrastructure\Notifications\QueuedResetPassword;
 use Lynomia\Modules\Identity\Infrastructure\Notifications\QueuedVerifyEmail;
 use Lynomia\Modules\Rbac\Domain\Enums\Role as RoleName;
@@ -145,6 +147,22 @@ class User extends Authenticatable implements MustVerifyEmail
         'two_factor_secret',
         'two_factor_recovery_codes',
     ];
+
+    /**
+     * The address, stored in its one spelling (LoginAddress) whoever sets it
+     * — registration, an invitation, the console bootstrap, a factory — so
+     * that the unique index on `users.email` is one login per mailbox rather
+     * than one per way of writing it. Lookups normalise what they compare
+     * with the same way; see LoginAddress.
+     *
+     * @return Attribute<string, string>
+     */
+    protected function email(): Attribute
+    {
+        return Attribute::make(
+            set: static fn (string $value): string => LoginAddress::normalise($value),
+        );
+    }
 
     /**
      * @return array<string, string>

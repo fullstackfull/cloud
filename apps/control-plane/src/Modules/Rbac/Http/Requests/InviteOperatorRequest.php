@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Rbac\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Lynomia\Http\Rules\ALoginAddressThatSplitsWhereWritten;
 use Lynomia\Modules\Rbac\Application\Actions\InviteOperator;
 
 final class InviteOperatorRequest extends FormRequest
@@ -22,17 +23,19 @@ final class InviteOperatorRequest extends FormRequest
     {
         return [
             'email' => [
-                'required', 'string', 'email', 'max:255',
+                'required', 'string', 'email', 'max:255', new ALoginAddressThatSplitsWhereWritten,
                 /*
                  * An address that already holds a staff role is refused rather
                  * than quietly re-roled: this endpoint reads as "add an
                  * operator", and using it to silently replace somebody's
                  * authority would be a role change nobody asked for. The role
                  * endpoint is where that is done, and it is audited as such.
+                 * Read without a lock; InviteOperator asks again under one and
+                 * refuses with the same words.
                  */
                 function (string $attribute, mixed $value, callable $fail): void {
                     if (is_string($value) && InviteOperator::alreadyAnOperator($value)) {
-                        $fail('That address already belongs to an operator. Change their roles instead.');
+                        $fail(InviteOperator::THE_ADDRESS_IS_AN_OPERATORS);
                     }
                 },
             ],

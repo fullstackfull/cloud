@@ -17,6 +17,7 @@ use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerMember;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Identity\Infrastructure\Notifications\OperatorInvitation;
 use Lynomia\Modules\Identity\Infrastructure\Notifications\QueuedResetPassword;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
@@ -214,7 +215,9 @@ final class AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest exten
             'roles' => [Role::Noc->value],
         ])->assertCreated();
 
-        Notification::assertSentToTimes($account, QueuedResetPassword::class, 2);
+        // The invitation's link comes in the invitation's own mail.
+        Notification::assertSentToTimes($account, QueuedResetPassword::class, 1);
+        Notification::assertSentToTimes($account, OperatorInvitation::class, 1);
     }
 
     /**
@@ -338,7 +341,7 @@ final class AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest exten
         $this->assertNull($restored->deleted_at);
         $this->assertEqualsCanonicalizing([Role::Customer->value, Role::Noc->value], $restored->getRoleNames()->all());
         $this->assertFalse(Hash::check(self::SQUATTERS_PASSWORD, (string) $restored->password));
-        Notification::assertSentTo($restored, QueuedResetPassword::class);
+        Notification::assertSentTo($restored, OperatorInvitation::class);
         $invited = AuditEntry::query()->where('action', AuditAction::OperatorInvited)->sole();
         $this->assertTrue($invited->context['restored_deleted_login'] ?? false);
         $this->assertSame([Role::InfrastructureAdmin->value], $invited->context['staff_roles_held_when_deleted'] ?? null);
@@ -364,7 +367,10 @@ final class AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest exten
      * sending `roles: []` for a registered customer's login emptied it,
      * `customer` included). The route cannot give `customer` either — the
      * request refuses it by name — so a login's customer standing is not
-     * something the operator surface changes in either direction.
+     * something the operator surface changes in either direction. A login
+     * that is only a customer is not on this route at all: it is answered as
+     * an id that does not exist (B8-2, re-audit after round seven: `roles: []`
+     * on one answered 200 with the customer's name and address).
      */
     #[Test]
     public function changing_roles_never_takes_the_customer_role_away(): void
@@ -378,8 +384,8 @@ final class AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest exten
         $this->freshClient();
         $this->actingAs($admin)
             ->putJson('/api/admin/operators/'.$login->id.'/roles', ['roles' => []])
-            ->assertOk()
-            ->assertJsonPath('data.roles', []);
+            ->assertNotFound()
+            ->assertJsonPath('error.code', 'resource.not_found');
         $this->assertSame([Role::Customer->value], $login->fresh()?->getRoleNames()->all());
 
         // Promoted, then demoted: a customer again, not a login with nothing.
@@ -405,12 +411,13 @@ final class AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest exten
             ->assertJsonPath('data.roles', []);
         $this->assertSame([Role::Customer->value], $login->fresh()?->getRoleNames()->all());
 
-        // And a customer login is not re-promoted through this route.
+        // And a customer login is not re-promoted through this route: it is
+        // answered as an id that does not exist.
         $this->freshClient();
         $this->actingAs($admin)
             ->putJson('/api/admin/operators/'.$login->id.'/roles', ['roles' => [Role::Noc->value]])
-            ->assertStatus(422)
-            ->assertJsonPath('error.code', 'rbac.not_an_operator');
+            ->assertNotFound()
+            ->assertJsonPath('error.code', 'resource.not_found');
     }
 
     /**
@@ -574,8 +581,8 @@ final class AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest exten
 
         $this->actingAs($admin)
             ->putJson('/api/admin/operators/'.$customer->id.'/roles', ['roles' => [Role::InfrastructureAdmin->value]])
-            ->assertStatus(422)
-            ->assertJsonPath('error.code', 'rbac.not_an_operator');
+            ->assertNotFound()
+            ->assertJsonPath('error.code', 'resource.not_found');
 
         $this->assertFalse($customer->fresh()?->hasRole(Role::InfrastructureAdmin->value));
 
@@ -614,7 +621,7 @@ final class AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest exten
     {
         $token = null;
 
-        Notification::assertSentTo($account, QueuedResetPassword::class, static function (QueuedResetPassword $mail) use (&$token): bool {
+        Notification::assertSentTo($account, OperatorInvitation::class, static function (OperatorInvitation $mail) use (&$token): bool {
             $token = $mail->token;
 
             return true;

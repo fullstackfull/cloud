@@ -14,6 +14,7 @@ use Lynomia\Modules\Identity\Domain\Enums\CustomerStatus;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerType;
 use Lynomia\Modules\Identity\Domain\Exceptions\RegistrationUnavailable;
 use Lynomia\Modules\Identity\Domain\Services\LegalDocuments;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\LegalAcceptance;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
@@ -95,7 +96,7 @@ final readonly class RegisterCustomer
             throw RegistrationUnavailable::untilTheLegalDocumentsArePublished();
         }
 
-        $email = strtolower(trim($attributes['email']));
+        $email = LoginAddress::normalise($attributes['email']);
 
         /*
          * An address that already has an account produces no account and no
@@ -145,10 +146,10 @@ final readonly class RegisterCustomer
         // One transaction: a user without their customer account, or a customer
         // with no owner, are both unusable states.
         try {
-            [$user, $customer] = DB::transaction(function () use ($attributes, $type, $country, $currency, $documents): array {
+            [$user, $customer] = DB::transaction(function () use ($attributes, $email, $type, $country, $currency, $documents): array {
                 $user = User::create([
                     'name' => $attributes['name'],
-                    'email' => strtolower(trim($attributes['email'])),
+                    'email' => $email,
                     'password' => $attributes['password'],
                     'locale' => $attributes['locale'] ?? config('app.locale'),
                     'timezone' => $attributes['timezone'] ?? config('app.timezone'),
@@ -168,7 +169,7 @@ final readonly class RegisterCustomer
                         ? ($attributes['company_name'] ?? null)
                         : null,
                     'currency' => $currency,
-                    'billing_email' => strtolower(trim($attributes['email'])),
+                    'billing_email' => $email,
                     'country' => $country,
                 ]);
 

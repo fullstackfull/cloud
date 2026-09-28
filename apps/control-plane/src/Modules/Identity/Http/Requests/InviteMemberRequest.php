@@ -6,7 +6,9 @@ namespace Lynomia\Modules\Identity\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Lynomia\Http\Rules\ALoginAddressThatSplitsWhereWritten;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 
 /**
  * The two things an invitation needs, and nothing else.
@@ -38,14 +40,14 @@ final class InviteMemberRequest extends FormRequest
              * become a customer. An address that does not resolve fails at the
              * only moment that proves anything, which is delivery.
              */
-            'email' => ['required', 'string', 'email:rfc', 'max:254'],
+            'email' => ['required', 'string', 'email:rfc', 'max:254', new ALoginAddressThatSplitsWhereWritten],
             'role' => ['required', 'string', Rule::in(CustomerRole::assignableValues())],
         ];
     }
 
     public function email(): string
     {
-        return mb_strtolower(trim((string) $this->input('email')));
+        return LoginAddress::normalise((string) $this->input('email'));
     }
 
     public function role(): CustomerRole

@@ -117,19 +117,6 @@ final class RoleChangeRefusedException extends DomainException
         return $exception->as('rbac.last_administrator');
     }
 
-    /**
-     * A staff role given to a login that holds none would be operator
-     * authority for whoever holds that login's credentials, and nobody proved
-     * those belong to the address's owner. The invitation is the way: it
-     * takes them away first and mails the reset link.
-     */
-    public static function becauseTheLoginIsNotAnOperator(): self
-    {
-        return (new self(
-            'That login is not an operator. Invite the address instead; the invitation makes its owner set a new password.'
-        ))->as('rbac.not_an_operator');
-    }
-
     public function errorCode(): string
     {
         return $this->errorCode;

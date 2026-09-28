@@ -46,7 +46,7 @@ final readonly class AcceptInvitation
                 throw MembershipRefusedException::becauseTheOfferIsNotOpen();
             }
 
-            if (! hash_equals($invitation->email, mb_strtolower((string) $user->email))) {
+            if (! hash_equals($invitation->email, (string) $user->email)) {
                 throw MembershipRefusedException::becauseTheOfferWasMadeToSomebodyElse();
             }
 

@@ -411,6 +411,9 @@ return [
         'notifications' => [
             'unknown_category_or_channel' => 'Unknown notification category or channel.',
         ],
+        'login_address' => [
+            'not_where_written' => 'That address would not be delivered where it is written: the part after the @ holds a symbol or a space that mail systems read as another @ or as a space.',
+        ],
     ],
 
 ];

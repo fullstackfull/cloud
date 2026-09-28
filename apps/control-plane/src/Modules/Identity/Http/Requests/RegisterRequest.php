@@ -7,8 +7,10 @@ namespace Lynomia\Modules\Identity\Http\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
+use Lynomia\Http\Rules\ALoginAddressThatSplitsWhereWritten;
 use Lynomia\Modules\Billing\Domain\Services\BillingCurrencies;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerType;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 
 final class RegisterRequest extends FormRequest
 {
@@ -30,7 +32,7 @@ final class RegisterRequest extends FormRequest
              * where the collision is handled, and it handles it by saying
              * nothing.
              */
-            'email' => ['required', 'string', 'email:rfc,strict', 'max:255'],
+            'email' => ['required', 'string', 'email:rfc,strict', 'max:255', new ALoginAddressThatSplitsWhereWritten],
             'password' => ['required', 'string', 'confirmed', Password::defaults()],
 
             'account_type' => ['sometimes', Rule::enum(CustomerType::class)],
@@ -89,7 +91,7 @@ final class RegisterRequest extends FormRequest
          * second one about its capitalisation.
          */
         $this->merge(array_filter([
-            'email' => is_string($this->input('email')) ? strtolower(trim($this->input('email'))) : null,
+            'email' => is_string($this->input('email')) ? LoginAddress::normalise($this->input('email')) : null,
             'country' => is_string($this->input('country')) ? strtoupper(trim($this->input('country'))) : null,
             'currency' => is_string($this->input('currency')) ? strtoupper(trim($this->input('currency'))) : null,
         ], static fn (mixed $v): bool => $v !== null && $v !== ''));

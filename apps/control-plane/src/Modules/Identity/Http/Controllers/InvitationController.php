@@ -61,7 +61,7 @@ final class InvitationController
                  * it was meant for.
                  */
                 'is_for_you' => $user instanceof User
-                    && hash_equals($invitation->email, mb_strtolower((string) $user->email)),
+                    && hash_equals($invitation->email, (string) $user->email),
             ],
         ]);
     }

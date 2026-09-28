@@ -12,6 +12,7 @@ use Lynomia\Modules\Identity\Domain\Enums\LoginOutcome;
 use Lynomia\Modules\Identity\Domain\Exceptions\AccountLockedException;
 use Lynomia\Modules\Identity\Domain\Exceptions\InvalidCredentialsException;
 use Lynomia\Modules\Identity\Domain\Exceptions\TwoFactorRequiredException;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
 /**
@@ -47,7 +48,7 @@ final readonly class AttemptLogin
      */
     public function execute(string $email, string $password, Request $request): User
     {
-        $email = strtolower(trim($email));
+        $email = LoginAddress::normalise($email);
         $user = User::query()->where('email', $email)->first();
 
         if ($user === null) {
