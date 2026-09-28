@@ -248,3 +248,8 @@ confirmed unnumbered items are listed there.
 | B | a trailing ideographic full stop makes a second login; a normalised address overflowing its column; reset tokens after the address rewrite | fixing | — |
 | C | an overlap skip counted as a failure; a stale capacity count in the hosting sweep; a pending unlisted account as critical drift; timing and alert sentences | fixing | — |
 | E | an unreadable activity cursor; plan-options money nullability; four schema types; response-conformance oracle | fixing | — |
+
+The owner decided after the re-audit after round eight: round nine finishes with a
+verifier per fix, then one final audit, in which only money, authorization, data loss
+and lockout block; everything else is a documented reservation
+(`docs/round-2-briefs/closure-threshold.md`).
