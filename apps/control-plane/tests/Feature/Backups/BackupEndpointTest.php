@@ -50,6 +50,25 @@ final class BackupEndpointTest extends VpsApiTestCase
             ->assertJsonPath('data.0.is_restorable', true);
     }
 
+    /**
+     * The published `perPage` parameter is "clamped to the collection's
+     * maximum rather than refused", and `BoundsPageSize` reads a size below
+     * one as unspecified. This list alone refused one with a 422.
+     */
+    #[Test]
+    public function a_nonsense_page_size_is_the_default_page_rather_than_a_refusal(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $machine = $this->machineFor($customer);
+
+        foreach ([0, -5] as $size) {
+            $this->actingAs($user)
+                ->getJson('/api/v1/vps/'.$machine->id.'/backups?per_page='.$size)
+                ->assertOk()
+                ->assertJsonPath('meta.per_page', 25);
+        }
+    }
+
     #[Test]
     public function the_payload_names_no_part_of_the_platforms_infrastructure(): void
     {

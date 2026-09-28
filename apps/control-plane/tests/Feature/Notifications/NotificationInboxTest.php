@@ -61,6 +61,24 @@ final class NotificationInboxTest extends VpsApiTestCase
         $this->assertSame(50, $meta['per_page'], 'A request beyond the maximum is clamped and served.');
     }
 
+    /**
+     * The published `perPage` parameter defaults to 25, as every other
+     * numbered page does; the inbox served 20.
+     */
+    #[Test]
+    public function a_page_with_no_size_asked_for_is_the_published_default(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+
+        Notification::factory()->count(26)->create(['customer_id' => $customer->getKey()]);
+
+        $this->actingAs($user)
+            ->getJson('/api/v1/notifications')
+            ->assertOk()
+            ->assertJsonPath('meta.per_page', 25)
+            ->assertJsonCount(25, 'data');
+    }
+
     #[Test]
     public function the_body_is_rendered_in_the_readers_language(): void
     {

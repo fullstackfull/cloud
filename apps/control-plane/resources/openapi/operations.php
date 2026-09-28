@@ -13,8 +13,10 @@ declare(strict_types=1);
  *
  * `envelope` names the response envelope (`page`, `cursor`, `list`,
  * `single`, `redirect` or `none`); `schema` names the resource inside it.
- * `status` overrides the default success code. `body` is the request schema
- * for a mutation. `query` adds parameters beyond paging.
+ * `status` overrides the default success code. `nullable`, on a `single`
+ * envelope, publishes `data` as that resource or null. `body` is the request
+ * schema for a mutation. `query` adds parameters beyond paging. `errors`
+ * adds refusals, by status, beyond the ones every operation carries.
  */
 
 /** A resource returned inside `{"data": …}`. */
@@ -510,6 +512,10 @@ return [
         'description' => 'For a staging copy: the production domain, the scope, when the copy was made, and the warnings in words — including that this platform holds no backup of a shared-hosting site. The same words the confirmation shows.',
         'query' => ['scope'],
         'response' => $one('WordPressPushImpact'),
+        'errors' => [
+            409 => 'The production site this copy was made from no longer exists on the platform. `wordpress.production_gone`.',
+            422 => 'The site is not a staging copy, so there is no production to push over. `wordpress.not_a_staging_copy`.',
+        ],
     ],
     'api.v1.wordpress.sites.push' => [
         'tag' => 'WordPress',
@@ -873,6 +879,9 @@ return [
         'description' => "Answers with all five availability states, `unknown` among them. A registrar that times out has said nothing: rendering that as available invites a customer to buy a name that is taken and get a refusal after their money moved, and rendering it as unavailable turns away a customer who could have had it. The price beside each answer is the catalogue's and is not a commitment — what the platform will honour is a quote.",
         'query' => ['name', 'also_try'],
         'response' => ['envelope' => 'list', 'schema' => 'DomainSearchResult'],
+        'errors' => [
+            422 => 'The name cannot be searched. `validation.failed` when the query does not validate (`name` is required; `also_try` is at most ten entries of at most 63 characters each), with the failing fields in `error.details`; otherwise a `domain.*` code saying what is wrong with the name as typed, such as `domain.name_has_no_tld` or `domain.tld_unknown`.',
+        ],
     ],
     'api.v1.domains.quotes.store' => [
         'tag' => 'Domains',
@@ -1483,8 +1492,9 @@ return [
     'api.admin.infrastructure.dedicated.bmc.show' => [
         'tag' => 'Operator',
         'summary' => 'Where a machine\'s controller is',
+        'description' => '`data` is null until a controller has been recorded for the machine.',
         'permission' => 'infrastructure.view',
-        'response' => $one('AdminBmcEndpoint'),
+        'response' => ['envelope' => 'single', 'schema' => 'AdminBmcEndpoint', 'status' => 200, 'nullable' => true],
     ],
     'api.admin.infrastructure.dedicated.bmc.store' => [
         'tag' => 'Operator',

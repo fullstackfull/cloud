@@ -27,7 +27,8 @@ final class ListBackupsRequest extends FormRequest
     {
         return [
             'page' => ['sometimes', 'integer', 'min:1'],
-            'per_page' => ['sometimes', 'integer', 'min:1'],
+            // No minimum: BoundsPageSize reads a size below one as unspecified.
+            'per_page' => ['sometimes', 'integer'],
             'state' => ['sometimes', Rule::enum(BackupState::class)],
         ];
     }

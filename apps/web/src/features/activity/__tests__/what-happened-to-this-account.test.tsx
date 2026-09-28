@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ActivityPage } from '@/features/activity/ActivityPage'
 import '@/i18n'
-import type { ActivityItem } from '@/lib/types'
+import type { ActivityItem, ActivityPage as ActivityPageBody } from '@/lib/types'
 
 /**
  * AR-13: one account-wide history, read from the server.
@@ -37,7 +37,8 @@ function item(overrides: Partial<ActivityItem> = {}): ActivityItem {
 /** Every request the page makes, with its query string, in order. */
 const asked: string[] = []
 
-function serve(pages: Record<string, { data: ActivityItem[]; meta: unknown }>) {
+/** Typed as the feed's page, so a fixture's meta cannot drift from the one the server sends. */
+function serve(pages: Record<string, ActivityPageBody>) {
   return vi.fn((input: RequestInfo | URL): Promise<Response> => {
     const url = input instanceof Request ? input.url : String(input)
     asked.push(url)
