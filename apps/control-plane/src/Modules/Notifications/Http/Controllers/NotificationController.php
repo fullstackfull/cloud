@@ -36,6 +36,9 @@ final class NotificationController
 
     public const int MAX_PER_PAGE = 50;
 
+    /** The default the description publishes for every numbered page (`perPage`). */
+    public const int DEFAULT_PER_PAGE = 25;
+
     public function __construct(
         private readonly ActingCustomer $acting,
         private readonly RenderNotification $renderer,
@@ -52,7 +55,7 @@ final class NotificationController
     {
         $this->authoriseWithinAccount($request, 'service.view');
 
-        $perPage = min(max($request->integer('per_page', 20), 1), self::MAX_PER_PAGE);
+        $perPage = min(max($request->integer('per_page', self::DEFAULT_PER_PAGE), 1), self::MAX_PER_PAGE);
 
         $notifications = $this->scoped($request)
             ->when(

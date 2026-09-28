@@ -325,8 +325,11 @@ jobs:
       # something a hand-rolled check would have looked for.
       #
       # Exits non-zero on errors and zero on warnings, which is the behaviour
-      # wanted: one warning stands, on the email-verification endpoint, because
-      # it redirects and genuinely has no 2xx response.
+      # wanted. Six warnings stand when this was written, and nothing here
+      # counts them: one on the email-verification endpoint, because it
+      # redirects and genuinely has no 2xx response, and five for tags with no
+      # description (Activity, DNS, Domains, Payments and WordPress; the
+      # descriptions live in GenerateOpenApiSpec::tags()).
       - name: Validate docs/openapi.yaml
         run: npm run openapi:lint
 
