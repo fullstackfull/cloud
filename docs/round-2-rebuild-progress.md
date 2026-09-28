@@ -259,3 +259,16 @@ All of round nine merged at `da0e916`. Full backend suite there: 6,172/6,172,
 (303 operations), `npm run openapi:lint`, `make infra-validate`, and in `apps/web`
 vitest 655/655, `npm run typecheck` and `eslint --max-warnings=0`. The final audit
 under `docs/round-2-briefs/closure-threshold.md` is next.
+
+### Final audit after round nine — the one blocking item
+
+The final audit against `d75281b` (six bands, under `closure-threshold.md`) found
+one blocking item, in money: a paid plan change whose resize never completed was
+kept when its service ended, although the customer texts promise it is returned.
+It was fixed on `round10/M` and verified independently; the verifier rejected it
+twice on further money paths (a hand refund leaving the upgraded plan billed at
+renewal and a downgrade over-crediting; a later undelivered change keeping an
+earlier one; a renewal already issued at the new price; an over-credit after a
+middle plan), each repaired, and then upheld it with reservations none in a
+blocking class. Merged `0300c47` (tip `1526c06`). New operator route:
+`POST /api/admin/provisioning/jobs/{job}/return-payment`.
