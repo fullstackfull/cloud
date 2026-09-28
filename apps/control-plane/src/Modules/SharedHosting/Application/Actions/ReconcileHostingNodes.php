@@ -67,8 +67,9 @@ final readonly class ReconcileHostingNodes
      * in progress rather than an account missing at the panel.
      *
      * Longer than an unattended build can take: config/provisioning.php gives
-     * create_hosting_account 300 seconds and three attempts with 30, 120 and
-     * 600 seconds between them, about 28 minutes in all. After this, a pending
+     * create_hosting_account 300 seconds and three attempts, with the first
+     * two backoffs (30 and 120 seconds) between them, about 17.5 minutes in
+     * all. After this, a pending
      * account the panel does not list is recorded as missing at the panel,
      * critical like any other — the customer has paid for an account that was
      * never built — with the moment it has been pending since. Nothing else

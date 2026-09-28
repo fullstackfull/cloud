@@ -44,7 +44,9 @@ use Throwable;
  *    run: ScheduledTaskFinished with skippedBecauseOverlapping set, and, when
  *    an earlier run of the same event object in the same schedule:run process
  *    (a repetition of a sub-minute entry) failed, ScheduledTaskFailed as well,
- *    carrying that earlier failure. finished() and failed() both return
+ *    carrying that earlier failure - except for a closure that threw, whose
+ *    skip rethrows before ScheduledTaskFinished, so only ScheduledTaskFailed
+ *    arrives. finished() and failed() both return
  *    without recording on skippedBecauseOverlapping.
  *
  * So a foreground failure is counted in failed() and nowhere else: finished()

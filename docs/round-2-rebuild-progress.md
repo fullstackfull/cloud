@@ -246,7 +246,7 @@ confirmed unnumbered items are listed there.
 |---|---|---|---|
 | A | a stale pre-lock reading credits a downgrade; a resize whose task cannot be asked about; a non-build job in review on an ended service; the adoption guard's placement and the failed-task log line pinned | fixing | — |
 | B | a trailing ideographic full stop makes a second login; a normalised address overflowing its column; reset tokens after the address rewrite | fixing | — |
-| C | an overlap skip counted as a failure; a stale capacity count in the hosting sweep; a pending unlisted account as critical drift; timing and alert sentences | fixing | — |
+| C | an overlap skip counted as a failure; a stale capacity count in the hosting sweep; a pending unlisted account as critical drift; timing and alert sentences | upheld with reservations, none in a blocking class (the pending window's clock `updated_at` has no oracle over `created_at`; one stranger on two nodes merges into one drift row; a node deleted mid-sweep now fails that node); merged `c5926af`; the build-time figure (17.5 minutes, not 28) and a skipped closure's event shape corrected at integration | `35dcd05` |
 | E | an unreadable activity cursor; plan-options money nullability; four schema types; response-conformance oracle | fixing | — |
 
 The owner decided after the re-audit after round eight: round nine finishes with a
