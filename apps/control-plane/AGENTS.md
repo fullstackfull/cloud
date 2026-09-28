@@ -86,8 +86,9 @@ leaves rows behind for the same reason — `php artisan migrate:fresh` on the
 test database clears it.
 
 In `apps/web`: `npx vitest run`, `npx eslint src --max-warnings=0`,
-`npx tsc --noEmit`, `npx vite build`, and `npx playwright test` for the
-browser specs. `npm run openapi:lint` from the repository root validates
+`npm run typecheck` (`tsc -b --noEmit`: a bare `npx tsc --noEmit` checks
+nothing, because the root tsconfig lists no files), `npx vite build`, and
+`npx playwright test` for the browser specs. `npm run openapi:lint` from the repository root validates
 `docs/openapi.yaml`.
 
 ## The gates are the design
