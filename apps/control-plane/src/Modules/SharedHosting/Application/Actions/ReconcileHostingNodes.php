@@ -32,7 +32,9 @@ use Throwable;
  *  - **Missing at the panel.** The platform says the account exists and the
  *    panel has never heard of it. Critical, and in the worst direction: the
  *    customer is being billed for a website that is not being served, and the
- *    first person to notice is them.
+ *    first person to notice is them. A pending account is not reported until
+ *    it has been pending longer than a build takes: until then it is a build
+ *    the panel has not been asked for, or has not finished.
  *  - **Orphan at the panel.** An account the platform never created — made by
  *    hand during an incident, or left behind by a create whose answer was
  *    lost. Occupying disk nobody is billing for.
@@ -59,6 +61,21 @@ final readonly class ReconcileHostingNodes
     private const string RESOURCE = 'hosting_account';
 
     private const string NODE_RESOURCE = 'hosting_node';
+
+    /**
+     * How long a pending account the panel does not list is taken for a build
+     * in progress rather than an account missing at the panel.
+     *
+     * Longer than an unattended build can take: config/provisioning.php gives
+     * create_hosting_account 300 seconds and three attempts with 30, 120 and
+     * 600 seconds between them, about 28 minutes in all. After this, a pending
+     * account the panel does not list is recorded as missing at the panel,
+     * critical like any other — the customer has paid for an account that was
+     * never built — with the moment it has been pending since. Nothing else
+     * reports a pending hosting account that stays pending: provisioning's
+     * stale sweep quarantines the job, not the account.
+     */
+    private const int PENDING_BUILD_WINDOW_MINUTES = 60;
 
     public function __construct(
         private HostingProviderFactory $providers,
@@ -167,16 +184,30 @@ final readonly class ReconcileHostingNodes
                      * waits here, before it has taken any drift lock, and
                      * compares once the first has committed.
                      * TwoOverlappingHostingSweepsInTwoProcessesTest holds it.
+                     *
+                     * And the row that lock returns is the one everything
+                     * below reads. $node was read before the listing's HTTP
+                     * call, and an order that reserved a slot on this node
+                     * while the panel was answering has since moved
+                     * account_count and added its row: checked against the old
+                     * count and the new rows, the ledger looked one short and
+                     * a spec_mismatch was recorded that was not there.
+                     *
+                     * The drifts are recorded in one order whatever node or
+                     * listing they came from; see recordInOrder().
                      */
-                    HostingNode::query()->whereKey($node->getKey())->lockForUpdate()->first();
+                    $locked = HostingNode::query()->whereKey($node->getKey())->lockForUpdate()->firstOrFail();
 
                     /** @var list<HostingAccount> $rows */
                     $rows = HostingAccount::query()
-                        ->where('hosting_node_id', $node->getKey())
+                        ->where('hosting_node_id', $locked->getKey())
                         ->get()
                         ->all();
 
-                    $found = $this->compare($node, $rows, $listed) + $this->checkCapacity($node, $rows);
+                    $found = $this->recordInOrder([
+                        ...$this->compare($locked, $rows, $listed),
+                        ...$this->checkCapacity($locked, $rows),
+                    ]);
 
                     $node->forceFill([
                         'reconciled_at' => now(),
@@ -282,12 +313,16 @@ final readonly class ReconcileHostingNodes
     }
 
     /**
+     * What this node's comparison found, as RecordDrift arguments, recorded
+     * by the caller through recordInOrder().
+     *
      * @param  list<HostingAccount>  $rows
      * @param  list<RemoteAccount>  $listed
+     * @return list<array<string, mixed>>
      */
-    private function compare(HostingNode $node, array $rows, array $listed): int
+    private function compare(HostingNode $node, array $rows, array $listed): array
     {
-        $drifts = 0;
+        $drifts = [];
 
         /** @var array<string, RemoteAccount> $byUsername */
         $byUsername = [];
@@ -304,61 +339,89 @@ final readonly class ReconcileHostingNodes
             $remote = $byUsername[$username] ?? null;
 
             if ($row->status->existsAtPanel() && $remote === null) {
-                $this->drift->execute(
-                    provider: $node->panel->value,
-                    resourceType: self::RESOURCE,
-                    kind: DriftKind::MissingAtProvider,
-                    providerReference: $row->username,
-                    serviceId: (string) ($row->service_id ?? ''),
-                    expected: ['status' => $row->status->value, 'node' => $node->slug],
-                    observed: ['present' => false],
+                /*
+                 * A pending account the panel does not list is, while it is
+                 * young, a build in progress: its row is written before the
+                 * panel is asked, and this node's row can be reserved while
+                 * the listing is being read. Neither is at the panel yet, and
+                 * neither is drift. See PENDING_BUILD_WINDOW_MINUTES for how
+                 * long that lasts and what happens after.
+                 */
+                if ($row->status === HostingAccountStatus::Pending && ! $this->pendingForTooLong($row)) {
+                    continue;
+                }
+
+                $expected = ['status' => $row->status->value, 'node' => $node->slug];
+
+                if ($row->status === HostingAccountStatus::Pending) {
+                    $expected['pending_since'] = $row->updated_at?->toIso8601String();
+                }
+
+                $drifts[] = [
+                    'provider' => $node->panel->value,
+                    'resourceType' => self::RESOURCE,
+                    'kind' => DriftKind::MissingAtProvider,
+                    'providerReference' => $row->username,
+                    'serviceId' => (string) ($row->service_id ?? ''),
+                    'expected' => $expected,
+                    'observed' => ['present' => false],
                     // The customer is paying for a website that is not being
                     // served, and they will find out before the platform does.
-                    severity: DriftSeverity::Critical,
-                );
-
-                $drifts++;
+                    'severity' => DriftSeverity::Critical,
+                ];
 
                 continue;
             }
 
             if (! $row->status->existsAtPanel() && $remote !== null) {
-                $this->drift->execute(
-                    provider: $node->panel->value,
-                    resourceType: self::RESOURCE,
-                    kind: DriftKind::OrphanAtProvider,
-                    providerReference: $row->username,
-                    serviceId: (string) ($row->service_id ?? ''),
-                    expected: ['status' => $row->status->value],
-                    observed: ['present' => true, 'node' => $node->slug],
+                $drifts[] = [
+                    'provider' => $node->panel->value,
+                    'resourceType' => self::RESOURCE,
+                    'kind' => DriftKind::OrphanAtProvider,
+                    'providerReference' => $row->username,
+                    'serviceId' => (string) ($row->service_id ?? ''),
+                    'expected' => ['status' => $row->status->value],
+                    'observed' => ['present' => true, 'node' => $node->slug],
                     // Terminated here and alive there: disk and a licence slot
                     // nobody is billing for, and somebody's data still on a
                     // machine the platform thinks is empty.
-                    severity: DriftSeverity::Warning,
-                );
-
-                $drifts++;
+                    'severity' => DriftSeverity::Warning,
+                ];
 
                 continue;
             }
 
             if ($remote !== null && $this->suspensionDisagrees($row, $remote)) {
-                $this->drift->execute(
-                    provider: $node->panel->value,
-                    resourceType: self::RESOURCE,
-                    kind: DriftKind::SuspensionMismatch,
-                    providerReference: $row->username,
-                    serviceId: (string) ($row->service_id ?? ''),
-                    expected: ['suspended' => $row->status === HostingAccountStatus::Suspended],
-                    observed: ['suspended' => $remote->suspended],
-                    severity: DriftSeverity::Critical,
-                );
-
-                $drifts++;
+                $drifts[] = [
+                    'provider' => $node->panel->value,
+                    'resourceType' => self::RESOURCE,
+                    'kind' => DriftKind::SuspensionMismatch,
+                    'providerReference' => $row->username,
+                    'serviceId' => (string) ($row->service_id ?? ''),
+                    'expected' => ['suspended' => $row->status === HostingAccountStatus::Suspended],
+                    'observed' => ['suspended' => $remote->suspended],
+                    'severity' => DriftSeverity::Critical,
+                ];
             }
         }
 
-        return $drifts + $this->reportStrangers($node, $byUsername, $known);
+        return [...$drifts, ...$this->reportStrangers($node, $byUsername, $known)];
+    }
+
+    /**
+     * Whether a pending account has been pending longer than a build takes.
+     *
+     * Measured from the row's last write (`updated_at`). ReserveHostingNodeCapacity
+     * writes it when it reserves the slot and when it re-arms a failed
+     * attempt; a retry of a pending row reuses it without writing. Any other
+     * write to the row restarts the window, which can only make this later,
+     * never earlier.
+     */
+    private function pendingForTooLong(HostingAccount $row): bool
+    {
+        $since = $row->updated_at;
+
+        return $since === null || $since->lte(now()->subMinutes(self::PENDING_BUILD_WINDOW_MINUTES));
     }
 
     /**
@@ -380,27 +443,27 @@ final readonly class ReconcileHostingNodes
     /**
      * @param  array<string, RemoteAccount>  $byUsername
      * @param  list<string>  $known
+     * @return list<array<string, mixed>>
      */
-    private function reportStrangers(HostingNode $node, array $byUsername, array $known): int
+    private function reportStrangers(HostingNode $node, array $byUsername, array $known): array
     {
-        $drifts = 0;
+        $drifts = [];
 
         foreach ($byUsername as $username => $remote) {
             if (in_array($username, $known, strict: true)) {
                 continue;
             }
 
-            $this->drift->execute(
-                provider: $node->panel->value,
-                resourceType: self::RESOURCE,
-                kind: DriftKind::OrphanAtProvider,
-                providerReference: $remote->username,
-                expected: ['known_to_platform' => false],
-                observed: ['present' => true, 'node' => $node->slug, 'suspended' => $remote->suspended],
-                severity: DriftSeverity::Warning,
-            );
-
-            $drifts++;
+            $drifts[] = [
+                'provider' => $node->panel->value,
+                'resourceType' => self::RESOURCE,
+                'kind' => DriftKind::OrphanAtProvider,
+                'providerReference' => $remote->username,
+                'serviceId' => null,
+                'expected' => ['known_to_platform' => false],
+                'observed' => ['present' => true, 'node' => $node->slug, 'suspended' => $remote->suspended],
+                'severity' => DriftSeverity::Warning,
+            ];
         }
 
         return $drifts;
@@ -416,9 +479,15 @@ final readonly class ReconcileHostingNodes
      * accounts it could hold and an under-counted one oversells its disk —
      * and neither is visible from any screen.
      *
+     * $node is the row locked for this comparison and $rows were read under
+     * that lock, so the count and the rows are one moment's: an action that
+     * moves the count takes the same lock (ReserveHostingNodeCapacity does)
+     * and commits either before both reads or after this transaction.
+     *
      * @param  list<HostingAccount>  $rows
+     * @return list<array<string, mixed>>
      */
-    private function checkCapacity(HostingNode $node, array $rows): int
+    private function checkCapacity(HostingNode $node, array $rows): array
     {
         $occupying = count(array_filter(
             $rows,
@@ -426,20 +495,60 @@ final readonly class ReconcileHostingNodes
         ));
 
         if ($occupying === $node->account_count) {
-            return 0;
+            return [];
         }
 
-        $this->drift->execute(
-            provider: $node->panel->value,
-            resourceType: self::NODE_RESOURCE,
-            kind: DriftKind::SpecMismatch,
-            providerReference: $node->slug,
-            expected: ['account_count' => $node->account_count],
-            observed: ['accounts_occupying_capacity' => $occupying],
-            severity: DriftSeverity::Warning,
-        );
+        return [[
+            'provider' => $node->panel->value,
+            'resourceType' => self::NODE_RESOURCE,
+            'kind' => DriftKind::SpecMismatch,
+            'providerReference' => $node->slug,
+            'serviceId' => null,
+            'expected' => ['account_count' => $node->account_count],
+            'observed' => ['accounts_occupying_capacity' => $occupying],
+            'severity' => DriftSeverity::Warning,
+        ]];
+    }
 
-        return 1;
+    /**
+     * Records a node's drifts in the order of their RecordDrift identity, and
+     * returns how many there were.
+     *
+     * Each drift takes RecordDrift's transaction-scoped advisory lock, held
+     * until this node's transaction ends, and the identity it is keyed by
+     * names the panel type and the username but not the node. Two sweeps on
+     * two nodes of one panel type (an operator's run beside the scheduled one
+     * reaches that: each goes through the nodes in the order it read them, and
+     * the second read its order after the first had stamped some) that met
+     * the same two usernames in opposite orders each held one lock the other
+     * wanted, and PostgreSQL failed one with a deadlock. Taken in one order
+     * everywhere, a sweep that holds a lock waits only for ones after it, so
+     * no two sweeps wait on each other. That holds for a sweep that holds no
+     * lock from before its node: one called inside a transaction of its own
+     * caller keeps every node's drift locks until that caller commits, and
+     * this order says nothing about those. Nor about two identities whose
+     * hashtext() is equal: they share one lock, and the order here is of the
+     * identities, not of their hashes.
+     *
+     * @param  list<array<string, mixed>>  $drifts
+     */
+    private function recordInOrder(array $drifts): int
+    {
+        $identity = static fn (array $drift): string => implode('|', [
+            $drift['provider'],
+            $drift['resourceType'],
+            $drift['kind']->value,
+            $drift['providerReference'] ?? '',
+            $drift['serviceId'] ?? '',
+        ]);
+
+        usort($drifts, static fn (array $a, array $b): int => strcmp($identity($a), $identity($b)));
+
+        foreach ($drifts as $drift) {
+            $this->drift->execute(...$drift);
+        }
+
+        return count($drifts);
     }
 
     /**

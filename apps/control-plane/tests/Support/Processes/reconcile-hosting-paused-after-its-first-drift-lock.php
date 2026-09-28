@@ -3,11 +3,13 @@
 declare(strict_types=1);
 
 /*
- * `hosting:reconcile`, run in its own process, against a DirectAdmin node whose
+ * `hosting:reconcile`, run in its own process, against DirectAdmin nodes (the
+ * slugs in SWEEP_NODE, separated by commas, each given a credential) whose
  * account listing is the body in SWEEP_LISTING, held still just after it has
  * taken its first drift lock.
  *
- * For {@see \Tests\Feature\SharedHosting\TwoOverlappingHostingSweepsInTwoProcessesTest}.
+ * For {@see \Tests\Feature\SharedHosting\TwoOverlappingHostingSweepsInTwoProcessesTest}
+ * and {@see \Tests\Feature\SharedHosting\TwoSweepsOnTwoNodesOfOnePanelTest}.
  * RecordDrift serialises each drift on a transaction-scoped advisory lock
  * (`pg_advisory_xact_lock(hashtext(…))`), and inside a node's transaction that
  * lock is held until the node commits. Once the first one has been granted,
@@ -34,8 +36,9 @@ require $base.'/vendor/autoload.php';
 $app = require $base.'/bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
 
-$slug = (string) getenv('SWEEP_NODE');
-config(['hosting.credentials.'.$slug => ['username' => 'admin', 'login_key' => 'da-login-key-'.$slug]]);
+foreach (explode(',', (string) getenv('SWEEP_NODE')) as $slug) {
+    config(['hosting.credentials.'.$slug => ['username' => 'admin', 'login_key' => 'da-login-key-'.$slug]]);
+}
 
 $listing = (string) getenv('SWEEP_LISTING');
 Http::fake(static fn () => Http::response($listing, 200));
