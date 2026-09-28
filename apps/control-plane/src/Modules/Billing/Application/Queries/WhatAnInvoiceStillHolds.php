@@ -119,16 +119,22 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  * moves onto); the close of a job whose service ended,
  * CloseAJobWhoseServiceEnded (the provisioning job, then - returning the
  * paid change it delivered, through ReturnAPaidChangeWhoseDeliveryStopped -
- * the paid invoice and the wallet). A provisioning job's row is outside the
- * numbered order, and taken before an invoice: the actions that lock a job
- * (the provisioning engine's claim, RetryProvisioningJob, AdoptOrphanResource,
- * DetectStaleJobs, CloseAJobWhoseServiceEnded, RepointReservedIdentity,
- * NameTheDomainAHostingJobWillServe - `grep -rln "ProvisioningJob::query()->lockForUpdate" src`
- * when this was written, which lists this file too for the command itself) hold no invoice, subscription or wallet while they
- * wait for it. A job's stop in review or failure returns its paid change
- * after the caller commits, holding no job lock.
+ * the paid invoice and the wallet); an operator's return of a held paid
+ * change, ReturnAHeldPaidChange (the provisioning job, the subscription, the
+ * paid invoice, the wallet, then the plan the subscription goes back to). A
+ * provisioning job's row is outside the numbered order, and taken before a
+ * subscription or an invoice: the actions that lock a job (the provisioning
+ * engine's claim, RetryProvisioningJob, AdoptOrphanResource, DetectStaleJobs,
+ * CloseAJobWhoseServiceEnded, RepointReservedIdentity,
+ * NameTheDomainAHostingJobWillServe, ReturnAHeldPaidChange - `grep -rln "ProvisioningJob::query()->lockForUpdate" src`
+ * when this was written, which lists this file and
+ * ReturnAPaidChangeWhoseDeliveryStopped too; that listener locks a job only
+ * in a transaction of its own, after the return has failed, holding nothing
+ * else) hold no invoice, subscription or wallet while they wait for it. A
+ * job's stop in review or failure returns its paid change after the caller
+ * commits, holding no job lock.
  *
- * Those three take an invoice lock after a subscription, against the order
+ * Those four take an invoice lock after a subscription, against the order
  * above, and only ever a paid one (ApplyPlanChange: every non-open one it
  * draws on). That is safe because nothing holding a paid invoice's lock
  * waits for a subscription or an order. The wind-up used to lock its paid

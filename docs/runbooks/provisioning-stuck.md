@@ -198,7 +198,8 @@ the job stays on the list. It is refused (409) for a job not in review
 (`provisioning.close_not_in_review`), for a build, a destroy, a rebuild or a
 WordPress job (`provisioning.close_not_for_this_kind` — a build or a destroy
 may have left a resource: §4), and while the service has not ended
-(`provisioning.close_service_not_ended` — retry it instead). It needs the
+(`provisioning.close_service_not_ended` — retry it instead, or return a paid
+change as below). It needs the
 `provisioning.retry` permission, as retry and adopt do.
 
 **A paid plan change whose job stopped on a live service.** A resize or package
@@ -212,29 +213,42 @@ change is made or returned. Decide which:
 1. **Complete it.** Make the room or fix the cause, then retry the job
    (`POST /admin/provisioning/jobs/{job}/retry`). A retry that succeeds
    delivers the change, and nothing is returned.
-2. **Return it**, when it cannot be delivered. Find the charge on the invoice
-   and refund what the invoice still holds:
-
-   ```sql
-   SELECT id, provider, amount_minor FROM transactions
-    WHERE invoice_id = '<INVOICE_ULID>' AND kind = 'charge' AND status = 'succeeded';
-   ```
+2. **Return it**, when it cannot be delivered. First, for a resize in review,
+   look at the machine: one stopped as `vps.resize_unverified`, or with a
+   `resize_task_in_flight`, may have grown - then retry instead, which settles
+   it to what the hypervisor reports. Otherwise:
 
    ```
-   POST /admin/transactions/{transaction}/refunds   # amount_minor, reason required
+   POST /admin/provisioning/jobs/{job}/return-payment   # evidence required
    ```
 
-   A charge paid from the wallet is refunded to the wallet; a card charge to
-   the card. It needs the `payment.refund` permission. Do not retry the job
-   afterwards: a retry that then succeeds delivers a change already refunded.
-   What the refund does **not** do: move the subscription back to the plan it
-   came from - it stays on the new plan, and a renewal bills its price (the
-   customer's messages say so). No operator route moves a subscription's plan.
-   The customer can change the plan back themselves once the job is not in
-   review (a job in review holds every plan change, `service_busy`); a job in
-   review on a live service stays there until the service ends, when it is
-   closable, and the close then returns nothing more - the refund already took
-   what the invoice held.
+   In one transaction it returns what the proration invoice still holds to the
+   customer's wallet, puts the subscription back on the plan and price the
+   change came from (unless it was changed again since or has ended - the
+   answer's `plan_restored` says which), records the change returned, and
+   cancels the job: it leaves this list, stops holding the customer's plan
+   changes, and can no longer be retried. The customer is told. It is audited
+   as `provisioning.paid_change_returned` with your evidence, and needs the
+   `payment.refund` permission, because it moves money back out. It is
+   refused (409) for a job that is still queued or running
+   (`provisioning.return_not_stopped` - wait for it), a job that delivers no
+   paid plan change (`provisioning.return_not_a_paid_change`), and a job whose
+   service has ended (`provisioning.return_service_ended` - close it: the end
+   returns the money).
+
+   Do **not** refund the capture by hand. The raw refund route
+   (`POST /admin/transactions/{transaction}/refunds`) refuses a capture whose
+   plan change is still in play (409 `provisioning.refund_of_a_paid_change_in_play`):
+   it would move the money and leave the change in play - the subscription on
+   the new plan and billed at it, the job holding every plan change, a later
+   downgrade crediting the same money again, and a retry able to deliver a
+   change already paid back. The money goes to the wallet, as every return of
+   an undelivered purchase does; a card refund on top of it is held to what
+   the invoice then holds, which is nothing.
+
+If returning the paid change fails when a job fails on a service that has
+already ended, the job is sent to review instead (its error ends with "close the
+job to ask again"): close it, and the close returns the money.
 
 ## 7. If nothing above fits
 

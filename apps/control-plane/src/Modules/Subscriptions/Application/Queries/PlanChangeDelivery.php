@@ -488,14 +488,132 @@ final readonly class PlanChangeDelivery
      */
     public function deliveryEndedWithItsService(string $subscriptionId, string $invoiceId): bool
     {
-        /** @var list<ProvisioningJob> $jobs */
-        $jobs = $this->deliveringJobs($subscriptionId, $invoiceId)->get(['id', 'status', 'service_id'])->all();
+        return $this->endedWithItsService($this->deliveringJobs($subscriptionId, $invoiceId));
+    }
 
-        if ($jobs === []) {
+    /**
+     * Whether a plan change recorded after this one was delivered, and so
+     * decided the machine's shape in its place: what the end of a
+     * subscription or a service asks before it keeps an earlier paid change
+     * undelivered ({@see ReturnAnUpgradeTheEndPrevented}).
+     *
+     * A later change counts only when it was delivered itself. It is not
+     * returned (`returned_at`), and either:
+     *  - it owed nothing (no proration invoice), and what it queued under its
+     *    own key (`...:change:<id>`) did not stop undelivered on a service
+     *    that has ended - or it queued nothing; or
+     *  - its invoice was paid and it was delivered (wasDelivered()).
+     *
+     * aLaterChangeWasSettled() - the settlement's question, "has a later
+     * change already decided what to build" - counted any later change that
+     * owed nothing or was paid. Read at the end, that kept an earlier paid
+     * upgrade because a later one was paid, although the later one failed
+     * too: 27.000 kept for nothing, and the answer turned on which of the two
+     * was asked first, since a later change already returned did not count
+     * (B2, the verification of round ten M: two paid upgrades that both
+     * failed; a paid upgrade followed by a downgrade whose shrink failed). A
+     * later change that was itself not delivered decided nothing, and the
+     * answer no longer depends on whether it has been returned yet.
+     */
+    public function aLaterChangeWasDelivered(PlanChange $change): bool
+    {
+        /** @var list<PlanChange> $later */
+        $later = PlanChange::query()
+            ->where('subscription_id', $change->subscription_id)
+            ->whereNull('returned_at')
+            ->where(static fn ($query) => $query
+                ->where('changed_at', '>', $change->changed_at)
+                ->orWhere(static fn ($same) => $same
+                    ->where('changed_at', $change->changed_at)
+                    ->where('id', '>', $change->id)))
+            ->get()
+            ->all();
+
+        $subscriptionId = (string) $change->subscription_id;
+
+        foreach ($later as $candidate) {
+            if ($candidate->proration_invoice_id === null) {
+                $queued = ProvisioningJob::query()->where('idempotency_key', 'like', sprintf('plan-change:%s:%%:change:%s', $subscriptionId, $candidate->getKey()));
+
+                if (! $this->endedWithItsService($queued)) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            $paid = Invoice::query()
+                ->whereKey($candidate->proration_invoice_id)
+                ->where('status', InvoiceStatus::Paid->value)
+                ->exists();
+
+            if ($paid && $this->wasDelivered($subscriptionId, (string) $candidate->proration_invoice_id)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether the paid plan change this proration invoice bills is still in
+     * play and not delivered: recorded, paid, not returned, and either its
+     * settlement has not been heard (nothing queued, `delivered_at` empty) or
+     * what it queued has not succeeded - queued, running, in review, failed.
+     *
+     * Such a change can still be delivered - the settlement queues it, a
+     * retry runs it - and refunding its invoice by hand would leave it in
+     * play: the subscription on the new plan and billed at its price, a job
+     * in review holding every plan change (`service_busy`), a later downgrade
+     * crediting the refunded money a second time, and a retry that could
+     * deliver a change already paid back (B1, the verification of round ten
+     * M). The raw refund route is refused for it; an operator returns it with
+     * ReturnAHeldPaidChange, which takes it out of play.
+     */
+    public function aPaidChangeIsInPlay(Invoice $invoice): bool
+    {
+        if ($invoice->status !== InvoiceStatus::Paid || $invoice->subscription_id === null) {
             return false;
         }
 
+        /** @var PlanChange|null $change */
+        $change = PlanChange::query()->where('proration_invoice_id', $invoice->getKey())->first();
+
+        if ($change === null || $change->returned_at !== null) {
+            return false;
+        }
+
+        $jobs = $this->deliveringJobs((string) $invoice->subscription_id, (string) $invoice->getKey())->get(['status'])->all();
+
+        if ($jobs === []) {
+            return $change->delivered_at === null;
+        }
+
         foreach ($jobs as $job) {
+            if ($job->status === ProvisioningJobStatus::Succeeded || $job->status === ProvisioningJobStatus::Cancelled) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Whether there is such a job and every one stopped without succeeding
+     * (STOPPED_UNDELIVERED) on a service that has ended.
+     *
+     * @param  Builder<ProvisioningJob>  $jobs
+     */
+    private function endedWithItsService(Builder $jobs): bool
+    {
+        /** @var list<ProvisioningJob> $found */
+        $found = $jobs->get(['id', 'status', 'service_id'])->all();
+
+        if ($found === []) {
+            return false;
+        }
+
+        foreach ($found as $job) {
             if (! in_array($job->status, self::STOPPED_UNDELIVERED, true) || $job->service_id === null) {
                 return false;
             }

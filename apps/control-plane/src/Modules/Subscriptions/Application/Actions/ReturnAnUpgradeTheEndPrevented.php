@@ -75,17 +75,38 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *       nothing needed resizing delivered the upgrade all the same: it used
  *       to be read off whether a resize job existed, and such an upgrade was
  *       returned at the end;
- *  - no later change was settled, when the change is recorded: an upgrade a
- *    later settled change superseded - a later change that owed nothing, or
- *    whose invoice was paid, and whose credit was drawn on this invoice -
- *    was settled by that change, not left undelivered. A later change still
+ *  - no later change was delivered, when the change is recorded
+ *    (PlanChangeDelivery::aLaterChangeWasDelivered()): an upgrade a later
+ *    change superseded and delivered in its place - a later change not
+ *    returned, that owed nothing or was paid, and whose own resize or
+ *    package change did not stop undelivered on the ended service - was
+ *    settled by that change, not left undelivered. A later change still
  *    unpaid (voided as the subscription ends) supersedes nothing, and the
- *    upgrade is returned (X1).
+ *    upgrade is returned (X1). Nor does a later change that was itself not
+ *    delivered. It used to count once it was settled (owed nothing, or paid),
+ *    so of two paid upgrades that both failed the earlier was kept, and it
+ *    was returned only if the later one happened to be returned first (B2,
+ *    the verification of round ten M). The answer no longer depends on the
+ *    order the two are asked in.
+ *
+ * What each undelivered change owes back is what its invoice still holds
+ * (WhatAnInvoiceStillHolds), nothing more. A later downgrade's credit, drawn
+ * on this invoice when it was made, has already left the invoice, and is
+ * not credited again; no downgrade credit is reversed, here or anywhere. In
+ * the case the verifier measured - a 27.000 upgrade that failed, then a
+ * downgrade that credited 15.000 drawn on it and whose shrink failed too -
+ * the upgrade's invoice holds 12.000, that is what is returned, and the
+ * customer ends where they began: 27.000 paid, 15.000 back through the
+ * downgrade and 12.000 at the end. Reversing the downgrade's credit as well
+ * would take back money the invoice no longer counts, and the platform does
+ * not claw a wallet credit back (WhatAnInvoiceStillHolds).
  *
  * A change its settlement found could no longer be delivered was returned
- * there (ReturnAPlanChangeNoLongerDeliverable): the invoice holds nothing
- * more, and asked again here it credits nothing. So does an invoice an
- * operator already refunded by hand.
+ * there (ReturnAPlanChangeNoLongerDeliverable), and a held change an operator
+ * returned on a live service was returned by ReturnAHeldPaidChange: the
+ * invoice holds nothing more, and asked again here it credits nothing. A raw
+ * refund of a paid change still in play is refused
+ * (PlanChangeDelivery::aPaidChangeIsInPlay()).
  *
  * A return that credits something is recorded as that one does: the change's
  * `returned_at` and `return_reason`; a `subscription.plan_changed` audit
@@ -156,7 +177,7 @@ final readonly class ReturnAnUpgradeTheEndPrevented
         /** @var PlanChange|null $change */
         $change = PlanChange::query()->where('proration_invoice_id', $invoice->getKey())->first();
 
-        if ($change !== null && $this->delivery->aLaterChangeWasSettled($change)) {
+        if ($change !== null && $this->delivery->aLaterChangeWasDelivered($change)) {
             return 0;
         }
 

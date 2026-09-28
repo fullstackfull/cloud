@@ -18,7 +18,9 @@ use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Provisioning\Domain\Exceptions\PaidChangeReturnRefusedException;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Subscriptions\Application\Queries\PlanChangeDelivery;
 
 /**
  * Invoices, payments and refunds across every account.
@@ -103,6 +105,26 @@ final class BillingController
             throw ValidationException::withMessages([
                 'transaction' => 'Only a succeeded capture can be refunded.',
             ]);
+        }
+
+        /*
+         * A capture that paid for a plan change still in play - not
+         * delivered, not returned - is not refunded here: the refund would
+         * move the money and leave the change in play, the subscription on
+         * the new plan and a retry able to deliver it (B1, the verification
+         * of round ten M). ReturnAHeldPaidChange returns it and takes it out
+         * of play. Read before the refund, outside its locks. A change leaves
+         * play for good - its job succeeds or is cancelled, or it is
+         * returned, and none of those is undone - so a change this read
+         * finds out of play cannot be back in play by the time the refund
+         * runs; one it finds in play and that leaves play meanwhile is
+         * refused, and the operator asks again.
+         */
+        /** @var Invoice|null $paidFor */
+        $paidFor = $found->invoice_id === null ? null : Invoice::query()->find($found->invoice_id);
+
+        if ($paidFor !== null && app(PlanChangeDelivery::class)->aPaidChangeIsInPlay($paidFor)) {
+            throw PaidChangeReturnRefusedException::becauseARefundWouldLeaveTheChangeInPlay((string) $found->getKey(), (string) $paidFor->getKey());
         }
 
         $user = $request->user();

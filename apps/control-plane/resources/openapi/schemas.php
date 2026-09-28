@@ -2824,6 +2824,17 @@ return [
             'service_id' => ['type' => ['string', 'null']],
         ],
     ],
+    'AdminReturnedPaidChange' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'status' => ['type' => ['string', 'null']],
+            'service_id' => ['type' => ['string', 'null']],
+            'returned_to_wallet_minor' => ['type' => 'integer'],
+            'plan_restored' => ['type' => 'boolean'],
+        ],
+    ],
     'AdminQuarantinedAddress' => [
         'type' => 'object',
         'additionalProperties' => false,

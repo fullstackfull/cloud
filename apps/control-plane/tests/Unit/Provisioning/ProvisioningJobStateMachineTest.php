@@ -42,6 +42,20 @@ final class ProvisioningJobStateMachineTest extends TestCase
     }
 
     #[Test]
+    public function a_person_can_give_up_on_a_failed_job(): void
+    {
+        /*
+         * An operator returning the paid plan change a failed resize was
+         * delivering cancels the job with it, so a retry cannot deliver a
+         * change already paid back (B1, the verification of round ten M).
+         * The engine never takes this edge: it settles a job as failed and
+         * stops.
+         */
+        $this->assertTrue($this->machine->canTransition(ProvisioningJobStatus::Failed, ProvisioningJobStatus::Cancelled));
+        $this->assertFalse($this->machine->canTransition(ProvisioningJobStatus::Running, ProvisioningJobStatus::Cancelled));
+    }
+
+    #[Test]
     public function a_succeeded_job_is_finished_with(): void
     {
         $this->assertSame([], $this->machine->reachableFrom(ProvisioningJobStatus::Succeeded));

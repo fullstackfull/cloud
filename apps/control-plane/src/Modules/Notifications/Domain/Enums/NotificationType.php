@@ -86,6 +86,18 @@ enum NotificationType: string
      * service ended before the change was completed, and where the money went.
      */
     case PlanChangeReturnedAtTheEnd = 'billing.plan_change_returned_at_the_end';
+    /*
+     * A paid plan change held for an operator on a live service - its resize
+     * or package change stopped in review or failed - that the operator
+     * returned (ReturnAHeldPaidChange, through
+     * ReturnAPlanChangeNoLongerDeliverable::returnHeld()): the change is
+     * cancelled and the payment is in the wallet. Two types, because what
+     * the customer is billed next differs and each sentence must be true: the
+     * subscription went back to its earlier plan, or it did not (it was
+     * changed again since, or it has ended).
+     */
+    case HeldPlanChangeReturned = 'billing.held_plan_change_returned';
+    case HeldPlanChangeReturnedPlanKept = 'billing.held_plan_change_returned_plan_kept';
 
     /*
      * The account's country or currency, decided. Applied says from when
@@ -279,6 +291,8 @@ enum NotificationType: string
             self::CancellationScheduled,
             self::PlanChangeReturned,
             self::PlanChangeReturnedAtTheEnd,
+            self::HeldPlanChangeReturned,
+            self::HeldPlanChangeReturnedPlanKept,
             self::CountryCurrencyChangeApplied,
             self::CountryCurrencyChangeRejected,
             self::CountryCurrencyChangeNeedsReview => NotificationCategory::Billing,
@@ -304,6 +318,7 @@ enum NotificationType: string
             self::PasswordChanged, self::TwoFactorEnabled, self::TwoFactorDisabled, self::NewSignIn,
             self::InvoiceIssued, self::PaymentFailed, self::RefundIssued,
             self::GracePeriodStarted, self::CancellationScheduled, self::PlanChangeReturned, self::PlanChangeReturnedAtTheEnd,
+            self::HeldPlanChangeReturned, self::HeldPlanChangeReturnedPlanKept,
             self::CountryCurrencyChangeApplied, self::CountryCurrencyChangeRejected,
             self::ServiceReady, self::ServiceProvisioningFailed,
             self::ServiceSuspended, self::ServiceRestored, self::ServiceReactivationFailed,

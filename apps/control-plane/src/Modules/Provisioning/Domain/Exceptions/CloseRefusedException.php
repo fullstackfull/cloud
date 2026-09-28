@@ -47,7 +47,7 @@ final class CloseRefusedException extends DomainException
 
     public static function becauseTheServiceHasNotEnded(string $jobId, ?string $serviceId): self
     {
-        $exception = new self('The service this job works for has not ended, so what the job was doing still matters: retry it.');
+        $exception = new self('The service this job works for has not ended, so what the job was doing still matters: retry it - or, for a paid plan change that will not be delivered, return it (POST /api/admin/provisioning/jobs/{job}/return-payment).');
 
         return $exception->withContext(['provisioning_job_id' => $jobId, 'service_id' => $serviceId])
             ->as('provisioning.close_service_not_ended');

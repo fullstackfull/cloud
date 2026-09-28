@@ -16,6 +16,7 @@ use Lynomia\Modules\Provisioning\Application\Actions\CloseAJobWhoseServiceEnded;
 use Lynomia\Modules\Provisioning\Application\Actions\RetryProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\SharedHosting\Application\Actions\NameTheDomainAHostingJobWillServe;
+use Lynomia\Modules\Subscriptions\Application\Actions\ReturnAHeldPaidChange;
 use Lynomia\Modules\Vps\Application\Actions\RepointReservedIdentity;
 
 /**
@@ -244,6 +245,60 @@ final class ProvisioningController
                 'id' => $closed->id,
                 'status' => $closed->status->value,
                 'service_id' => $closed->service_id,
+            ],
+        ]);
+    }
+
+    /**
+     * Return a paid plan change held on a live service, and take it out of
+     * play.
+     *
+     * ReturnAHeldPaidChange says what it accepts and what it writes: the
+     * money to the wallet, the subscription back on the plan it came from
+     * when it can be, the change stamped returned, the job cancelled. The
+     * raw refund of such a change's capture is refused (B1, the verification
+     * of round ten M). The evidence is required and audited with what was
+     * returned, in the same transaction; nothing here calls a provider.
+     */
+    public function returnPayment(Request $request, string $job): JsonResponse
+    {
+        $found = ProvisioningJob::query()->findOrFail($job);
+
+        $validated = $request->validate([
+            'evidence' => ['required', 'string', 'min:3', 'max:1000'],
+        ]);
+
+        $user = $request->user();
+        $returnedBy = $user instanceof User
+            ? sprintf('%s <%s>', $user->name, $user->email)
+            : 'system';
+
+        /** @var array{job: ProvisioningJob, credited: int, restored: bool} $outcome */
+        $outcome = app(RecordActAtomically::class)->execute(
+            act: static fn (): array => app(ReturnAHeldPaidChange::class)->execute($found, $returnedBy),
+            describe: static fn (array $outcome): AuditedAct => new AuditedAct(
+                action: AuditAction::ProvisioningPaidChangeReturned,
+                subject: $outcome['job'],
+                customerId: $outcome['job']->customer_id,
+                context: [
+                    'evidence' => $validated['evidence'],
+                    'kind' => $outcome['job']->kind->value,
+                    'service_id' => $outcome['job']->service_id,
+                    'last_error' => $outcome['job']->last_error,
+                    'returned_to_wallet_minor' => $outcome['credited'],
+                    'plan_restored' => $outcome['restored'],
+                    'returned_by' => $returnedBy,
+                ],
+            ),
+        );
+
+        return response()->json([
+            'data' => [
+                'id' => $outcome['job']->id,
+                'status' => $outcome['job']->status->value,
+                'service_id' => $outcome['job']->service_id,
+                'returned_to_wallet_minor' => $outcome['credited'],
+                'plan_restored' => $outcome['restored'],
             ],
         ]);
     }

@@ -8,10 +8,14 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Provisioning\Application\Actions\CloseAJobWhoseServiceEnded;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
+use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobClosed;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobFailed;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobNeedsReview;
+use Lynomia\Modules\Provisioning\Domain\StateMachines\ProvisioningJobStateMachine;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Subscriptions\Application\Actions\ReturnAnUpgradeTheEndPrevented;
 use Lynomia\Modules\Subscriptions\Application\Actions\WindUpAnEndedSubscription;
 use Throwable;
@@ -47,14 +51,16 @@ use Throwable;
  *    commits, if there is one, in a transaction of its own, so it holds none
  *    of the caller's locks. It never throws: it is raised where a worker or a
  *    sweep has already written the job's outcome, and its failure must not
- *    become theirs. A failure is logged; for a job in review the close asks
- *    again, and for a failed one the log line names the invoice for an
- *    operator (docs/runbooks/provisioning-stuck.md §6).
+ *    become theirs. A failure is logged, and the job is left where the close
+ *    asks again: a job in review is closable as it is, and a failed one on
+ *    an ended service is sent to review (sendAFailedJobToReview()), where it
+ *    is closable too (docs/runbooks/provisioning-stuck.md §6).
  */
 final readonly class ReturnAPaidChangeWhoseDeliveryStopped
 {
     public function __construct(
         private ReturnAnUpgradeTheEndPrevented $returnIt,
+        private ProvisioningJobStateMachine $jobStates,
     ) {}
 
     public function handle(ProvisioningJobClosed|ProvisioningJobFailed|ProvisioningJobNeedsReview $event): void
@@ -80,13 +86,52 @@ final readonly class ReturnAPaidChangeWhoseDeliveryStopped
             try {
                 DB::transaction(fn (): int => $this->returnIt->execute($invoiceId));
             } catch (Throwable $e) {
-                Log::warning('A paid plan change\'s job stopped and returning its payment to the wallet failed; an operator returns it (docs/runbooks/provisioning-stuck.md §6).', [
+                $sentToReview = $this->sendAFailedJobToReview($event->provisioningJobId, $e);
+
+                Log::warning('A paid plan change\'s job stopped and returning its payment to the wallet failed; closing the job asks again (docs/runbooks/provisioning-stuck.md §6).', [
                     'provisioning_job_id' => $event->provisioningJobId,
                     'invoice_id' => $invoiceId,
+                    'sent_to_review' => $sentToReview,
                     'reason' => $e->getMessage(),
                 ]);
             }
         });
+    }
+
+    /**
+     * A failed job whose return failed goes to review (`failed ->
+     * needs_review`, an edge the state machine has), on a service that has
+     * ended, so it is on the review list, closable, and its close asks for
+     * the return again inside the close's transaction. A job already in
+     * review is closable as it is. It used to be only logged, and a failed
+     * job left nothing on any list pointing at the money (reservation 3 of
+     * round ten M). Nothing is sent to review on a live service: nothing is
+     * returned there, and the payment is held for an operator as it was.
+     */
+    private function sendAFailedJobToReview(string $provisioningJobId, Throwable $why): bool
+    {
+        try {
+            return DB::transaction(function () use ($provisioningJobId, $why): bool {
+                /** @var ProvisioningJob|null $job */
+                $job = ProvisioningJob::query()->lockForUpdate()->find($provisioningJobId);
+
+                if ($job === null
+                    || $job->status !== ProvisioningJobStatus::Failed
+                    || $job->service_id === null
+                    || Service::query()->find($job->service_id)?->status !== ServiceStatus::Terminated
+                    || ! $this->jobStates->canTransition($job->status, ProvisioningJobStatus::NeedsReview)) {
+                    return false;
+                }
+
+                $job->status = ProvisioningJobStatus::NeedsReview;
+                $job->last_error = sprintf('%s (returning the paid plan change it delivered also failed: %s; close the job to ask again)', (string) $job->last_error, mb_substr($why->getMessage(), 0, 300));
+                $job->save();
+
+                return true;
+            });
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /**

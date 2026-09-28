@@ -639,7 +639,7 @@ return [
     'api.admin.transactions.refund' => [
         'tag' => 'Operator',
         'summary' => 'Refund a capture',
-        'description' => 'Its own permission: moving money back out is not implied by being able to look at payments. Records who issued it, because "who refunded this?" has to survive the operator leaving.',
+        'description' => 'Its own permission: moving money back out is not implied by being able to look at payments. Records who issued it, because "who refunded this?" has to survive the operator leaving. Refused (409 `provisioning.refund_of_a_paid_change_in_play`) for a capture on a proration invoice whose plan change is paid, not delivered and not returned: refunding it would leave the change in play - return it with `POST /api/admin/provisioning/jobs/{job}/return-payment` once its job has stopped.',
         'permission' => 'payment.refund',
         'body' => ['amount_minor', 'reason'],
         'response' => $one('AdminRefund', 201),
@@ -1273,10 +1273,18 @@ return [
     'api.admin.provisioning.close' => [
         'tag' => 'Operator',
         'summary' => 'Close a job whose service has ended',
-        'description' => 'Takes a job off the review list without running it, once the service it worked for has ended: a resize, a package change or a power change stopped in `needs_review` on a `terminated` service, which a retry refuses (`provisioning.retry_after_the_service_ended`) and an adoption refuses (`provisioning.adoption_not_a_build`). The job becomes `cancelled`. Refuses (409) a job not in `needs_review` (`provisioning.close_not_in_review`), a job of any other kind (`provisioning.close_not_for_this_kind`: a build or a destroy may have left a resource at the provider, and a rebuild is settled by its operation\'s own verdict) - and a job whose service has not ended (`provisioning.close_service_not_ended`). Nothing is asked of a provider and no money moves. The evidence is required and audited (`provisioning.closed`).',
+        'description' => 'Takes a job off the review list without running it, once the service it worked for has ended: a resize, a package change or a power change stopped in `needs_review` on a `terminated` service, which a retry refuses (`provisioning.retry_after_the_service_ended`) and an adoption refuses (`provisioning.adoption_not_a_build`). The job becomes `cancelled`. Refuses (409) a job not in `needs_review` (`provisioning.close_not_in_review`), a job of any other kind (`provisioning.close_not_for_this_kind`: a build or a destroy may have left a resource at the provider, and a rebuild is settled by its operation\'s own verdict) - and a job whose service has not ended (`provisioning.close_service_not_ended`). Nothing is asked of a provider. Money moves in one case: a resize or package change delivering a paid plan change has what its proration invoice still holds returned to the customer\'s wallet with the close, in the same transaction - usually nothing, since the service\'s end returned it already; a close whose return fails is refused. The evidence is required and audited (`provisioning.closed`).',
         'permission' => 'provisioning.retry',
         'body' => ['evidence'],
         'response' => $one('AdminClosedJob'),
+    ],
+    'api.admin.provisioning.return_payment' => [
+        'tag' => 'Operator',
+        'summary' => 'Return a paid plan change held on a live service',
+        'description' => 'The way to return a paid plan change whose resize or package change stopped (`needs_review` or `failed`) while its service is still live - the payment is held for an operator to complete the change (retry) or return it (this). In one transaction: what the proration invoice still holds goes back to the customer\'s wallet, against the invoice; the subscription goes back to the plan and price the change came from, unless it was changed again since or has ended (`plan_restored`); the change is recorded returned; the job is cancelled, so it leaves the review list, stops holding plan changes, and cannot be retried into delivering a change already paid back. The customer is told. Refuses (409) a job that has not stopped (`provisioning.return_not_stopped`), one that delivers no paid plan change (`provisioning.return_not_a_paid_change`), one whose service has ended - close it instead (`provisioning.return_service_ended`) - and a change already returned (`provisioning.return_already_returned`). The raw refund of such a change\'s capture is refused while the change is in play (`provisioning.refund_of_a_paid_change_in_play`). Nothing is asked of a provider. The evidence is required and audited (`provisioning.paid_change_returned`).',
+        'permission' => 'payment.refund',
+        'body' => ['evidence'],
+        'response' => $one('AdminReturnedPaidChange'),
     ],
     'api.admin.provisioning.hosting_domain' => [
         'tag' => 'Operator',

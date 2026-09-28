@@ -29,9 +29,11 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * The rule: a paid plan change its settlement finds can no longer be
  * delivered goes back, here. A change that fails after its settlement (a
  * resize or package change that fails outright or stops in review), or whose
- * settlement is never heard, is not returned here. While its service lives,
- * its money is held for an operator to complete the change or return it
- * (docs/billing.md, and docs/runbooks/provisioning-stuck.md §6 for how). When
+ * settlement is never heard, is not returned by execute(). While its service
+ * lives, its money is held for an operator to complete the change (a retry)
+ * or return it - through returnHeld() below, called by ReturnAHeldPaidChange,
+ * which takes it out of play as execute() does; the raw refund of its capture
+ * is refused (docs/billing.md, docs/runbooks/provisioning-stuck.md §6). When
  * its service ends with the change undelivered - the job stopped, or closed,
  * on a service that has ended - the money goes back to the wallet then
  * (ReturnAnUpgradeTheEndPrevented), without an operator. This paragraph used
@@ -95,6 +97,9 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
 {
     public const string AUDIT_REASON = 'plan_change_not_deliverable_at_settlement';
 
+    /** The audit reason of a held change an operator returned (returnHeld()). */
+    public const string HELD_AUDIT_REASON = 'held_plan_change_returned_by_an_operator';
+
     public function __construct(
         private ReturnWhatAnInvoiceStillHolds $returnWhatItHolds,
         private RecordAuditEntry $audit,
@@ -109,10 +114,43 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
      */
     public function execute(Subscription $locked, PlanChange $change, Invoice $invoice, string $refusal): int
     {
+        return $this->returnIt($locked, $change, $invoice, $refusal, held: false)['credited'];
+    }
+
+    /**
+     * The same return, for a paid change held for an operator on a live
+     * service - its resize or package change stopped in review or failed
+     * after its settlement - which the operator decided will not be
+     * delivered (ReturnAHeldPaidChange). What the invoice still holds goes
+     * back to the wallet, the subscription goes back to the plan it came from
+     * on the same terms as above, the change is stamped `returned_at`, and
+     * the audit entry carries the reason HELD_AUDIT_REASON. The customer is
+     * told with `billing.held_plan_change_returned` when the plan was put
+     * back and `billing.held_plan_change_returned_plan_kept` when it was not.
+     *
+     * The caller holds the job, the subscription and the paid invoice, in
+     * that order; the wallet and the plan are taken here, after them
+     * (WhatAnInvoiceStillHolds, the lock order).
+     *
+     * @param  Subscription  $locked  the subscription, locked by the caller
+     * @return array{credited: int, restored: bool}
+     */
+    public function returnHeld(Subscription $locked, PlanChange $change, Invoice $invoice, string $why): array
+    {
+        return $this->returnIt($locked, $change, $invoice, $why, held: true);
+    }
+
+    /**
+     * @return array{credited: int, restored: bool}
+     */
+    private function returnIt(Subscription $locked, PlanChange $change, Invoice $invoice, string $refusal, bool $held): array
+    {
         $credited = $this->returnWhatItHolds->toTheWallet(
             $invoice,
-            'plan-change-not-deliverable',
-            sprintf('Payment for invoice %s returned: the plan change it paid for could no longer be made', $invoice->number),
+            $held ? 'held-plan-change-returned' : 'plan-change-not-deliverable',
+            $held
+                ? sprintf('Payment for invoice %s returned: the plan change it paid for could not be completed and was cancelled', $invoice->number)
+                : sprintf('Payment for invoice %s returned: the plan change it paid for could no longer be made', $invoice->number),
             ['subscription_id' => (string) $locked->getKey(), 'plan_change_id' => (string) $change->getKey()],
         );
 
@@ -132,7 +170,7 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
             context: [
                 'from_plan_id' => $change->to_plan_id,
                 'to_plan_id' => $restored ? $change->from_plan_id : $change->to_plan_id,
-                'reason' => self::AUDIT_REASON,
+                'reason' => $held ? self::HELD_AUDIT_REASON : self::AUDIT_REASON,
                 'refusal' => $refusal,
                 'plan_restored' => $restored,
                 'plan_stock_exceeded_by' => $exceededBy,
@@ -143,20 +181,22 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
             ],
         );
 
-        Log::warning('A paid plan change could no longer be delivered when its payment was captured; the payment was returned to the wallet and the plan put back.', [
-            'invoice_id' => (string) $invoice->getKey(),
-            'subscription_id' => (string) $locked->getKey(),
-            'plan_change_id' => (string) $change->getKey(),
-            'refusal' => $refusal,
-            'plan_restored' => $restored,
-            'plan_stock_exceeded_by' => $exceededBy,
-            'plan_per_customer_limit_exceeded_by' => $customerExceededBy,
-            'returned_to_wallet_minor' => $credited,
-        ]);
+        Log::warning($held
+            ? 'A paid plan change held for an operator was returned by one: the payment went back to the wallet, the plan put back when it could be, and the job cancelled.'
+            : 'A paid plan change could no longer be delivered when its payment was captured; the payment was returned to the wallet and the plan put back.', [
+                'invoice_id' => (string) $invoice->getKey(),
+                'subscription_id' => (string) $locked->getKey(),
+                'plan_change_id' => (string) $change->getKey(),
+                'refusal' => $refusal,
+                'plan_restored' => $restored,
+                'plan_stock_exceeded_by' => $exceededBy,
+                'plan_per_customer_limit_exceeded_by' => $customerExceededBy,
+                'returned_to_wallet_minor' => $credited,
+            ]);
 
-        $this->tellTheCustomerOnceCommitted($locked, $change, $invoice, $credited);
+        $this->tellTheCustomerOnceCommitted($locked, $change, $invoice, $credited, $held, $restored);
 
-        return $credited;
+        return ['credited' => $credited, 'restored' => $restored];
     }
 
     /**
@@ -164,7 +204,7 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
      * about a return that rolled back would tell the customer of money that
      * never moved.
      */
-    private function tellTheCustomerOnceCommitted(Subscription $subscription, PlanChange $change, Invoice $invoice, int $credited): void
+    private function tellTheCustomerOnceCommitted(Subscription $subscription, PlanChange $change, Invoice $invoice, int $credited, bool $held, bool $restored): void
     {
         $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
         $label = $service?->label;
@@ -173,10 +213,16 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
             : (is_string($label) && $label !== '' ? $label : (string) $service->getKey());
         $amount = Money::ofMinor($credited, (string) $invoice->currency)->format();
 
-        DB::afterCommit(function () use ($subscription, $change, $name, $amount): void {
+        $type = match (true) {
+            ! $held => NotificationType::PlanChangeReturned,
+            $restored => NotificationType::HeldPlanChangeReturned,
+            default => NotificationType::HeldPlanChangeReturnedPlanKept,
+        };
+
+        DB::afterCommit(function () use ($subscription, $change, $name, $amount, $type): void {
             $this->notify->execute(
                 customerId: (string) $subscription->customer_id,
-                type: NotificationType::PlanChangeReturned,
+                type: $type,
                 idempotencyKey: 'plan-change-returned:'.$change->getKey(),
                 subject: $subscription,
                 data: ['service' => $name, 'amount' => $amount],
