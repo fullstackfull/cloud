@@ -7,11 +7,15 @@ namespace Tests\Feature\SharedHosting;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
+use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
+use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ResourceDrift;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\SharedHosting\Application\Actions\ReconcileHostingNodes;
+use Lynomia\Modules\SharedHosting\Application\Actions\ReserveHostingNodeCapacity;
+use Lynomia\Modules\SharedHosting\Domain\Contracts\HostingProvider;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\CreateAccountRequest;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\RemoteAccount;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
@@ -20,7 +24,9 @@ use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
 use Lynomia\Modules\SharedHosting\Infrastructure\HostingProviderFactory;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use Lynomia\Modules\SharedHosting\Infrastructure\Providers\FakeHostingProvider;
+use Mockery;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -178,6 +184,81 @@ final class HostingReconciliationTest extends TestCase
         $this->node->forceFill(['account_count' => 1])->save();
 
         $this->assertSame(0, app(ReconcileHostingNodes::class)->execute()['drifts']);
+    }
+
+    #[Test]
+    public function an_account_still_being_built_that_the_panel_does_not_list_yet_is_not_missing(): void
+    {
+        /*
+         * The row is written before the panel is asked to create anything, so
+         * for the length of a build the panel does not list it. Recording that
+         * as a critical missing_at_provider made every build a critical drift.
+         */
+        $this->row('buildingnow', HostingAccountStatus::Pending);
+        $this->node->forceFill(['account_count' => 1])->save();
+
+        $this->travel(59)->minutes();
+
+        $this->assertSame(0, app(ReconcileHostingNodes::class)->execute()['drifts']);
+        $this->assertSame(0, ResourceDrift::query()->count());
+    }
+
+    #[Test]
+    public function an_account_pending_for_longer_than_a_build_takes_and_not_at_the_panel_is_missing(): void
+    {
+        // A build that never reached the panel, and nothing else reports it:
+        // the customer has paid for an account that does not exist.
+        $row = $this->row('neverbuilt', HostingAccountStatus::Pending);
+        $this->node->forceFill(['account_count' => 1])->save();
+
+        $this->travel(61)->minutes();
+
+        $this->assertSame(1, app(ReconcileHostingNodes::class)->execute()['drifts']);
+
+        $drift = ResourceDrift::query()->sole();
+        $this->assertSame(DriftKind::MissingAtProvider, $drift->kind);
+        $this->assertSame(DriftSeverity::Critical, $drift->severity);
+        $this->assertSame('neverbuilt', $drift->provider_reference);
+        $this->assertSame('pending', $drift->expected['status'] ?? null);
+        $this->assertSame($row->updated_at?->toIso8601String(), $drift->expected['pending_since'] ?? null);
+    }
+
+    #[Test]
+    public function an_order_that_takes_a_slot_while_the_panel_is_answering_is_not_a_ledger_drift(): void
+    {
+        /*
+         * The node was read before its listing was asked for. An order that
+         * reserved a slot on it meanwhile moved account_count to 1 and added
+         * its pending row; compared against the count read before, the
+         * ledger looked one short and a spec_mismatch was recorded.
+         */
+        config(['hosting.scheduler.max_disk_used_percent' => 100]);
+        $this->node->forceFill(['max_accounts' => 10, 'disk_total_mib' => 1_048_576, 'disk_used_mib' => 0])->save();
+        $customer = Customer::factory()->create();
+        $package = HostingPackage::factory()->create();
+        $node = $this->node;
+        $panel = $this->panel;
+
+        $during = Mockery::mock(HostingProvider::class);
+        $during->shouldReceive('listAccounts')->once()->andReturnUsing(static function () use ($node, $panel, $customer, $package): array {
+            app(ReserveHostingNodeCapacity::class)->execute(
+                node: HostingNode::query()->findOrFail($node->getKey()),
+                username: 'neworder',
+                primaryDomain: 'neworder.example.test',
+                customerId: (string) $customer->getKey(),
+                package: $package,
+            );
+
+            return $panel->listAccounts($node);
+        });
+        app(HostingProviderFactory::class)->swap($this->node, $during);
+
+        $outcome = app(ReconcileHostingNodes::class)->execute();
+
+        $this->assertSame(1, $this->node->fresh()?->account_count, 'The reservation did not happen during the listing.');
+        $this->assertSame(1, $outcome['accounts']);
+        $this->assertSame(0, ResourceDrift::query()->where('kind', DriftKind::SpecMismatch->value)->count(), 'A ledger drift was recorded from a count read before the lock.');
+        $this->assertSame(0, $outcome['drifts']);
     }
 
     #[Test]

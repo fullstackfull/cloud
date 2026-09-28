@@ -8,8 +8,9 @@ happening, sweeps not advancing.
 A command that keeps failing raises `ScheduledCommandFailing` (warning, to the
 platform channel): it has failed three runs in a row, read from
 `lynomia_scheduled_command_consecutive_failures`, for five minutes. Each failed
-run counts once, so for `hosting:reconcile`, which runs every four hours, the
-alert comes no sooner than eight hours and five minutes after the first failure. The alert
+run counts once, when it finishes, so for `hosting:reconcile`, which runs every
+four hours, the alert comes no sooner than eight hours and five minutes after the
+time the first failed run was due to start. The alert
 names the command in its `command` label. A success resets the count, so the
 alert clears on the first run that succeeds.
 
