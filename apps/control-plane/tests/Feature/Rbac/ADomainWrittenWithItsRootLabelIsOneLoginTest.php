@@ -71,7 +71,7 @@ final class ADomainWrittenWithItsRootLabelIsOneLoginTest extends TestCase
     {
         $this->assertSame('ops@example.com', LoginAddress::normalise("ops@EXAMPLE.com{$stop}"));
         $this->assertSame('ops@οδος.gr', LoginAddress::normalise("ops@οδος.gr{$stop}"));
-        $this->assertSame('ops@ab--cd.com', LoginAddress::normalise("ops@AB--cd.com{$stop}"), 'A domain UTS #46 refuses keeps its root label.');
+        $this->assertSame('ops@ab--cd.com', LoginAddress::normalise("ops@AB--cd.com{$stop}"), 'A domain UTS #46 refuses with its label is stored without its root label all the same.');
 
         // Two stops are an empty label, not a root label: UTS #46 refuses the
         // domain, and it is kept as typed.

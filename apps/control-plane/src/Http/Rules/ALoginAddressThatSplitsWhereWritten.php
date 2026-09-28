@@ -24,7 +24,9 @@ use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
  * Only where an address is first taken in: registration, the operator
  * invitation, the team invitation and the console bootstrap. Sign-in, forgot
  * and reset only look up a login that already exists, and normalise() makes
- * the lookup find it however its address is written. Refusing there locked
+ * the lookup find it however its address is written, among the spellings the
+ * `email` rule on those routes accepts (it refuses a trailing ASCII root label,
+ * so `ops@example.com.` must be typed without the dot there). Refusing there locked
  * people out of addresses that do receive mail (verifier of round eight, on
  * 9bbf092, where this required UTS #46 to accept the domain and so refused
  * `x@mail.ab--cd.example.com`). A domain UTS #46 refuses is not refused
