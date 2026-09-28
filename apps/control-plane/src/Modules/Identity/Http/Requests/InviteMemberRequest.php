@@ -6,7 +6,7 @@ namespace Lynomia\Modules\Identity\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
-use Lynomia\Http\Rules\ALoginAddressThatDelivers;
+use Lynomia\Http\Rules\ALoginAddressThatSplitsWhereWritten;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 
@@ -40,7 +40,7 @@ final class InviteMemberRequest extends FormRequest
              * become a customer. An address that does not resolve fails at the
              * only moment that proves anything, which is delivery.
              */
-            'email' => ['required', 'string', 'email:rfc', 'max:254', new ALoginAddressThatDelivers],
+            'email' => ['required', 'string', 'email:rfc', 'max:254', new ALoginAddressThatSplitsWhereWritten],
             'role' => ['required', 'string', Rule::in(CustomerRole::assignableValues())],
         ];
     }

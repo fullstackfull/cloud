@@ -14,7 +14,6 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
 use Lynomia\Http\Responses\ApiError;
 use Lynomia\Http\Responses\ErrorCatalogue;
-use Lynomia\Http\Rules\ALoginAddressThatDelivers;
 use Lynomia\Modules\Identity\Application\Actions\NotifyAboutAccountSecurity;
 use Lynomia\Modules\Identity\Application\Actions\RecordLoginActivity;
 use Lynomia\Modules\Identity\Domain\Enums\LoginOutcome;
@@ -26,7 +25,7 @@ final class PasswordResetController
     public function sendLink(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'email' => ['required', 'string', 'email', 'max:255', new ALoginAddressThatDelivers],
+            'email' => ['required', 'string', 'email', 'max:255'],
         ]);
 
         Password::sendResetLink(['email' => LoginAddress::normalise($validated['email'])]);
@@ -48,7 +47,7 @@ final class PasswordResetController
     {
         $validated = $request->validate([
             'token' => ['required', 'string'],
-            'email' => ['required', 'string', 'email', 'max:255', new ALoginAddressThatDelivers],
+            'email' => ['required', 'string', 'email', 'max:255'],
             'password' => ['required', 'string', 'confirmed', PasswordRule::defaults()],
         ]);
 

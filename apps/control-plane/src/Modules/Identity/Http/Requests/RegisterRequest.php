@@ -7,7 +7,7 @@ namespace Lynomia\Modules\Identity\Http\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
-use Lynomia\Http\Rules\ALoginAddressThatDelivers;
+use Lynomia\Http\Rules\ALoginAddressThatSplitsWhereWritten;
 use Lynomia\Modules\Billing\Domain\Services\BillingCurrencies;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerType;
 use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
@@ -32,7 +32,7 @@ final class RegisterRequest extends FormRequest
              * where the collision is handled, and it handles it by saying
              * nothing.
              */
-            'email' => ['required', 'string', 'email:rfc,strict', 'max:255', new ALoginAddressThatDelivers],
+            'email' => ['required', 'string', 'email:rfc,strict', 'max:255', new ALoginAddressThatSplitsWhereWritten],
             'password' => ['required', 'string', 'confirmed', Password::defaults()],
 
             'account_type' => ['sometimes', Rule::enum(CustomerType::class)],

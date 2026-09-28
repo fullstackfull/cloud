@@ -93,16 +93,17 @@ use Normalizer;
  * `ops@company.test@evil.test`), and a no-break or other Unicode space maps
  * to U+0020, which trim() took off the end on a second pass (verifier of
  * round eight, on 2698318). Kept as typed, such an address splits where it
- * was written and normalises the same twice; deliversAsWritten() says it
- * does not deliver, and every route that takes a login address refuses it
- * for that (Lynomia\Http\Rules\ALoginAddressThatDelivers).
+ * was written and normalises the same twice; splitsWhereWritten() says it
+ * would not be delivered where it is written, and every route where an
+ * address is first taken in refuses it for that
+ * (Lynomia\Http\Rules\ALoginAddressThatSplitsWhereWritten).
  *
  * Measured, for every code point placed in four label contexts (4,448,124
  * domains), the stored address read at its own last `@`: wherever UTS #46
  * accepts the domain as typed and maps it to no `@`, separator or control
  * character (593,507), the stored domain has the same ASCII form; where it
- * maps it to one (284), deliversAsWritten() refuses every one; wherever UTS
- * #46 refuses the domain as typed, it refuses the stored one too. The
+ * maps it to one (284), splitsWhereWritten() refuses every one; wherever
+ * UTS #46 refuses the domain as typed, it refuses the stored one too. The
  * address as a whole is trimmed (trim()) before any of this, so an ASCII
  * space at its end is not part of the domain.
  *
@@ -114,8 +115,9 @@ use Normalizer;
  * idn_to_utf8() from ext-intl (ICU 74.2 where this was measured). Without
  * the extension nothing fails — symfony/polyfill-intl-normalizer and
  * symfony/polyfill-intl-idn, installed because symfony/mime, symfony/string
- * and egulias/email-validator require them, define both — but the polyfill's IDNA tables are not ICU's,
- * and a domain could be stored in another spelling. The extension is
+ * and egulias/email-validator require them, define both — but the
+ * polyfill's IDNA tables are not ICU's, and a domain could be stored in
+ * another spelling. The extension is
  * provisioned by the php_fpm role (`php_fpm_extensions` in
  * infrastructure/ansible/roles/php_fpm/defaults/main.yml) and named in the
  * setup-php steps of .github/workflows/ci.yml, and
@@ -181,37 +183,47 @@ final class LoginAddress
     }
 
     /**
-     * Whether the address, stored in its one spelling, is delivered where it
-     * was written: a local part, a last `@`, and a domain that is an address
-     * literal (`[192.0.2.1]`, `[IPv6:…]`) or one UTS #46 processing accepts
-     * and whose ASCII form is labels of letters, digits, hyphens and
-     * underscores, joined by dots.
+     * Whether the address would be delivered where it is written: it has an
+     * `@`, and the compatibility form (NFKC) of its domain as typed — which
+     * is where UTS #46's mapping of these comes from, and which keeps any
+     * separator or control character the domain holds — has no `@`, no
+     * separator (\p{Z}) and no control character (\p{Cc}).
      *
-     * Not so, for one: an `@` or a space that the domain's mapping produces
-     * (`ops@company.test＠evil.test`, `ops@example.test` + U+00A0), which
-     * `email:rfc,strict` accepts and normalise() keeps as typed. The rule
-     * every route that takes a login address applies
-     * (Lynomia\Http\Rules\ALoginAddressThatDelivers) refuses what this
-     * refuses.
+     * That is exactly the harm found: `＠` (U+FF20) and `﹫` (U+FE6B), whose
+     * compatibility form and UTS #46 mapping is `@` (`ops@company.test＠evil.test`
+     * read at its last `@` once mapped names evil.test), and a no-break or
+     * other Unicode space, whose form is U+0020 — all accepted by
+     * `email:rfc,strict`, all kept as typed by normalise() (verifier of round
+     * eight, on 2698318). Nothing else is asked of the domain: one UTS #46
+     * refuses — `--` in a label's third and fourth positions,
+     * `x@mail.ab--cd.example.com`, `u@xn--bad.com` — receives mail, and is
+     * not refused here (verifier of round eight, on 9bbf092, where this
+     * required UTS #46 to accept it).
+     *
+     * The rule where an address is first taken in
+     * (Lynomia\Http\Rules\ALoginAddressThatSplitsWhereWritten) refuses what
+     * this refuses.
+     *
+     * Measured, for every code point placed in four label contexts (4,448,124
+     * domains): of those UTS #46 accepts, this refuses the 284 whose mapping
+     * holds an `@`, a separator or a control character and none other; of
+     * those UTS #46 refuses (3,854,333), it refuses 140, each with a C1
+     * control (U+0080–U+009F), the Ogham space mark (U+1680) or a line or
+     * paragraph separator (U+2028, U+2029) standing in the domain as typed.
      */
-    public static function deliversAsWritten(string $address): bool
+    public static function splitsWhereWritten(string $address): bool
     {
-        $normalised = self::normalise($address);
-        $at = strrpos($normalised, '@');
+        $trimmed = trim($address);
+        $at = strrpos($trimmed, '@');
 
-        if ($at === false || $at === 0) {
+        if ($at === false) {
             return false;
         }
 
-        $domain = substr($normalised, $at + 1);
+        $typed = substr($trimmed, $at + 1);
+        $compatible = Normalizer::normalize($typed, Normalizer::FORM_KC);
 
-        if (preg_match('/^\[[0-9A-Za-z:.]+\]$/', $domain) === 1) {
-            return true;
-        }
-
-        $ascii = $domain === '' ? false : idn_to_ascii($domain, self::IDNA_OPTIONS, INTL_IDNA_VARIANT_UTS46);
-
-        return is_string($ascii) && preg_match('/^[a-z0-9_-]+(\.[a-z0-9_-]+)*$/', $ascii) === 1;
+        return preg_match(self::SPLITS_OR_TRIMS, $compatible === false ? $typed : $compatible) !== 1;
     }
 
     /**
