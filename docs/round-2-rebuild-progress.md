@@ -272,3 +272,8 @@ earlier one; a renewal already issued at the new price; an over-credit after a
 middle plan), each repaired, and then upheld it with reservations none in a
 blocking class. Merged `0300c47` (tip `1526c06`). New operator route:
 `POST /api/admin/provisioning/jobs/{job}/return-payment`.
+
+**Closed.** Full suite at `f8906c1`: 6,220/6,220, 801 suites `skipped="0"`, exit 0;
+`make infra-validate` 0 at `2d89da4`. Adjudication recorded in
+`docs/final-audit-after-round-9.md`: `SOFTWARE_CODE_COMPLETE = YES` under the owner's
+closure threshold; the frozen statuses stay NOT READY / NONE.
