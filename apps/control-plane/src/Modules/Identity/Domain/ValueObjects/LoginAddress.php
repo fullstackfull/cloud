@@ -105,7 +105,41 @@ use Normalizer;
  * maps it to one (284), splitsWhereWritten() refuses every one; wherever
  * UTS #46 refuses the domain as typed, it refuses the stored one too. The
  * address as a whole is trimmed (trim()) before any of this, so an ASCII
- * space at its end is not part of the domain.
+ * space at its end is not part of the domain. None of those four contexts
+ * ends the domain with a full stop; the root label, below, is the one change
+ * made to a domain that does.
+ *
+ * ---------------------------------------------------------------------------
+ * The root label
+ * ---------------------------------------------------------------------------
+ *
+ * A domain may end with its root label: a final full stop, written `.` or as
+ * one of the three other characters UTS #46 treats as a label separator,
+ * `。` (U+3002), `．` (U+FF0E) and `｡` (U+FF61). `example.com。` and
+ * `example.com` are one name to a resolver, and mail is addressed to the
+ * second: the mailer refuses an address ending in `.`. UTS #46 keeps the root
+ * label (as `.`), so `ops@EXAMPLE.com。` — which `email:rfc,strict` accepts
+ * as typed — used to be stored `ops@example.com.`: a second login beside
+ * `ops@example.com`, under an address nothing could send to (B9-1, re-audit
+ * after round eight).
+ *
+ * So one final separator, after a character that is neither a separator nor
+ * one trim() strips, is taken off the domain before anything else, and the
+ * rest is treated as above — whether UTS #46 then accepts it or refuses it
+ * (`ops@AB--cd.com。` is stored `ops@ab--cd.com`, as `ops@AB--cd.com` is).
+ * Those four are the only code points UTS #46 maps to a separator (every
+ * code point c, as `a` c `b`, measured with ICU 74.2); `﹒` (U+FE52) is not
+ * one of them — UTS #46 refuses a domain holding it, and it is kept as typed.
+ * Two final separators are an empty label and not a root label: UTS #46
+ * refuses the domain, and it is kept as typed. A domain holding nothing but
+ * a separator (`ops@。`) keeps it.
+ *
+ * Measured, for every code point c followed by each of the four separators
+ * in three contexts (`a` c `.gr`, `x.` c `Σ`, and c alone; 13,344,372
+ * domains), against the same domain typed without the separator: the stored
+ * address is the same in every case but 20, which are c alone where c is a
+ * space or one of the four separators; and normalising the stored address
+ * again changes nothing in any of them.
  *
  * ---------------------------------------------------------------------------
  * ext-intl
@@ -143,6 +177,13 @@ final class LoginAddress
     /** An `@`, a separator (\p{Z}) or a control character (\p{Cc}): between them, every byte trim() strips. */
     private const string SPLITS_OR_TRIMS = '/[@\p{Z}\p{Cc}]/u';
 
+    /**
+     * A final `.`, `。` (U+3002), `．` (U+FF0E) or `｡` (U+FF61) — the four
+     * code points UTS #46 maps to a label separator — after a character that
+     * is neither one of them nor one trim() strips.
+     */
+    private const string ROOT_LABEL = '/(?<=[^.\x{3002}\x{FF0E}\x{FF61} \t\n\r\0\x0B])[.\x{3002}\x{FF0E}\x{FF61}]\z/u';
+
     public static function normalise(string $address): string
     {
         $trimmed = trim($address);
@@ -162,6 +203,11 @@ final class LoginAddress
 
     private static function domain(string $domain): string
     {
+        // The root label, written as a final full stop UTS #46 treats as a
+        // label separator, is not part of the stored domain; see "The root
+        // label" above.
+        $domain = preg_replace(self::ROOT_LABEL, '', $domain) ?? $domain;
+
         if ($domain !== '') {
             $ascii = idn_to_ascii($domain, self::IDNA_OPTIONS, INTL_IDNA_VARIANT_UTS46);
             $unicode = $ascii === false ? false : idn_to_utf8($ascii, self::IDNA_OPTIONS, INTL_IDNA_VARIANT_UTS46);

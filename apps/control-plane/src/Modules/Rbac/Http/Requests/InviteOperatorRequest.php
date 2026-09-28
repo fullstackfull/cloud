@@ -6,7 +6,7 @@ namespace Lynomia\Modules\Rbac\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
-use Lynomia\Http\Rules\ALoginAddressThatSplitsWhereWritten;
+use Lynomia\Http\Rules\LoginAddressAtIntake;
 use Lynomia\Modules\Rbac\Application\Actions\InviteOperator;
 
 final class InviteOperatorRequest extends FormRequest
@@ -23,7 +23,9 @@ final class InviteOperatorRequest extends FormRequest
     {
         return [
             'email' => [
-                'required', 'string', 'email', 'max:255', new ALoginAddressThatSplitsWhereWritten,
+                // Applied to the address as it will be stored; see
+                // prepareForValidation().
+                ...LoginAddressAtIntake::rules(),
                 /*
                  * An address that already holds a staff role is refused rather
                  * than quietly re-roled: this endpoint reads as "add an
@@ -43,6 +45,19 @@ final class InviteOperatorRequest extends FormRequest
             'roles' => ['present', 'array'],
             'roles.*' => ['string', Rule::in(ChangeOperatorRolesRequest::assignable())],
         ];
+    }
+
+    /**
+     * The address is validated as it will be stored (LoginAddressAtIntake):
+     * it used to be validated as typed, so `ops@EXAMPLE.com。` passed and was
+     * stored `ops@example.com.`, and an address that grows when lowercased
+     * passed `max:255` and overflowed the column (B9-1, X9-2).
+     */
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('email')) {
+            $this->merge(['email' => LoginAddressAtIntake::asStored($this->input('email'))]);
+        }
     }
 
     /**

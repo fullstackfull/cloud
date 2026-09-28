@@ -17,7 +17,12 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
  * Failures are recorded even when no account matches the address, because the
  * pattern of attempts against non-existent accounts is exactly what reveals
  * credential-stuffing. The attempted address is stored; the attempted password
- * never is.
+ * never is. It is stored normalised (LoginAddress), and clipped to the
+ * column's 255 characters: sign-in takes no address in, so nothing measured
+ * it as stored, and an address that grows when lowercased (130 `İ`, 142
+ * characters as typed, 272 normalised) used to fail the insert with a 500
+ * (X9-2, re-audit after round eight). Nothing in src/ or app/ reads the
+ * column back, so a clipped address is only what the history shows.
  *
  * A success is also the one place every completed sign-in passes through —
  * the password-only path and the second-factor path alike — so it is where a
@@ -27,6 +32,9 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
  */
 final readonly class RecordLoginActivity
 {
+    /** login_activities.email_attempted is varchar(255). */
+    private const int EMAIL_ATTEMPTED_LENGTH = 255;
+
     public function __construct(
         private NotifyAboutAccountSecurity $security,
     ) {}
@@ -39,7 +47,7 @@ final readonly class RecordLoginActivity
     ): LoginActivity {
         $activity = LoginActivity::create([
             'user_id' => $user?->id,
-            'email_attempted' => $emailAttempted !== null ? LoginAddress::normalise($emailAttempted) : null,
+            'email_attempted' => $emailAttempted !== null ? mb_substr(LoginAddress::normalise($emailAttempted), 0, self::EMAIL_ATTEMPTED_LENGTH) : null,
             'outcome' => $outcome,
             'ip_address' => $request->ip(),
             'user_agent' => substr((string) $request->userAgent(), 0, 1000),
