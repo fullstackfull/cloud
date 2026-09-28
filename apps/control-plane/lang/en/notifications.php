@@ -79,6 +79,10 @@ return [
             'title' => 'The plan change for :service was not made',
             'body' => 'The plan change for :service could no longer be made when your payment arrived, so :service has not been changed. :amount has been returned to your wallet.',
         ],
+        'plan_change_returned_at_the_end' => [
+            'title' => 'The plan change for :service was not completed',
+            'body' => ':service ended before the plan change you paid for was completed, so what you paid for the change and had not already been refunded, :amount, has been returned to your wallet.',
+        ],
         'cancellation_scheduled' => [
             'title' => ':service is scheduled to end',
             'body' => ':service will end on :date. You will keep full use of it until then. Your data is kept for :retention_days days after that, and destroyed once that time is up.',
@@ -131,7 +135,7 @@ return [
         ],
         'plan_change_failed_after_payment' => [
             'title' => 'Could not change the plan for :service',
-            'body' => 'The plan change for :service did not complete. Your subscription is on the new plan, and a renewal before the change is completed is billed at its price. What you paid for the change is held until our team either completes the change or returns the payment to you.',
+            'body' => 'The plan change for :service did not complete. Your subscription is on the new plan, and a renewal before the change is completed is billed at its price. What you paid for the change is held until our team either completes the change or returns the payment to you. If :service ends before then, the payment is returned to your wallet.',
         ],
         'plan_change_needs_review' => [
             'title' => 'The plan change for :service is waiting for our team',

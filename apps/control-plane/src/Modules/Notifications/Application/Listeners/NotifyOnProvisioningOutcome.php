@@ -10,6 +10,7 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
+use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobFailed;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobNeedsReview;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobSucceeded;
@@ -136,7 +137,7 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
     {
         $service = $this->service($event->serviceId);
 
-        if ($service === null) {
+        if ($service === null || $this->aPaidChangeOnAnEndedService($event->kind, $event->provisioningJobId, $service)) {
             return;
         }
 
@@ -149,7 +150,8 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
              * upgrade discovering months later that they never got it. And
              * telling them what happened to the money: held for an operator
              * after a paid upgrade, nothing charged after a change that owed
-             * nothing (wasPaidFor()).
+             * nothing (wasPaidFor()). A paid upgrade whose service has ended
+             * is not held, and is not told this (aPaidChangeOnAnEndedService()).
              */
             $this->isAPlanChange($event->kind) => $this->wasPaidFor($event->provisioningJobId)
                 ? NotificationType::PlanChangeFailedAfterPayment
@@ -178,7 +180,7 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
     {
         $service = $this->service($event->serviceId);
 
-        if ($service === null) {
+        if ($service === null || $this->aPaidChangeOnAnEndedService($event->kind, $event->provisioningJobId, $service)) {
             return;
         }
 
@@ -193,8 +195,8 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
          * message for a change paid for and one that owed nothing, so the
          * payment is spoken of conditionally, which is true of both. A resize the
          * node can no longer hold ends here after its retries, with the money
-         * held for an operator to grow the machine or return it
-         * (ResizeVpsHandler), and the build's message - setting the service up
+         * held for an operator to grow the machine or return it, or returned
+         * without one when the service ends first (ResizeVpsHandler), and the build's message - setting the service up
          * did not finish - told the customer nothing about either.
          */
         $this->notify->execute(
@@ -262,6 +264,22 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
      * any other is read as a change that owed nothing, and its failure is
      * told that nothing was charged.
      */
+    private function aPaidChangeOnAnEndedService(ProvisioningJobKind $kind, string $provisioningJobId, Service $service): bool
+    {
+        /*
+         * A paid change whose job stops once its service has ended is not
+         * held: its payment goes back to the wallet as the job stops
+         * (ReturnAPaidChangeWhoseDeliveryStopped), and the customer is told
+         * that (`billing.plan_change_returned_at_the_end`). The failed or
+         * in-review message says the payment is held until the change is
+         * made or returned - not true of a change nothing can make any more -
+         * so it is not sent beside it.
+         */
+        return $this->isAPlanChange($kind)
+            && $service->status === ServiceStatus::Terminated
+            && $this->wasPaidFor($provisioningJobId);
+    }
+
     private function wasPaidFor(string $provisioningJobId): bool
     {
         $key = ProvisioningJob::query()->whereKey($provisioningJobId)->value('idempotency_key');

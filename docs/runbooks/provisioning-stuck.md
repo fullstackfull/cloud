@@ -186,13 +186,55 @@ POST /admin/provisioning/jobs/{job}/close      # evidence required
 The needs-review list marks such a job `closable`, and the portal offers
 **Close the job** on it. Closing moves the job to `cancelled` without running
 it, records who closed it on the job and in the audit trail
-(`provisioning.closed`, with your evidence), asks nothing of any provider and
-moves no money. It is refused (409) for a job not in review
+(`provisioning.closed`, with your evidence), and asks nothing of any provider.
+It moves money in one case: a resize or package change delivering a **paid**
+plan change (its key ends `:invoice:<INVOICE_ULID>`) has what that invoice
+still holds returned to the customer's wallet with the close, in the same
+transaction - a `subscription.plan_changed` audit entry with the reason
+`plan_change_not_delivered_before_the_end`, the change stamped `returned_at`,
+and the customer told once. Usually the service's end has already returned it,
+and the close returns nothing more; a close whose return fails is refused, so
+the job stays on the list. It is refused (409) for a job not in review
 (`provisioning.close_not_in_review`), for a build, a destroy, a rebuild or a
 WordPress job (`provisioning.close_not_for_this_kind` — a build or a destroy
 may have left a resource: §4), and while the service has not ended
 (`provisioning.close_service_not_ended` — retry it instead). It needs the
 `provisioning.retry` permission, as retry and adopt do.
+
+**A paid plan change whose job stopped on a live service.** A resize or package
+change queued under `plan-change:<SUBSCRIPTION>:<PLAN>:invoice:<INVOICE_ULID>`
+that is in review or `failed` while its service is still live holds the
+customer's payment for the change: nothing returns it automatically while the
+service lives (`docs/billing.md`). It is returned without you only if the
+service ends first. The customer has been told the payment is held until the
+change is made or returned. Decide which:
+
+1. **Complete it.** Make the room or fix the cause, then retry the job
+   (`POST /admin/provisioning/jobs/{job}/retry`). A retry that succeeds
+   delivers the change, and nothing is returned.
+2. **Return it**, when it cannot be delivered. Find the charge on the invoice
+   and refund what the invoice still holds:
+
+   ```sql
+   SELECT id, provider, amount_minor FROM transactions
+    WHERE invoice_id = '<INVOICE_ULID>' AND kind = 'charge' AND status = 'succeeded';
+   ```
+
+   ```
+   POST /admin/transactions/{transaction}/refunds   # amount_minor, reason required
+   ```
+
+   A charge paid from the wallet is refunded to the wallet; a card charge to
+   the card. It needs the `payment.refund` permission. Do not retry the job
+   afterwards: a retry that then succeeds delivers a change already refunded.
+   What the refund does **not** do: move the subscription back to the plan it
+   came from - it stays on the new plan, and a renewal bills its price (the
+   customer's messages say so). No operator route moves a subscription's plan.
+   The customer can change the plan back themselves once the job is not in
+   review (a job in review holds every plan change, `service_busy`); a job in
+   review on a live service stays there until the service ends, when it is
+   closable, and the close then returns nothing more - the refund already took
+   what the invoice held.
 
 ## 7. If nothing above fits
 

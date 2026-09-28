@@ -17,7 +17,12 @@ use Illuminate\Database\Eloquent\Model;
  * settlement listener then stamps at most one of `delivered_at` (heard while
  * the subscription was live) or `returned_at` with `return_reason` (the change
  * could no longer be delivered when its payment was captured, and the money
- * went back to the wallet), and nothing else on it is ever updated. The
+ * went back to the wallet). `returned_at` and `return_reason` are also
+ * stamped when the change's payment goes back because its subscription or
+ * its service ended before it was delivered (ReturnAnUpgradeTheEndPrevented)
+ * - after `delivered_at`, for a change whose settlement was heard and whose
+ * resize then stopped on a service that ended. Nothing else on it is ever
+ * updated. The
  * settlement listener reads it to build the machine to
  * what a paid invoice bought, and the period's credit ceiling reads
  * `wallet_credit_minor` to know what earlier changes already gave back.
@@ -37,8 +42,8 @@ use Illuminate\Database\Eloquent\Model;
  * @property ?string $changed_by_user_id
  * @property CarbonImmutable $changed_at
  * @property ?CarbonImmutable $delivered_at when its settlement was heard while the subscription was live
- * @property ?CarbonImmutable $returned_at when its settlement returned it undelivered, because it could no longer be delivered
- * @property ?string $return_reason why, in an operator's words (PlanChangeDelivery::refusal())
+ * @property ?CarbonImmutable $returned_at when its payment went back undelivered: at its settlement, because it could no longer be delivered, or at the end of its subscription or service
+ * @property ?string $return_reason why, in an operator's words (PlanChangeDelivery::refusal(), or ReturnAnUpgradeTheEndPrevented's)
  */
 final class PlanChange extends Model
 {

@@ -27,10 +27,16 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * delivering nothing and keeping the money.
  *
  * The rule: a paid plan change its settlement finds can no longer be
- * delivered goes back. Only that: a change that fails after its settlement
- * (a resize or package change that fails outright or stops in review), or
- * whose settlement is never heard, is not returned here - its money is held
- * for an operator to complete the change or return it (docs/billing.md).
+ * delivered goes back, here. A change that fails after its settlement (a
+ * resize or package change that fails outright or stops in review), or whose
+ * settlement is never heard, is not returned here. While its service lives,
+ * its money is held for an operator to complete the change or return it
+ * (docs/billing.md, and docs/runbooks/provisioning-stuck.md §6 for how). When
+ * its service ends with the change undelivered - the job stopped, or closed,
+ * on a service that has ended - the money goes back to the wallet then
+ * (ReturnAnUpgradeTheEndPrevented), without an operator. This paragraph used
+ * to say that nothing else returned such a change, which was the defect's
+ * other half: the end kept it (R10-M, the final audit).
  * The payment of a proration invoice asks whether the change can still be
  * delivered (PlanChangeDelivery::refusalForTheInvoice()) when the payment is
  * opened, but a card payment is captured later, at the provider, and an

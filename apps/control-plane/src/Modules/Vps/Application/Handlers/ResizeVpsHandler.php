@@ -201,7 +201,12 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  * fills and empties, and room made by a destroy is room this job can use -
  * and when the attempts run out the job stops in review, never failed: the
  * upgrade stays on the operator's list and on lynomia_plan_change_total until
- * a person grows the machine or returns the money. It is never reported done
+ * a person grows the machine (a retry) or returns the money (a refund of the
+ * charge, docs/runbooks/provisioning-stuck.md §6), or until the service ends:
+ * the money then goes back to the wallet without a person
+ * (ReturnAnUpgradeTheEndPrevented), and the job is closed off the list
+ * (CloseAJobWhoseServiceEnded), which returns it if nothing has yet. It used
+ * to be kept once the service ended (R10-M, the final audit). It is never reported done
  * and never grown onto room the node does not have; the customer is told the
  * change is waiting for the team and what they paid is held
  * (NotifyOnProvisioningOutcome, plan_change_needs_review). The plan-change

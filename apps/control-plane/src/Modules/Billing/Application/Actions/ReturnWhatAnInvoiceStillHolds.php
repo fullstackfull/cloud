@@ -21,7 +21,8 @@ use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
  * (CreditWhatACancelledOrderPaid), an upgrade that lapsed unpaid
  * (RenewSubscription), the open invoices of a subscription that has ended
  * (CancelSubscription, EndTheSubscriptionWithItsService), a paid upgrade
- * that ending prevented from being delivered (ReturnAnUpgradeTheEndPrevented),
+ * that the end of its subscription or its service prevented from being
+ * delivered (ReturnAnUpgradeTheEndPrevented),
  * and a paid plan change that could no longer be delivered when its payment
  * was captured (ReturnAPlanChangeNoLongerDeliverable).
  * Each used to carry
