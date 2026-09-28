@@ -15,6 +15,7 @@ use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Services\TaxResolver;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
+use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
@@ -26,6 +27,7 @@ use Lynomia\Modules\Subscriptions\Application\Listeners\RestorePlanOnVoidedUpgra
 use Lynomia\Modules\Subscriptions\Application\Queries\MoneyCollectedForThePeriod;
 use Lynomia\Modules\Subscriptions\Domain\Enums\PlanChangeRefusal;
 use Lynomia\Modules\Subscriptions\Domain\Exceptions\PlanChangeRefusedException;
+use Lynomia\Modules\Subscriptions\Domain\ValueObjects\PlanResources;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Vps\Application\Handlers\ResizeVpsHandler;
@@ -102,6 +104,12 @@ use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
  */
 final readonly class ApplyPlanChange
 {
+    /**
+     * How many times execute() reads the machine before it refuses a change
+     * whose machine's row moved after each reading.
+     */
+    private const int READINGS = 3;
+
     public function __construct(
         private QuotePlanChange $quotes,
         private ChangeSubscriptionPlan $changePlan,
@@ -146,10 +154,56 @@ final readonly class ApplyPlanChange
          * its locks, and the quote under them asks with that reading: a
          * hypervisor read under the subscription's lock held it, and the
          * orders' and invoices', for as long as the hypervisor took (B2).
+         *
+         * A reading is as old as the moment it was taken. A resize that
+         * completes between it and the subscription's lock has left no job
+         * queued, running or in review, so the quote's ServiceBusy question
+         * passes, and the quote measured from the reading: a downgrade back
+         * off the upgrade that resize delivered read as no change of shape,
+         * was credited, and queued no resize - the machine stayed large at
+         * the small plan's price (A9-1, the re-audit after round eight). So
+         * the machine's row is taken before the reading and again under the
+         * locks, after the quote; every resize that completes writes the
+         * row (ResizeVpsHandler), and a row that moved means the reading
+         * predates a resize. Nothing has been written by then; the
+         * transaction ends, and the machine is read again, outside the
+         * locks. A row that moves under each of READINGS attempts is refused
+         * as busy (409 service_busy), which the customer can simply try
+         * again.
          */
-        $runs = $this->quotes->whatTheMachineRuns($subscription);
+        for ($reading = 1; ; $reading++) {
+            $rowAtTheReading = $this->quotes->whatTheRowSays($subscription);
+            $runs = $this->quotes->whatTheMachineRuns($subscription);
 
-        return DB::transaction(function () use ($subscription, $plan, $price, $actor, $runs): PlanChangeOutcome {
+            $outcome = $this->underTheLocks($subscription, $plan, $price, $actor, $runs, $rowAtTheReading);
+
+            if ($outcome !== null) {
+                return $outcome;
+            }
+
+            if ($reading >= self::READINGS) {
+                throw PlanChangeRefusedException::because([PlanChangeRefusal::ServiceBusy]);
+            }
+        }
+    }
+
+    /**
+     * The change, under the subscription's lock and the money's; null, with
+     * nothing written, when the machine's row moved after $rowAtTheReading
+     * was taken - the reading $runs is then older than a resize that
+     * completed, and execute() reads the machine again.
+     *
+     * @throws PlanChangeRefusedException
+     */
+    private function underTheLocks(
+        Subscription $subscription,
+        Plan $plan,
+        PlanPrice $price,
+        ?User $actor,
+        ?VmResources $runs,
+        ?PlanResources $rowAtTheReading,
+    ): ?PlanChangeOutcome {
+        return DB::transaction(function () use ($subscription, $plan, $price, $actor, $runs, $rowAtTheReading): ?PlanChangeOutcome {
             /*
              * The subscription row is the mutex for everything below: a second
              * change for the same subscription waits here, and then finds the
@@ -174,6 +228,15 @@ final readonly class ApplyPlanChange
             $this->collected->lockTheInvoicesItDrawsOn($locked);
 
             $quote = $this->quotes->execute($locked, $plan, $price, runs: $runs);
+
+            /*
+             * Read after the quote asked ServiceBusy: a resize still queued,
+             * running or in review was refused there, and one that completed
+             * before that question wrote its row before it (execute()).
+             */
+            if (! $this->theRowStillSays($locked, $rowAtTheReading)) {
+                return null;
+            }
 
             if (! $quote->isAvailable()) {
                 /*
@@ -288,6 +351,21 @@ final readonly class ApplyPlanChange
                 invoice: $invoice,
             );
         });
+    }
+
+    /**
+     * Whether the machine's row still records the shape it did when the
+     * reading was taken (both absent, for a subscription with no machine).
+     */
+    private function theRowStillSays(Subscription $subscription, ?PlanResources $rowAtTheReading): bool
+    {
+        $row = $this->quotes->whatTheRowSays($subscription);
+
+        if ($row === null || $rowAtTheReading === null) {
+            return $row === null && $rowAtTheReading === null;
+        }
+
+        return ! $row->differsFrom($rowAtTheReading);
     }
 
     /**

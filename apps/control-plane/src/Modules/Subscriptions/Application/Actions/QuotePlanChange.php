@@ -80,6 +80,16 @@ final readonly class QuotePlanChange
     }
 
     /**
+     * The machine behind the subscription as its row records it
+     * (PlanChangeDelivery::whatTheRowSays()), for a caller that holds a
+     * reading to tell whether a resize completed after it was taken.
+     */
+    public function whatTheRowSays(Subscription $subscription): ?PlanResources
+    {
+        return $this->delivery->whatTheRowSays($subscription);
+    }
+
+    /**
      * Quote one target plan.
      */
     /**

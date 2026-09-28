@@ -234,6 +234,33 @@ final readonly class PlanChangeDelivery
      */
     public function whatTheMachineRuns(?Subscription $subscription): ?VmResources
     {
+        $machine = $this->machineBehind($subscription);
+
+        return $machine === null ? null : $this->commitment->whatItRuns($machine);
+    }
+
+    /**
+     * The VPS machine behind this subscription as its row (virtual_machines)
+     * records it - the shape the hypervisor last confirmed, written by every
+     * resize that completes; null when there is no such machine. A database
+     * read, no provider call.
+     *
+     * ApplyPlanChange takes it before its reading (whatTheMachineRuns()) and
+     * again under its locks, after the quote's ServiceBusy question: a row
+     * that moved in between is a resize that completed after the reading was
+     * taken, so the reading is stale and is taken again outside the locks.
+     */
+    public function whatTheRowSays(?Subscription $subscription): ?PlanResources
+    {
+        $machine = $this->machineBehind($subscription);
+
+        return $machine === null
+            ? null
+            : new PlanResources(vcpu: $machine->vcpu, memoryMib: $machine->memory_mib, diskGib: $machine->disk_gib);
+    }
+
+    private function machineBehind(?Subscription $subscription): ?VirtualMachine
+    {
         if ($subscription === null) {
             return null;
         }
@@ -247,7 +274,7 @@ final readonly class PlanChangeDelivery
         /** @var VirtualMachine|null $machine */
         $machine = VirtualMachine::query()->where('service_id', $service->getKey())->first();
 
-        return $machine === null ? null : $this->commitment->whatItRuns($machine);
+        return $machine;
     }
 
     /**
@@ -319,9 +346,20 @@ final readonly class PlanChangeDelivery
      * was then quoted from the row as no change of shape - credited, with no
      * resize queued, and the machine left large (A8-1, the re-audit after
      * round seven; B-1, its verification). A quote with a reading measures
-     * from the machine in any case, so even a row left behind is not a credit
-     * for a change the machine did not make; one without a reading measures
-     * from the row.
+     * from the reading, so a row left behind the machine is not a credit for
+     * a change the machine did not make; one without a reading measures from
+     * the row. The reading can be the one left behind instead: it is taken
+     * before the locks, and a resize that completes between it and them
+     * leaves no job busy. A downgrade quoted from it read as no change of
+     * shape, was credited and queued no resize (A9-1, the re-audit after
+     * round eight). ApplyPlanChange therefore takes the row
+     * (whatTheRowSays()) before its reading and again under its locks,
+     * after the quote asked ServiceBusy; a row that moved in between means
+     * a resize completed after the reading, and the change writes nothing
+     * and reads the machine again outside the locks - three times, then
+     * refuses as ServiceBusy. The payment and the settlement, which ask with
+     * a reading of their own, are not held to this: they do not measure a
+     * credit from it.
      *  - Otherwise the service's own recorded allocation where it has one,
      *    and else the plan given (the subscription's, or the one the change
      *    left).
