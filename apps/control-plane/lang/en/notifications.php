@@ -127,7 +127,7 @@ return [
         ],
         'plan_change_failed' => [
             'title' => 'Could not change the plan for :service',
-            'body' => 'The plan change for :service was recorded on your subscription, which is now on the new plan and billed at its price, but :service itself could not be changed to match and is still running as it was. Nothing has been charged for the change.',
+            'body' => 'The plan change for :service was recorded on your subscription, which is now on the new plan and billed at its price, but the change to :service itself did not complete. Nothing has been charged for the change.',
         ],
         'plan_change_failed_after_payment' => [
             'title' => 'Could not change the plan for :service',

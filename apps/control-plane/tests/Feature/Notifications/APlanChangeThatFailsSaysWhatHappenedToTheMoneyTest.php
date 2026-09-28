@@ -101,7 +101,7 @@ final class APlanChangeThatFailsSaysWhatHappenedToTheMoneyTest extends TestCase
         $this->assertStringNotContainsString('left as it was', $this->renderedBody('en'));
         $this->assertStringNotContainsString('وبقي كما كان', $this->renderedBody('ar'));
         $this->assertStringContainsString('now on the new plan and billed at its price', $this->renderedBody('en'));
-        $this->assertStringContainsString('still running as it was', $this->renderedBody('en'));
+        $this->assertStringContainsString('the change to web-01 itself did not complete', $this->renderedBody('en'));
         $this->assertStringContainsString('ويُفوتَر بسعرها', $this->renderedBody('ar'));
     }
 
@@ -151,6 +151,26 @@ final class APlanChangeThatFailsSaysWhatHappenedToTheMoneyTest extends TestCase
         $this->assertStringNotContainsString('كما كان', $this->renderedBody('ar'));
         $this->assertStringContainsString('may not match the new plan', $this->renderedBody('en'));
         $this->assertStringContainsString('قد لا يطابق', $this->renderedBody('ar'));
+    }
+
+    #[Test]
+    public function an_unpaid_change_whose_machine_a_destroy_removed_does_not_say_it_runs_as_it_was(): void
+    {
+        /*
+         * B-2 (the verification of round eight A): a plan-change resize a
+         * destroy overlapped ends vps.unknown_machine, permanent, and the
+         * customer read that the service "is still running as it was" - of a
+         * machine that is gone.
+         */
+        $job = $this->job(ProvisioningJobKind::Resize, 'plan-change:'.Str::ulid().':'.Str::ulid().':change:'.Str::ulid());
+
+        app(NotifyOnProvisioningOutcome::class)->failed(new ProvisioningJobFailed((string) $job->id, ProvisioningJobKind::Resize, (string) $this->service->id, FailureClass::Permanent, 'vps.unknown_machine'));
+
+        $this->assertStringNotContainsString('as it was', $this->renderedBody('en'));
+        $this->assertStringNotContainsString('running', $this->renderedBody('en'));
+        $this->assertStringNotContainsString('كما كان', $this->renderedBody('ar'));
+        $this->assertStringNotContainsString('يعمل', $this->renderedBody('ar'));
+        $this->assertStringContainsString('Nothing has been charged', $this->renderedBody('en'));
     }
 
     #[Test]

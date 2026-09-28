@@ -131,8 +131,11 @@ enum NotificationType: string
      * made, and nothing was charged for it: PlanChangeFailed says so, and -
      * because the subscription moved, with its price and any credit, when
      * the change was made - says the subscription is on the new plan while
-     * the service runs as it was (it used to say the change was "left as it
-     * was", which the re-audit after round six found false). An
+     * the change to the service did not complete (it used to say the change
+     * was "left as it was", which the re-audit after round six found false,
+     * and then that the service was "still running as it was", false of a
+     * machine a destroy removed while the resize ran - B-2, the verification
+     * of round eight A). An
      * upgrade is queued only once its proration invoice is paid, so its
      * failure has been charged, and the payment is held for an operator to
      * complete the change or return it: PlanChangeFailedAfterPayment. The one

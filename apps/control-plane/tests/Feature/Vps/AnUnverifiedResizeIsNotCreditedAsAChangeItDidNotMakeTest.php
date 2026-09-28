@@ -124,6 +124,77 @@ final class AnUnverifiedResizeIsNotCreditedAsAChangeItDidNotMakeTest extends Bil
         $this->assertSame($wallet, $this->walletOf($customer));
     }
 
+    #[Test]
+    public function an_unverified_resize_cannot_be_adopted_so_it_is_not_settled_without_the_row(): void
+    {
+        /*
+         * B-1 (the verification of round eight A): the operator's adoption,
+         * given any reference, settled the resize in review as succeeded
+         * with no row written; the service was no longer busy and the
+         * downgrade was credited 27.000 from the stale row.
+         */
+        [$customer, $user, $subscription, $machine, $small, $large, $resize] = $this->anUnverifiedUpgrade();
+
+        foreach (['resize-of-'.$machine->provider_id, (string) $machine->provider_id] as $reference) {
+            $this->actingAs($this->operator())
+                ->postJson('/api/admin/provisioning/jobs/'.$resize->id.'/adopt', ['provider_reference' => $reference, 'evidence' => 'Looked at the machine at the node.'])
+                ->assertStatus(409)
+                ->assertJsonPath('error.code', 'provisioning.adoption_not_a_build');
+        }
+
+        $this->assertSame(ProvisioningJobStatus::NeedsReview, $resize->refresh()->status);
+
+        $wallet = $this->walletOf($customer);
+        $this->assertNotSame(200, $this->changePlan($user, $subscription, $small, 'a8-1-down-000003')->status());
+        $this->assertSame($wallet, $this->walletOf($customer), 'A change of shape the machine did not make was credited.');
+        $this->assertSame((string) $large->id, (string) $subscription->fresh()?->plan_id);
+    }
+
+    #[Test]
+    public function a_row_left_behind_the_machine_is_not_measured_from_when_the_machine_is_read(): void
+    {
+        /*
+         * Belt and braces: however a row came to be behind its machine, a
+         * quote holding a reading of the machine measures the change of
+         * shape from the reading. Here the job is made to stop holding the
+         * service by hand - the state no code path now leaves - and the
+         * downgrade is still a change of shape that would shrink the disk.
+         */
+        [$customer, $user, $subscription, , $small] = $this->anUnverifiedUpgrade();
+        ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->update(['status' => ProvisioningJobStatus::Failed->value]);
+
+        $option = $this->optionFor($user, $subscription, $small);
+        $this->assertTrue($option['changes_infrastructure'] ?? null, json_encode($option));
+        $this->assertSame(['vcpu' => 8, 'memory_mib' => 16384, 'disk_gib' => 160], $option['current_resources'] ?? null);
+        $this->assertContains('would_shrink_disk', $option['refusals'] ?? []);
+
+        $wallet = $this->walletOf($customer);
+        $this->assertNotSame(200, $this->changePlan($user, $subscription, $small, 'a8-1-down-000004')->status());
+        $this->assertSame($wallet, $this->walletOf($customer));
+    }
+
+    #[Test]
+    public function a_disk_the_reading_puts_below_the_row_is_measured_from_the_row(): void
+    {
+        /*
+         * Measured from the reading, the disk is the larger of the reading's
+         * and the row's: the resize refuses a disk below the row, and a quote
+         * that passes is a change the resize does not refuse. The row says
+         * 160, the hypervisor 40; a plan of 100 is refused as a shrink here
+         * rather than sold and then refused by the resize.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $this->customer = $customer;
+        $small = $this->plan('small', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 40], 9_000);
+        $mid = $this->plan('mid', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 100], 20_000);
+        $subscription = $this->paidSubscriptionOn($customer, $small);
+        $machine = $this->builtMachineFor($subscription, $small);
+        $machine->forceFill(['disk_gib' => 160])->save();
+
+        $option = $this->optionFor($user, $subscription, $mid);
+        $this->assertContains('would_shrink_disk', $option['refusals'] ?? [], json_encode($option));
+    }
+
     /**
      * @return array{Customer, User, Subscription, VirtualMachine, Plan, Plan, ProvisioningJob}
      */

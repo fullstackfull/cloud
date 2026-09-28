@@ -163,9 +163,11 @@ final class FakeComputeProvider implements ComputeProvider
      * Disk growths a resize has started and not yet finished, keyed by node
      * and provider id: the GiB each adds and the time its task started. A
      * growth lands on the machine when a read finds its task finished - the
-     * same test getTask() makes of the task's UPID (see resizeVm()).
+     * same test getTask() makes of the task's UPID (see resizeVm()) - and a
+     * growth whose task fails (the task-failure marker) is dropped then,
+     * never landing.
      *
-     * @var array<string, array<string, list<array{gib: int, started_at: int}>>>
+     * @var array<string, array<string, list<array{gib: int, fails: bool, started_at: int}>>>
      */
     private array $pendingDiskGrowth = [];
 
@@ -362,7 +364,9 @@ final class FakeComputeProvider implements ComputeProvider
      * running until the delay has passed, and the growth lands on the
      * machine at the first read at or after that time - read by an instance
      * whose delay says the task has finished, as getTask() reads the UPID.
-     * A change with no disk growth is finished at the answer either way.
+     * On a machine asked for under a name carrying TASK_FAILURE_MARKER the
+     * task reports failure instead, and the growth never lands. A change
+     * with no disk growth is finished at the answer either way.
      */
     public function resizeVm(string $nodeName, string $providerId, ResizeVmRequest $request): VmOperation
     {
@@ -403,9 +407,14 @@ final class FakeComputeProvider implements ComputeProvider
             );
         }
 
-        $taskId = $this->upid($nodeName, 'qmresize', $providerId, false);
+        // A machine asked for under a name carrying the task-failure marker
+        // has its disk growth fail: the task reports failure once it has
+        // finished, and the growth never lands.
+        $fails = self::hostnameCarries(self::requestedHostnameOf($machine), self::TASK_FAILURE_MARKER);
+        $taskId = $this->upid($nodeName, 'qmresize', $providerId, $fails);
         $this->pendingDiskGrowth[$nodeName][$providerId][] = [
             'gib' => (int) $request->diskGib,
+            'fails' => $fails,
             // The start time the UPID carries, so the growth lands exactly
             // when getTask() first reports the task finished.
             'started_at' => (int) hexdec(explode(':', $taskId)[4]),
@@ -869,12 +878,12 @@ final class FakeComputeProvider implements ComputeProvider
         foreach ($pending as $growth) {
             if (time() < $growth['started_at'] + $this->taskDelaySeconds) {
                 $waiting[] = $growth;
-            } else {
+            } elseif (! $growth['fails']) {
                 $landed += $growth['gib'];
             }
         }
 
-        if ($landed === 0) {
+        if ($waiting === $pending) {
             return;
         }
 
@@ -919,7 +928,7 @@ final class FakeComputeProvider implements ComputeProvider
         $machines = $state['machines'] ?? [];
         /** @var array<string, true> $destroyed */
         $destroyed = $state['destroyed'] ?? [];
-        /** @var array<string, array<string, list<array{gib: int, started_at: int}>>> $pending */
+        /** @var array<string, array<string, list<array{gib: int, fails: bool, started_at: int}>>> $pending */
         $pending = $state['pending_disk_growth'] ?? [];
 
         $this->machines = $machines;

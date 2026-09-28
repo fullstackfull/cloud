@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Provisioning\Domain\Exceptions;
 
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 
@@ -25,6 +26,21 @@ final class OrphanAdoptionRejectedException extends DomainException
 
         return $exception->withContext(['provisioning_job_id' => $jobId, 'status' => $status->value])
             ->as('provisioning.adoption_job_settled');
+    }
+
+    /**
+     * Adoption attaches a resource a build made and never answered for. A job
+     * whose kind makes no resource (ProvisioningJobKind::createsResource())
+     * has nothing to adopt: settling a resize this way recorded it done with
+     * nothing read from the machine, and the plan change was then quoted from
+     * a row the resize never wrote (B-1, the verification of round eight A).
+     */
+    public static function becauseTheJobBuildsNothing(string $jobId, ProvisioningJobKind $kind): self
+    {
+        $exception = new self('Only a job that builds a resource can adopt one; this kind of job changes a resource that already exists. Retry it instead.');
+
+        return $exception->withContext(['provisioning_job_id' => $jobId, 'kind' => $kind->value])
+            ->as('provisioning.adoption_not_a_build');
     }
 
     public static function becauseJobIsRunning(string $jobId): self

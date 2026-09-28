@@ -302,6 +302,30 @@ final class FakeComputeProviderTest extends TestCase
     }
 
     #[Test]
+    public function a_disk_growth_whose_task_fails_never_lands(): void
+    {
+        $path = storage_path('framework/testing/fake-fleet-'.uniqid().'.json');
+        config()->set('compute.fake.state_path', $path);
+        config()->set('compute.fake.task_delay_seconds', 600);
+
+        try {
+            $slow = new FakeComputeProvider;
+            $slow->createVirtualMachine($this->request(hostname: FakeComputeProvider::failingHostname('web-01', FakeComputeProvider::TASK_FAILURE_MARKER)));
+            $operation = $slow->resizeVm('pve-01', '101', new ResizeVmRequest(diskGib: 40));
+            $this->assertSame(RemoteTaskStatus::Running, $operation->status);
+
+            config()->set('compute.fake.task_delay_seconds', 0);
+            $finished = new FakeComputeProvider;
+            $this->assertSame(RemoteTaskStatus::Failed, $finished->getTask('pve-01', $operation->taskId)->status);
+            $this->assertSame(80, $finished->getVm('pve-01', '101')?->diskGib, 'A growth whose task failed landed.');
+        } finally {
+            if (is_file($path)) {
+                unlink($path);
+            }
+        }
+    }
+
+    #[Test]
     public function a_resize_with_nothing_to_change_is_refused(): void
     {
         $this->provider->createVirtualMachine($this->request());

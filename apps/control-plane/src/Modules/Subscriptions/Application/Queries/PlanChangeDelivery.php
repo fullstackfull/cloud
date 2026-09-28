@@ -214,7 +214,7 @@ final readonly class PlanChangeDelivery
             return 'the plan this change moves onto no longer exists';
         }
 
-        return $this->refusal($subscription, $plan, $this->runningBefore($subscription, $change), $runs);
+        return $this->refusal($subscription, $plan, $this->runningBefore($subscription, $change, $runs), $runs);
     }
 
     /**
@@ -273,14 +273,14 @@ final readonly class PlanChangeDelivery
      * what it runs now (whatTheServiceRuns()) - falling back to the plan the
      * change left, not the subscription's plan, which is already the target.
      */
-    private function runningBefore(Subscription $subscription, PlanChange $change): PlanResources
+    private function runningBefore(Subscription $subscription, PlanChange $change, ?VmResources $runs): PlanResources
     {
         $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
 
         /** @var Plan|null $from */
         $from = $change->from_plan_id === null ? null : Plan::query()->find($change->from_plan_id);
 
-        return $this->whatTheServiceRuns($service, $from);
+        return $this->whatTheServiceRuns($service, $from, $runs);
     }
 
     /**
@@ -288,26 +288,37 @@ final readonly class PlanChangeDelivery
      * ({@see QuotePlanChange}) and the delivery (refusalForTheChange())
      * measure a change of shape from.
      *
-     *  - A VPS with a machine: the machine's row (virtual_machines) - the
-     *    shape the hypervisor last confirmed, written by every resize that
-     *    completes (ResizeVpsHandler), and the shape the resize refuses a
-     *    disk shrink against. What grows, and whether the node can hold it,
-     *    the resize measures from the machine as the hypervisor reports it,
-     *    and so does the capacity question here (growthTheNodeCannotHold()).
-     *    The row is behind the machine while a resize the hypervisor
-     *    accepted is unconfirmed: its task still running
-     *    (`vps.resize_in_progress`, the job queued for its next attempt) or
-     *    its read-back failed or fell short (`vps.resize_unverified`, the job
-     *    in review). Neither is measured from here: QuotePlanChange refuses
-     *    every change of plan while a job of the service is queued, running
-     *    or in review (ServiceBusy), and so does the change itself, which
-     *    asks the quote's refusals again. `vps.resize_unverified` used to fail
-     *    the job, which holds nothing, and a downgrade was then quoted from
-     *    the row as no change of shape - credited, with no resize queued,
-     *    and the machine left large (A8-1, the re-audit after round seven).
-     *    What this does not cover: a job in review settled by anything but
-     *    its retry (which looks at the machine and writes the row) settles
-     *    without writing the row.
+     *  - A VPS with a machine, when the caller holds a reading of it
+     *    ($runs, MachineCommitment::whatItRuns(), taken before any lock): the
+     *    machine as the hypervisor reported it - its vCPU and memory, each
+     *    figure it did not report taken from the row - and the larger of the
+     *    disk reported and the row's, because the resize refuses a disk below
+     *    the row (a target no smaller than this passes both). What grows, and
+     *    whether the node can hold it, is measured from the same reading
+     *    (growthTheNodeCannotHold()), as the resize measures it.
+     *  - A VPS with a machine and no reading (a caller that passed none, or a
+     *    hypervisor that could not be read): the machine's row
+     *    (virtual_machines) - the shape the hypervisor last confirmed,
+     *    written by every resize that completes (ResizeVpsHandler).
+     *
+     * The row is behind the machine while a resize the hypervisor accepted is
+     * unconfirmed: its task still running (`vps.resize_in_progress`, the job
+     * queued for its next attempt) or its read-back failed or fell short
+     * (`vps.resize_unverified`, the job in review). While the job is queued,
+     * running or in review, QuotePlanChange refuses every change of plan
+     * (ServiceBusy), and so does the change itself, which asks the quote's
+     * refusals again. Of what writes a job's status under src/Modules, two
+     * move one out of review: its retry (RetryProvisioningJob), which runs
+     * it - a resize looks at the machine and writes the row - and an
+     * adoption (AdoptOrphanResource), which settles it without running it
+     * and is refused for a job that builds no resource, a resize among them. `vps.resize_unverified` used to fail the job, which holds
+     * nothing, and an adoption could settle it too; either way a downgrade
+     * was then quoted from the row as no change of shape - credited, with no
+     * resize queued, and the machine left large (A8-1, the re-audit after
+     * round seven; B-1, its verification). A quote with a reading measures
+     * from the machine in any case, so even a row left behind is not a credit
+     * for a change the machine did not make; one without a reading measures
+     * from the row.
      *  - Otherwise the service's own recorded allocation where it has one,
      *    and else the plan given (the subscription's, or the one the change
      *    left).
@@ -322,14 +333,21 @@ final readonly class PlanChangeDelivery
      * the machine had grown to got past the disk-shrink refusal and was
      * credited before the resize refused it.
      */
-    public function whatTheServiceRuns(?Service $service, ?Plan $otherwise): PlanResources
+    public function whatTheServiceRuns(?Service $service, ?Plan $otherwise, ?VmResources $runs = null): PlanResources
     {
         if ($service !== null && $service->kind === ProductKind::Vps->value) {
             /** @var VirtualMachine|null $machine */
             $machine = VirtualMachine::query()->where('service_id', $service->getKey())->first();
 
             if ($machine !== null) {
-                return new PlanResources(vcpu: $machine->vcpu, memoryMib: $machine->memory_mib, diskGib: $machine->disk_gib);
+                return $runs === null
+                    ? new PlanResources(vcpu: $machine->vcpu, memoryMib: $machine->memory_mib, diskGib: $machine->disk_gib)
+                    : new PlanResources(
+                        vcpu: $runs->vcpu,
+                        memoryMib: $runs->memoryMib,
+                        // The larger: the resize refuses a disk below the row.
+                        diskGib: max($runs->diskGib, $machine->disk_gib),
+                    );
             }
         }
 

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Vps\Application\Handlers;
 
+use Illuminate\Support\Facades\Log;
+use Lynomia\Modules\Compute\Domain\DTOs\RemoteTaskState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteVmState;
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\VmOperation;
@@ -90,7 +92,12 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  * is the same finding again, and an ask that fails is transient as a failed
  * look is, the task staying on the job - either way nothing is asked or
  * committed; finished, the task is forgotten and the attempt goes on as any
- * other, looking at the machine the task left. When the attempts run out
+ * other, looking at the machine the task left. A task that finished in
+ * failure is recorded on the job's result first (TASK_FAILED: its id, node,
+ * status, redacted exit status and the attempt that found it) and logged;
+ * the look then shows what it left, and what is still missing is asked for
+ * again. The task's UPID and node are named in the attempt's message, which
+ * is the job's `last_error` on the review list. When the attempts run out
  * with the task still running the job stops in review with the task on it,
  * and an operator's retry asks it first too. The task is not the job's
  * remote_job_id, which RetryProvisioningJob refuses to retry. A task
@@ -156,7 +163,9 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  *    machine stayed large (A8-1, the re-audit after round seven). In review
  *    it holds them (QuotePlanChange's ServiceBusy) until a person settles
  *    it; an operator's retry looks at the machine first and settles the row
- *    and the commitment to what the hypervisor then reports.
+ *    and the commitment to what the hypervisor then reports. An adoption,
+ *    which would settle it without running it, is refused for a resize
+ *    (AdoptOrphanResource: only a job that builds a resource adopts one).
  *
  * Nothing serialises two resizes of one machine, which is why the settling
  * restatements read the row under the lock rather than use the model this
@@ -204,6 +213,9 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
      * the next attempt asks about it before it looks at the machine.
      */
     public const string TASK_IN_FLIGHT = 'resize_task_in_flight';
+
+    /** Where on the job's result the last resize task that finished in failure is recorded. */
+    public const string TASK_FAILED = 'resize_task_failed';
 
     public function __construct(
         private ComputeProviderFactory $computeProviders,
@@ -274,12 +286,14 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
             $earlier = $this->taskAnEarlierAttemptLeftRunning($job);
 
             if ($earlier !== null) {
-                if (! $provider->getTask($earlier['node'], $earlier['id'])->isFinished()) {
-                    return $this->stillRunning($machineId, $earlier['id']);
+                $task = $provider->getTask($earlier['node'], $earlier['id']);
+
+                if (! $task->isFinished()) {
+                    return $this->stillRunning($machineId, $earlier['id'], $earlier['node']);
                 }
 
                 // Finished: what it did is on the machine the look below reads.
-                $this->forgetTheTask($job);
+                $this->forgetTheTask($job, $task);
             }
 
             // Looked at before it is changed (the class docblock).
@@ -440,7 +454,7 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
              */
             $this->rememberTheTask($job, $operation, $node->provider_name);
 
-            return $this->stillRunning($machineId, $operation->taskId);
+            return $this->stillRunning($machineId, $operation->taskId, $node->provider_name);
         }
 
         // Read back rather than assumed, once the task has finished. This is
@@ -540,13 +554,15 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
      * task outlasted the attempts is exactly the job a retry must be able to
      * finish.
      */
-    private function stillRunning(string $machineId, string $taskId): ProvisioningResult
+    private function stillRunning(string $machineId, string $taskId, string $nodeName): ProvisioningResult
     {
         return ProvisioningResult::failed(
             FailureClass::Transient,
             self::IN_PROGRESS,
-            'The hypervisor has not finished the resize task; the machine is read back once it has.',
-            metadata: ['virtual_machine_id' => $machineId, 'task_id' => $taskId],
+            // Named in the message because the message is the job's
+            // last_error, which the review list shows.
+            sprintf('The hypervisor has not finished the resize task %s on node %s; the machine is read back once it has.', $taskId, $nodeName),
+            metadata: ['virtual_machine_id' => $machineId, 'task_id' => $taskId, 'node' => $nodeName],
         );
     }
 
@@ -577,10 +593,32 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
         ]])->save();
     }
 
-    private function forgetTheTask(ProvisioningJob $job): void
+    /**
+     * The task has finished. A task that failed is recorded on the job
+     * (TASK_FAILED) and logged before it is forgotten: the attempt goes on to
+     * look at the machine, which shows what the failed task left, and asks
+     * for what is still missing - but the failure is not lost with the task.
+     */
+    private function forgetTheTask(ProvisioningJob $job, RemoteTaskState $task): void
     {
         $result = $job->result ?? [];
+        $finished = $result[self::TASK_IN_FLIGHT] ?? null;
         unset($result[self::TASK_IN_FLIGHT]);
+
+        if (! $task->isSuccessful()) {
+            $result[self::TASK_FAILED] = [
+                'id' => $task->taskId,
+                'node' => is_array($finished) ? ($finished['node'] ?? $task->nodeName) : $task->nodeName,
+                'status' => $task->status->value,
+                'exit_status' => $this->redactor->redactString((string) ($task->exitStatus ?? '')),
+                'attempt' => $job->attempts,
+            ];
+
+            Log::warning('A resize task the hypervisor accepted ended in failure; the machine is looked at again before anything more is asked.', [
+                'provisioning_job_id' => (string) $job->getKey(),
+                ...$result[self::TASK_FAILED],
+            ]);
+        }
 
         $job->forceFill(['result' => $result])->save();
     }

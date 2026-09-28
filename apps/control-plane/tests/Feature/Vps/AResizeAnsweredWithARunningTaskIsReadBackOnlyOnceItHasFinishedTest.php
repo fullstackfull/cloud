@@ -132,6 +132,41 @@ final class AResizeAnsweredWithARunningTaskIsReadBackOnlyOnceItHasFinishedTest e
     }
 
     #[Test]
+    public function a_resize_task_that_fails_is_recorded_on_the_job_and_nothing_is_taken_to_have_grown(): void
+    {
+        /*
+         * Probe q7 (the verification of round eight A): a task that finished
+         * in failure was forgotten and recorded nowhere. It is recorded on
+         * the job's result and logged; the look that follows finds the disk
+         * the failed task left (not grown), and asks for the growth again.
+         */
+        $machine = $this->aBuiltMachine(FakeComputeProvider::failingHostname('web-01', FakeComputeProvider::TASK_FAILURE_MARKER));
+        $resize = $this->resizeJob($machine, vcpu: 2, memoryMib: 4096, diskGib: 160);
+
+        $this->runWorker($resize);
+        $first = $resize->refresh()->result[ResizeVpsHandler::TASK_IN_FLIGHT]['id'] ?? null;
+        $this->assertIsString($first);
+        $this->assertStringContainsString($first, (string) $resize->last_error, 'The review list cannot see which task the job waits on.');
+
+        $this->theTasksFinish();
+        $this->runWorker($resize);
+
+        $resize->refresh();
+        $failed = $resize->result[ResizeVpsHandler::TASK_FAILED] ?? null;
+        $this->assertIsArray($failed, 'A resize task that failed was recorded nowhere.');
+        $this->assertSame($first, $failed['id']);
+        $this->assertSame('pve-01', $failed['node']);
+        $this->assertSame('failed', $failed['status']);
+        $this->assertNotSame('', $failed['exit_status']);
+        // The failed growth never landed, so the growth asked again - made
+        // at once by the simulator now that tasks take no time - is the only
+        // one: 40 + 120, not 280.
+        $this->assertSame(160, $this->fleetDisk($machine), 'A failed growth landed, or the growth was applied twice.');
+        $this->assertSame(ProvisioningJobStatus::Succeeded, $resize->status, (string) $resize->last_error);
+        $this->assertSame(160, $machine->refresh()->disk_gib);
+    }
+
+    #[Test]
     public function a_change_with_no_disk_growth_is_finished_when_it_is_answered(): void
     {
         $machine = $this->aBuiltMachine();
@@ -156,9 +191,9 @@ final class AResizeAnsweredWithARunningTaskIsReadBackOnlyOnceItHasFinishedTest e
         app(ComputeProviderFactory::class)->swap($this->cluster, $this->hypervisor);
     }
 
-    private function aBuiltMachine(): VirtualMachine
+    private function aBuiltMachine(?string $hostname = null): VirtualMachine
     {
-        $job = $this->createJob();
+        $job = $this->createJob($hostname === null ? [] : ['hostname' => $hostname]);
         $this->runWorker($job);
         $this->assertSame(ProvisioningJobStatus::Succeeded, $job->refresh()->status, (string) $job->last_error);
 

@@ -7,6 +7,7 @@ namespace Tests\Feature\Vps;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
 use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
@@ -336,6 +337,52 @@ final class AResizeMovesTheNodeCommitmentTest extends TestCase
         $this->assertSame(ProvisioningJobStatus::NeedsReview, $resize->status);
         $this->assertSame([2, 4096, 40], [$machine->refresh()->vcpu, $machine->memory_mib, $machine->disk_gib]);
         $this->assertSame([4, 8192, 40], $this->liveShape());
+    }
+
+    #[Test]
+    public function a_read_back_that_reports_more_than_was_asked_is_committed_in_full(): void
+    {
+        /*
+         * D9 (the verification of round eight A): the settle of an
+         * unverified resize is to what is known, and what the read-back
+         * reported is known. Asked for 8192 MiB, the machine reads back at
+         * 16384 (grown by hand as the resize ran): not confirmed, and the
+         * commitment holds the 16384 it runs, not the 8192 asked.
+         */
+        $machine = $this->aBuiltMachine();
+        $this->hypervisor->afterAResize = function () use ($machine): void {
+            $this->hypervisor->fleet->resizeVm('pve-01', (string) $machine->provider_id, new ResizeVmRequest(vcpu: 6, memoryMib: 16384, diskGib: 60));
+        };
+
+        $resize = $this->resize($machine, vcpu: 4, memoryMib: 8192, diskGib: 40);
+
+        $this->assertSame('vps.resize_unverified', $resize->result['error']['code'] ?? null);
+        $this->assertSame([6, 16384, 100], $this->liveShape());
+        $this->assertNodeHolds(vms: 1, vcpu: 6, memoryMib: 16384, diskGib: 100);
+    }
+
+    #[Test]
+    public function a_disk_growth_whose_disk_is_not_read_back_is_not_confirmed(): void
+    {
+        /*
+         * D10 (the verification of round eight A, its probe q8): a growth to
+         * 400 whose read-back reports no disk figure is not taken to have
+         * landed - the job stops in review, the row keeps 40, and the node
+         * holds the 400 the machine may now have.
+         */
+        $machine = $this->aBuiltMachine();
+        $this->hypervisor->afterAResize = function (): void {
+            $this->hypervisor->reportNoDisk = true;
+        };
+
+        $resize = $this->resize($machine, vcpu: 2, memoryMib: 4096, diskGib: 400);
+        $this->hypervisor->reportNoDisk = false;
+
+        $this->assertSame(ProvisioningJobStatus::NeedsReview, $resize->status);
+        $this->assertSame('vps.resize_unverified', $resize->result['error']['code'] ?? null);
+        $this->assertSame(40, $machine->refresh()->disk_gib);
+        $this->assertSame(400, $this->hypervisor->fleet->getVm('pve-01', (string) $machine->provider_id)?->diskGib);
+        $this->assertSame([2, 4096, 400], $this->liveShape());
     }
 
     /**
