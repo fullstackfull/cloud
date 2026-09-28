@@ -39,12 +39,19 @@ use Throwable;
  *    ScheduledTaskFailed only;
  *  - a background run: ScheduledTaskFinished at launch, before any exit code,
  *    and later ScheduledBackgroundTaskFinished from schedule:finish, carrying
- *    the exit code.
+ *    the exit code;
+ *  - a skip because the overlap mutex was taken between the filter and the
+ *    run: ScheduledTaskFinished with skippedBecauseOverlapping set, and, when
+ *    an earlier run of the same event object in the same schedule:run process
+ *    (a repetition of a sub-minute entry) failed, ScheduledTaskFailed as well,
+ *    carrying that earlier failure. finished() and failed() both return
+ *    without recording on skippedBecauseOverlapping.
  *
  * So a foreground failure is counted in failed() and nowhere else: finished()
  * with a non-zero exit code records nothing, because ScheduledTaskFailed for
  * the same run follows it. A background run is counted from its outcome, never
- * from its launch. Every entry in routes/console.php is a foreground command.
+ * from its launch. Every entry in routes/console.php is a foreground command,
+ * and when this was written none repeated within a minute.
  * SchedulerLivenessTest drives a real schedule:run through each shape above.
  */
 final class RecordScheduledRun
@@ -131,6 +138,23 @@ final class RecordScheduledRun
 
     public function failed(ScheduledTaskFailed $event): void
     {
+        /*
+         * A skip that arrives as "failed". Event::run clears
+         * skippedBecauseOverlapping on entry and sets it only when it returns
+         * without running because another invocation holds the mutex, so when
+         * it is set nothing ran in this invocation. Laravel reaches here for
+         * such a skip in two ways, read from ScheduleRunCommand::runEvent and
+         * CallbackEvent::run: the exit code and a closure's exception are
+         * kept on the event object from its previous run in the same
+         * schedule:run process, so a repetition of a sub-minute entry that is
+         * skipped after a failed repetition throws "failed with exit code",
+         * and a named closure that threw rethrows its old exception. Counting
+         * either turned one failed run and ten skips into eleven failures.
+         */
+        if ($event->task->skippedBecauseOverlapping) {
+            return;
+        }
+
         $this->record($event->task->command ?? $event->task->description, static function (ScheduledRun $run) use ($event): void {
             $run->last_ran_at = now();
             $run->last_failed_at = now();

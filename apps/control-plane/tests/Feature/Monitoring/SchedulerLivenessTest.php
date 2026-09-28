@@ -8,13 +8,17 @@ use Closure;
 use Illuminate\Console\Scheduling\Event as ScheduledEvent;
 use Illuminate\Console\Scheduling\EventMutex;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Console\Scheduling\ScheduleRunCommand;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Sleep;
 use Lynomia\Modules\Monitoring\Application\Collectors\SchedulerCollector;
 use Lynomia\Modules\Monitoring\Infrastructure\Formatters\PrometheusTextFormatter;
 use Lynomia\Modules\Monitoring\Infrastructure\Models\ScheduledRun;
 use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
+use Symfony\Component\Console\Input\ArrayInput;
+use Symfony\Component\Console\Output\NullOutput;
 use Tests\TestCase;
 
 /**
@@ -277,6 +281,69 @@ final class SchedulerLivenessTest extends TestCase
     }
 
     #[Test]
+    public function a_repetition_skipped_after_a_failed_one_is_not_another_failure(): void
+    {
+        /*
+         * A sub-minute entry repeats inside one schedule:run, on one event
+         * object. The exit code of a failed repetition stays on it, so a later
+         * repetition that loses the overlap race returns without running and
+         * schedule:run still throws "failed with exit code [1]" for it and
+         * dispatches ScheduledTaskFailed. One run and five skips were counted
+         * as six failures.
+         */
+        $mutex = $this->mutexThatGrantsOnlyTheFirstRun();
+        $event = $this->scheduleOnly(fn (Schedule $s) => $s->exec('false'))->everyFiveSeconds()->withoutOverlapping(60);
+        $event->preventOverlapsUsing($mutex);
+
+        $this->runTheSchedulerForTheRestOfTheMinute();
+
+        $this->assertGreaterThan(1, $mutex->creates, 'The entry did not repeat, so nothing was skipped.');
+        $this->assertTrue($event->skippedBecauseOverlapping, 'The race this test is about did not happen.');
+        $run = ScheduledRun::query()->sole();
+        $this->assertSame(1, $run->consecutive_failures, 'An overlap skip was counted as a failed run.');
+    }
+
+    #[Test]
+    public function a_named_closure_skipped_after_it_threw_is_not_another_failure(): void
+    {
+        // The other way: CallbackEvent keeps the exception its callback threw
+        // and rethrows it after a run that was skipped.
+        $mutex = $this->mutexThatGrantsOnlyTheFirstRun();
+        $event = $this->scheduleOnly(fn (Schedule $s) => $s
+            ->call(static function (): void {
+                throw new RuntimeException('the registrar refused the renewal');
+            })
+            ->name('closure-throws-once'))
+            ->everyFiveSeconds()
+            ->withoutOverlapping(60);
+        $event->preventOverlapsUsing($mutex);
+
+        $this->runTheSchedulerForTheRestOfTheMinute();
+
+        $this->assertGreaterThan(1, $mutex->creates, 'The entry did not repeat, so nothing was skipped.');
+        $this->assertTrue($event->skippedBecauseOverlapping, 'The race this test is about did not happen.');
+        $run = ScheduledRun::query()->sole();
+        $this->assertSame(1, $run->consecutive_failures, 'A skip rethrowing an old exception was counted as a failed run.');
+        $this->assertSame('the registrar refused the renewal', $run->last_failure);
+    }
+
+    #[Test]
+    public function every_repetition_that_runs_and_fails_is_counted(): void
+    {
+        // The guard must not hide real failures: nothing is skipped here, and
+        // each repetition is one failure.
+        $mutex = $this->mutexThatGrantsOnlyTheFirstRun(grantEvery: true);
+        $event = $this->scheduleOnly(fn (Schedule $s) => $s->exec('false'))->everyFiveSeconds()->withoutOverlapping(60);
+        $event->preventOverlapsUsing($mutex);
+
+        $this->runTheSchedulerForTheRestOfTheMinute();
+
+        $this->assertGreaterThan(1, $mutex->creates);
+        $this->assertFalse($event->skippedBecauseOverlapping);
+        $this->assertSame($mutex->creates, ScheduledRun::query()->sole()->consecutive_failures);
+    }
+
+    #[Test]
     public function a_command_that_has_never_succeeded_publishes_no_timestamp(): void
     {
         /*
@@ -362,6 +429,50 @@ final class SchedulerLivenessTest extends TestCase
     private function runTheScheduler(): void
     {
         Artisan::call('schedule:run');
+    }
+
+    /**
+     * schedule:run with its sub-minute loop, which lasts until the end of the
+     * minute it started in. The clock is put at second 30 and Sleep is faked
+     * in step with it, so the loop's six repetitions take no real time. The
+     * command is built here because it reads the clock when constructed.
+     */
+    private function runTheSchedulerForTheRestOfTheMinute(): void
+    {
+        $this->travelTo(now()->startOfMinute()->addSeconds(30));
+        Sleep::fake(syncWithCarbon: true);
+
+        $command = $this->app->make(ScheduleRunCommand::class);
+        $command->setLaravel($this->app);
+        $command->run(new ArrayInput([]), new NullOutput);
+    }
+
+    /**
+     * A mutex that grants the first create and refuses every later one while
+     * saying it is free: each later repetition passes its filter and then
+     * loses the race in Event::run. With $grantEvery it grants every create.
+     * Its public $creates counts the attempts.
+     */
+    private function mutexThatGrantsOnlyTheFirstRun(bool $grantEvery = false): EventMutex
+    {
+        return new class($grantEvery) implements EventMutex
+        {
+            public int $creates = 0;
+
+            public function __construct(private readonly bool $grantEvery) {}
+
+            public function create(ScheduledEvent $event): bool
+            {
+                return ++$this->creates === 1 || $this->grantEvery;
+            }
+
+            public function exists(ScheduledEvent $event): bool
+            {
+                return false;
+            }
+
+            public function forget(ScheduledEvent $event): void {}
+        };
     }
 
     private function scrape(): string
