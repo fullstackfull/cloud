@@ -146,7 +146,10 @@ final class ProvisioningController
      * looks before it acts: a VPS create looks under the identity it reserved
      * (F-15), and a resize reads the machine's shape from the hypervisor
      * before it grows it, so a growth that already landed is not applied
-     * twice (D7-2, round seven). That is not every case: a handler that
+     * twice (D7-2, round seven) - growing no disk while the hypervisor
+     * reports none, and asking nothing while a resize task an earlier
+     * attempt left running has not finished (D8-2, D8-1, the re-audit after
+     * round seven). That is not every case: a handler that
      * neither writes down what it did nor looks before acting again is held
      * by neither, and this endpoint does not claim otherwise. The evidence
      * the operator checked is required and audited, because "I looked at the

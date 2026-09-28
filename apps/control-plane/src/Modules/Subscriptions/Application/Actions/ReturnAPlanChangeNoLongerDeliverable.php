@@ -11,6 +11,7 @@ use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Billing\Application\Actions\ReturnWhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
+use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
@@ -63,7 +64,13 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *    the plan's whole excess after the return (`plan_stock_exceeded_by`,
  *    stockExceededBy()), which includes any excess the plan already had - an
  *    operator can lower stock_limit below the units held. It used to be
- *    exceeded silently (F-06's residue).
+ *    exceeded silently (F-06's residue). The same holds for the plan's
+ *    per_customer_limit: the account may have bought the plan again in the
+ *    window, and the return can put it over the limit; the account's whole
+ *    excess after the return is recorded beside it
+ *    (`plan_per_customer_limit_exceeded_by`, perCustomerLimitExceededBy()),
+ *    where it used to be exceeded silently too (A8-2, the re-audit after
+ *    round seven).
  *  - The change's record says it was returned and why (`returned_at`,
  *    `return_reason`), which is what keeps it from reading as a paid change
  *    awaiting delivery (PlanChangeDelivery::aPaidChangeAwaitsDelivery()).
@@ -105,6 +112,7 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
 
         $restored = $this->restoreThePlan($locked, $change);
         $exceededBy = $restored ? $this->stockExceededBy((string) $change->from_plan_id) : 0;
+        $customerExceededBy = $restored ? $this->perCustomerLimitExceededBy((string) $change->from_plan_id, $locked) : 0;
 
         PlanChange::query()
             ->whereKey($change->getKey())
@@ -122,6 +130,7 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
                 'refusal' => $refusal,
                 'plan_restored' => $restored,
                 'plan_stock_exceeded_by' => $exceededBy,
+                'plan_per_customer_limit_exceeded_by' => $customerExceededBy,
                 'proration_invoice_id' => (string) $invoice->getKey(),
                 'plan_change_id' => (string) $change->getKey(),
                 'returned_to_wallet_minor' => $credited,
@@ -135,6 +144,7 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
             'refusal' => $refusal,
             'plan_restored' => $restored,
             'plan_stock_exceeded_by' => $exceededBy,
+            'plan_per_customer_limit_exceeded_by' => $customerExceededBy,
             'returned_to_wallet_minor' => $credited,
         ]);
 
@@ -230,5 +240,39 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
         }
 
         return max(0, $this->capacity->claimed($planId) - (int) $plan->stock_limit);
+    }
+
+    /**
+     * By how many units the subscription's account now holds more of the
+     * plan it went back to than the plan's per_customer_limit allows (zero
+     * when it does not, or the plan has no such limit), read under the
+     * plan's lock (restoreThePlan() took it) and after the move - the
+     * account's figure PlanCapacity::shortfall() holds a checkout and a plan
+     * change to (PlanCapacity::claimed() for the customer).
+     *
+     * The same reasoning as stockExceededBy(): the paid upgrade stopped
+     * counting its unit against this plan, the account can have bought the
+     * plan again in the window, and the return is not refused for it. The
+     * figure is the account's whole excess after the return, including any
+     * it already had. Zero, too, when the subscription's account cannot be
+     * read.
+     */
+    private function perCustomerLimitExceededBy(string $planId, Subscription $subscription): int
+    {
+        /** @var Plan|null $plan */
+        $plan = Plan::query()->find($planId);
+
+        if ($plan === null || $plan->per_customer_limit === null) {
+            return 0;
+        }
+
+        /** @var Customer|null $customer */
+        $customer = Customer::query()->find($subscription->customer_id);
+
+        if ($customer === null) {
+            return 0;
+        }
+
+        return max(0, $this->capacity->claimed($planId, $customer) - (int) $plan->per_customer_limit);
     }
 }

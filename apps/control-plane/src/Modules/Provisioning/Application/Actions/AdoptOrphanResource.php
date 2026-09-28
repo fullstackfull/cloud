@@ -30,6 +30,14 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
  * The guards exist because getting adoption wrong is worse than the orphan it
  * fixes:
  *
+ *  - a job that builds nothing is refused (ProvisioningJobKind::
+ *    createsResource()): a resize, a reinstall, a power change or a package
+ *    change acts on a resource that already exists, and adopting a
+ *    reference settled such a job as done with nothing read - a resize in
+ *    review for an unverified read-back was settled that way, its machine
+ *    row never written, and a downgrade was then credited from the stale row
+ *    (B-1, the verification of round eight A). Such a job is retried, and
+ *    the retry looks at the resource first;
  *  - a running job is refused, because a live attempt may be about to write
  *    its own reference over the one being adopted;
  *  - a settled job is refused, because it already points at a resource and
@@ -170,6 +178,9 @@ final readonly class AdoptOrphanResource
      */
     public function lookFor(ProvisioningJob $job, string $providerReference): AdoptionLookup
     {
+        // Refused before the provider is asked about anything.
+        $this->assertItBuilds($job);
+
         return new AdoptionLookup(
             jobId: (string) $job->getKey(),
             providerReference: $providerReference,
@@ -178,10 +189,24 @@ final readonly class AdoptOrphanResource
     }
 
     /**
+     * Only a build adopts (OrphanAdoptionRejectedException::becauseTheJobBuildsNothing()).
+     *
+     * @throws OrphanAdoptionRejectedException
+     */
+    private function assertItBuilds(ProvisioningJob $job): void
+    {
+        if (! $job->kind->createsResource()) {
+            throw OrphanAdoptionRejectedException::becauseTheJobBuildsNothing((string) $job->getKey(), $job->kind);
+        }
+    }
+
+    /**
      * @throws OrphanAdoptionRejectedException
      */
     private function assertAdoptable(ProvisioningJob $job): void
     {
+        $this->assertItBuilds($job);
+
         if ($job->status === ProvisioningJobStatus::Running) {
             throw OrphanAdoptionRejectedException::becauseJobIsRunning((string) $job->getKey());
         }

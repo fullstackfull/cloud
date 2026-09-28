@@ -144,7 +144,7 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
             $this->isAReinstall($event->kind) => NotificationType::ReinstallFailed,
             /*
              * The case the phase brief singles out: the customer has been
-             * charged and their machine is still the old size. Telling them is
+             * charged and the change did not complete. Telling them is
              * not optional — the alternative is a customer who paid for an
              * upgrade discovering months later that they never got it. And
              * telling them what happened to the money: held for an operator

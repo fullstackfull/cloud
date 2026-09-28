@@ -97,7 +97,7 @@ final readonly class QuotePlanChange
 
         $service = $this->serviceFor($subscription);
 
-        $current = $this->currentResources($subscription, $service);
+        $current = $this->currentResources($subscription, $service, $runs);
         $target = PlanResources::fromArray($plan->resources);
 
         $knownUnits = $this->unitsOn($subscription);
@@ -415,15 +415,16 @@ final readonly class QuotePlanChange
      * What the customer is actually running, which is not always what their
      * plan says: PlanChangeDelivery::whatTheServiceRuns(), the answer the
      * delivery of the change measures from too. For a VPS that is its machine
-     * as the hypervisor confirmed it - a machine resized by a plan change or
+     * as the hypervisor reports it when the quote holds a reading ($runs),
+     * and else as the hypervisor last confirmed it - a machine resized by a plan change or
      * an operator, or built before the plan was edited, is the thing a
      * disk-shrink check and a capacity question have to measure from. Falling
      * back to the plan, or to the shape the service was bought at, let a
      * downgrade past that truncates a disk neither knows about.
      */
-    private function currentResources(Subscription $subscription, ?Service $service): PlanResources
+    private function currentResources(Subscription $subscription, ?Service $service, ?VmResources $runs): PlanResources
     {
-        return $this->delivery->whatTheServiceRuns($service, $subscription->plan);
+        return $this->delivery->whatTheServiceRuns($service, $subscription->plan, $runs);
     }
 
     private function serviceFor(Subscription $subscription): ?Service

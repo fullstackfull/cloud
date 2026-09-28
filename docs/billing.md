@@ -91,7 +91,10 @@ stops holding its unit of that plan, so the plan may have sold it in the window:
 is made all the same, adding at most the change's units to the plan's claims, and the audit
 entry records the plan's whole excess over its `stock_limit` after the return as
 `plan_stock_exceeded_by` - which includes any excess it already had, as when an operator
-lowered `stock_limit` below the units held), the change is
+lowered `stock_limit` below the units held; the account may likewise have bought the plan
+again in the window, and the account's whole excess over the plan's `per_customer_limit`
+after the return is recorded beside it as `plan_per_customer_limit_exceeded_by`, in the
+audit entry and the log), the change is
 recorded `returned_at` with its `return_reason`, and a `subscription.plan_changed` audit
 entry with the reason `plan_change_not_deliverable_at_settlement` names the invoice, the
 refusal and the amount returned (`ReturnAPlanChangeNoLongerDeliverable`), and the customer

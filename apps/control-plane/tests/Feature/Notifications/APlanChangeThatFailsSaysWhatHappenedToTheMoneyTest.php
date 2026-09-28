@@ -101,7 +101,7 @@ final class APlanChangeThatFailsSaysWhatHappenedToTheMoneyTest extends TestCase
         $this->assertStringNotContainsString('left as it was', $this->renderedBody('en'));
         $this->assertStringNotContainsString('وبقي كما كان', $this->renderedBody('ar'));
         $this->assertStringContainsString('now on the new plan and billed at its price', $this->renderedBody('en'));
-        $this->assertStringContainsString('still running as it was', $this->renderedBody('en'));
+        $this->assertStringContainsString('the change to web-01 itself did not complete', $this->renderedBody('en'));
         $this->assertStringContainsString('ويُفوتَر بسعرها', $this->renderedBody('ar'));
     }
 
@@ -125,6 +125,52 @@ final class APlanChangeThatFailsSaysWhatHappenedToTheMoneyTest extends TestCase
         app(NotifyOnProvisioningOutcome::class)->needsReview(new ProvisioningJobNeedsReview((string) $paid->id, $kind, (string) $this->service->id, null, FailureClass::Capacity, 'no room'));
         $this->assertStringContainsString('billed at its price', $this->renderedBody('en'));
         $this->assertStringContainsString('يُفوتَر بسعرها', $this->renderedBody('ar'));
+    }
+
+    #[Test]
+    public function a_paid_change_that_failed_or_waits_does_not_say_the_service_runs_as_it_was(): void
+    {
+        /*
+         * A8-1 (the re-audit after round seven): a resize the hypervisor
+         * made and could not read back failed the job, and the customer was
+         * told the service was "still running as it was" - of a machine that
+         * had been resized. Such a resize now stops in review, and neither
+         * message a paid change can end in says what state the service is
+         * in beyond what the platform knows.
+         */
+        $paid = $this->job(ProvisioningJobKind::Resize, 'plan-change:'.Str::ulid().':'.Str::ulid().':invoice:'.Str::ulid());
+
+        app(NotifyOnProvisioningOutcome::class)->failed(new ProvisioningJobFailed((string) $paid->id, ProvisioningJobKind::Resize, (string) $this->service->id, FailureClass::Permanent, 'vps.unknown_machine'));
+        $this->assertStringNotContainsString('as it was', $this->renderedBody('en'));
+        $this->assertStringNotContainsString('كما كان', $this->renderedBody('ar'));
+
+        Notification::query()->delete();
+
+        app(NotifyOnProvisioningOutcome::class)->needsReview(new ProvisioningJobNeedsReview((string) $paid->id, ProvisioningJobKind::Resize, (string) $this->service->id, null, FailureClass::Timeout, 'vps.resize_unverified'));
+        $this->assertStringNotContainsString('as it was', $this->renderedBody('en'));
+        $this->assertStringNotContainsString('كما كان', $this->renderedBody('ar'));
+        $this->assertStringContainsString('may not match the new plan', $this->renderedBody('en'));
+        $this->assertStringContainsString('قد لا يطابق', $this->renderedBody('ar'));
+    }
+
+    #[Test]
+    public function an_unpaid_change_whose_machine_a_destroy_removed_does_not_say_it_runs_as_it_was(): void
+    {
+        /*
+         * B-2 (the verification of round eight A): a plan-change resize a
+         * destroy overlapped ends vps.unknown_machine, permanent, and the
+         * customer read that the service "is still running as it was" - of a
+         * machine that is gone.
+         */
+        $job = $this->job(ProvisioningJobKind::Resize, 'plan-change:'.Str::ulid().':'.Str::ulid().':change:'.Str::ulid());
+
+        app(NotifyOnProvisioningOutcome::class)->failed(new ProvisioningJobFailed((string) $job->id, ProvisioningJobKind::Resize, (string) $this->service->id, FailureClass::Permanent, 'vps.unknown_machine'));
+
+        $this->assertStringNotContainsString('as it was', $this->renderedBody('en'));
+        $this->assertStringNotContainsString('running', $this->renderedBody('en'));
+        $this->assertStringNotContainsString('كما كان', $this->renderedBody('ar'));
+        $this->assertStringNotContainsString('يعمل', $this->renderedBody('ar'));
+        $this->assertStringContainsString('Nothing has been charged', $this->renderedBody('en'));
     }
 
     #[Test]

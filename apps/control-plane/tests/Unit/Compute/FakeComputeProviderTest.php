@@ -245,6 +245,87 @@ final class FakeComputeProviderTest extends TestCase
     }
 
     #[Test]
+    public function a_resize_made_before_the_answer_says_it_has_finished(): void
+    {
+        /*
+         * It used to answer Running - the default status - having made the
+         * whole change already (D8-1, the re-audit after round seven; the
+         * F-24 shape): "the task has not finished" and "the disk has grown"
+         * were both true of every resize.
+         */
+        $this->provider->createVirtualMachine($this->request());
+
+        $operation = $this->provider->resizeVm('pve-01', '101', new ResizeVmRequest(diskGib: 40));
+
+        $this->assertSame(RemoteTaskStatus::Succeeded, $operation->status);
+        $this->assertFalse($operation->isInFlight());
+        $this->assertSame(RemoteTaskStatus::Succeeded, $this->provider->getTask('pve-01', $operation->taskId)->status);
+        $this->assertSame(120, $this->provider->getVm('pve-01', '101')?->diskGib);
+    }
+
+    #[Test]
+    public function a_disk_growth_with_a_task_delay_is_running_and_lands_when_its_task_has_finished(): void
+    {
+        $path = storage_path('framework/testing/fake-fleet-'.uniqid().'.json');
+        config()->set('compute.fake.state_path', $path);
+        config()->set('compute.fake.task_delay_seconds', 600);
+
+        try {
+            $slow = new FakeComputeProvider;
+            $slow->createVirtualMachine($this->request());
+
+            $operation = $slow->resizeVm('pve-01', '101', new ResizeVmRequest(vcpu: 8, memoryMib: 16384, diskGib: 40));
+
+            // Answered with a task that has not finished, as Proxmox answers a disk growth.
+            $this->assertSame(RemoteTaskStatus::Running, $operation->status);
+            $this->assertTrue($operation->isInFlight());
+            $this->assertStringStartsWith('UPID:', $operation->taskId);
+            $this->assertSame(RemoteTaskStatus::Running, $slow->getTask('pve-01', $operation->taskId)->status);
+
+            // vCPU and memory are changed before the answer; the disk is not grown yet.
+            $running = $slow->getVm('pve-01', '101');
+            $this->assertSame([8, 16384, 80], [$running?->vcpu, $running?->memoryMib, $running?->diskGib]);
+            $this->assertSame(80, $slow->listVms('pve-01')[0]->diskGib);
+
+            // Read by an instance for which the task has finished: grown, once.
+            config()->set('compute.fake.task_delay_seconds', 0);
+            $finished = new FakeComputeProvider;
+            $this->assertSame(RemoteTaskStatus::Succeeded, $finished->getTask('pve-01', $operation->taskId)->status);
+            $this->assertSame(120, $finished->getVm('pve-01', '101')?->diskGib);
+            $this->assertSame(120, $finished->getVm('pve-01', '101')?->diskGib);
+            $this->assertSame(120, (new FakeComputeProvider)->listVms('pve-01')[0]->diskGib);
+        } finally {
+            if (is_file($path)) {
+                unlink($path);
+            }
+        }
+    }
+
+    #[Test]
+    public function a_disk_growth_whose_task_fails_never_lands(): void
+    {
+        $path = storage_path('framework/testing/fake-fleet-'.uniqid().'.json');
+        config()->set('compute.fake.state_path', $path);
+        config()->set('compute.fake.task_delay_seconds', 600);
+
+        try {
+            $slow = new FakeComputeProvider;
+            $slow->createVirtualMachine($this->request(hostname: FakeComputeProvider::failingHostname('web-01', FakeComputeProvider::TASK_FAILURE_MARKER)));
+            $operation = $slow->resizeVm('pve-01', '101', new ResizeVmRequest(diskGib: 40));
+            $this->assertSame(RemoteTaskStatus::Running, $operation->status);
+
+            config()->set('compute.fake.task_delay_seconds', 0);
+            $finished = new FakeComputeProvider;
+            $this->assertSame(RemoteTaskStatus::Failed, $finished->getTask('pve-01', $operation->taskId)->status);
+            $this->assertSame(80, $finished->getVm('pve-01', '101')?->diskGib, 'A growth whose task failed landed.');
+        } finally {
+            if (is_file($path)) {
+                unlink($path);
+            }
+        }
+    }
+
+    #[Test]
     public function a_resize_with_nothing_to_change_is_refused(): void
     {
         $this->provider->createVirtualMachine($this->request());

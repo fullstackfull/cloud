@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Testing\TestResponse;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
@@ -297,6 +298,52 @@ final class APlanChangeThatStoppedBeingDeliverableBeforeItsCaptureIsReturnedTest
 
         $entry = AuditEntry::query()->where('context->reason', 'plan_change_not_deliverable_at_settlement')->sole();
         $this->assertSame(1, $entry->context['plan_stock_exceeded_by'] ?? null, 'The plan was put over its stock limit and nothing said so.');
+    }
+
+    #[Test]
+    public function a_return_over_the_accounts_per_customer_limit_is_made_and_the_excess_recorded(): void
+    {
+        /*
+         * A8-2 (the re-audit after round seven): the per-customer limit is
+         * the stock limit's twin. The paid upgrade stops counting its unit
+         * against the plan it left, the same account buys that plan again in
+         * the window, and the return puts the subscription back on it - the
+         * account then holds two of a plan it may hold one of. Not refused,
+         * as the stock excess is not; recorded, as the stock excess is, in
+         * the audit entry and the log.
+         */
+        $starter = $this->sharedHostingPlan('starter');
+        $starter->forceFill(['per_customer_limit' => 1])->save();
+        $this->buySharedHosting($this->customer, $starter);
+        $subscription = Subscription::query()->where('customer_id', $this->customer->getKey())->sole();
+        [$planId, $priceId] = $this->operatorPutsAPlanOnSale($subscription);
+        $package = $this->operatorMapsAPackage($planId);
+
+        $this->changePlan($subscription, $planId, $priceId)->assertOk();
+        /** @var Invoice $invoice */
+        $invoice = Invoice::query()->where('subscription_id', $subscription->getKey())->where('status', InvoiceStatus::Open->value)->sole();
+        Event::fakeFor(fn () => app(SettleInvoice::class)->execute($invoice, Transaction::factory()->forCustomer($this->customer)->amount(Money::ofMinor($invoice->total_minor, 'KWD'))->create()), [InvoicePaid::class]);
+
+        // The unit the upgrade gave up, bought again by the same account.
+        $this->buySharedHosting($this->customer, $starter);
+        $this->assertSame(1, app(PlanCapacity::class)->claimed((string) $starter->getKey(), $this->customer));
+        // Another account's unit of the plan is not this account's excess.
+        $this->buySharedHosting(Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']), $starter);
+
+        $this->actingAs($this->operator)->deleteJson('/api/admin/catalogue/hosting-packages/'.$package)->assertOk();
+        Log::spy();
+        $this->redeliverTheSettlementOf($invoice->fresh() ?? $invoice);
+
+        $this->assertSame((string) $starter->getKey(), (string) $subscription->fresh()?->plan_id, 'A return to the plan the customer held was refused for the per-customer limit.');
+        $this->assertSame(2, app(PlanCapacity::class)->claimed((string) $starter->getKey(), $this->customer));
+
+        $entry = AuditEntry::query()->where('context->reason', 'plan_change_not_deliverable_at_settlement')->sole();
+        $this->assertSame(1, $entry->context['plan_per_customer_limit_exceeded_by'] ?? null, 'The account was put over the plan\'s per-customer limit and nothing said so.');
+        $this->assertSame(0, $entry->context['plan_stock_exceeded_by'] ?? null);
+        Log::shouldHaveReceived('warning')->withArgs(
+            static fn (string $message, array $context = []): bool => str_contains($message, 'could no longer be delivered when its payment was captured')
+                && ($context['plan_per_customer_limit_exceeded_by'] ?? null) === 1,
+        )->once();
     }
 
     #[Test]

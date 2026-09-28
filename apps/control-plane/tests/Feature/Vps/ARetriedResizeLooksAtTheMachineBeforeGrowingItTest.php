@@ -15,6 +15,7 @@ use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\Vps\Application\Handlers\ResizeVpsHandler;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Vps\Concerns\DrivesVpsCreatesThroughTheOperatorPath;
 use Tests\TestCase;
@@ -136,6 +137,58 @@ final class ARetriedResizeLooksAtTheMachineBeforeGrowingItTest extends TestCase
         $this->assertSame(ProvisioningJobStatus::Succeeded, $resize->refresh()->status, (string) $resize->last_error);
         $this->assertTrue($resize->result['response']['already_correct'] ?? false, json_encode($resize->result));
         $this->assertSame([4, 8192], [$machine->refresh()->vcpu, $machine->memory_mib]);
+    }
+
+    #[Test]
+    public function a_retry_that_cannot_read_the_disk_does_not_grow_it_again(): void
+    {
+        /*
+         * D8-2 (the re-audit after round seven): with the hypervisor
+         * reporting no disk figure (no `maxdisk`), the look fell back to the
+         * row, still 40 after a 40 -> 400 growth that landed with its answer
+         * lost, and the operator's retry grew the disk by 360 again - 760 on
+         * the machine. A growth past the row is not asked while the disk
+         * cannot be read; once it can, the retry finds the growth landed.
+         */
+        $machine = $this->aBuiltMachine();
+        $this->hypervisor->afterAResize = static function (): void {
+            throw ComputeProviderException::requestFailed('fake', 'resize_vm', [], indeterminate: true);
+        };
+        $resize = $this->resizeJob($machine, vcpu: 4, memoryMib: 8192, diskGib: 400);
+        $this->runWorker($resize);
+        $this->assertSame(ProvisioningJobStatus::NeedsReview, $resize->refresh()->status);
+        $this->assertSame(400, $this->hypervisor->fleet->getVm('pve-01', (string) $machine->provider_id)?->diskGib);
+
+        $this->hypervisor->reportNoDisk = true;
+        $this->retryAsOperator($resize)->assertOk();
+        DB::table('provisioning_jobs')->where('id', $resize->id)->update(['next_attempt_at' => null]);
+        $this->runWorker($resize);
+
+        $this->assertSame(400, $this->hypervisor->fleet->getVm('pve-01', (string) $machine->provider_id)?->diskGib, 'The disk was grown twice.');
+        $this->assertSame(ResizeVpsHandler::DISK_NOT_REPORTED, $resize->refresh()->result['error']['code'] ?? null);
+        $this->assertNotSame(ProvisioningJobStatus::Succeeded, $resize->status);
+        $this->assertSame(40, $machine->refresh()->disk_gib);
+
+        // Once the disk can be read, the growth is found landed and recorded.
+        $this->hypervisor->reportNoDisk = false;
+        $this->runWorker($resize);
+
+        $this->assertSame(ProvisioningJobStatus::Succeeded, $resize->refresh()->status, (string) $resize->last_error);
+        $this->assertSame(400, $this->hypervisor->fleet->getVm('pve-01', (string) $machine->provider_id)?->diskGib);
+        $this->assertSame([4, 8192, 400], [$machine->refresh()->vcpu, $machine->memory_mib, $machine->disk_gib]);
+    }
+
+    #[Test]
+    public function a_disk_target_no_larger_than_the_row_needs_no_disk_figure(): void
+    {
+        $machine = $this->aBuiltMachine();
+        $this->hypervisor->reportNoDisk = true;
+
+        $resize = $this->resizeJob($machine, vcpu: 4, memoryMib: 8192, diskGib: 40);
+        $this->runWorker($resize);
+
+        $this->assertSame(ProvisioningJobStatus::Succeeded, $resize->refresh()->status, (string) $resize->last_error);
+        $this->assertSame([4, 8192, 40], [$machine->refresh()->vcpu, $machine->memory_mib, $machine->disk_gib]);
     }
 
     #[Test]

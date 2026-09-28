@@ -51,7 +51,10 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  *    was lost is the same kind of case, closed the same way: requeued here,
  *    and the resize reads the machine's shape from the hypervisor before it
  *    grows anything, so a growth that landed is not applied twice
- *    (ResizeVpsHandler; D7-2, round seven).
+ *    (ResizeVpsHandler; D7-2, round seven) - and grows no disk while the
+ *    hypervisor reports no disk to measure from (D8-2), and asks nothing
+ *    while a resize task an earlier attempt left running has not finished
+ *    (D8-1, the re-audit after round seven).
  *  - **A job that has destroyed data.** A reinstall past the destructive line
  *    cannot be undone by running it again, and running it again lands a second
  *    installation on top of whatever the first one wrote.

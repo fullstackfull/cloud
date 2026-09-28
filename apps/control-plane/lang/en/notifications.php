@@ -127,15 +127,15 @@ return [
         ],
         'plan_change_failed' => [
             'title' => 'Could not change the plan for :service',
-            'body' => 'The plan change for :service was recorded on your subscription, which is now on the new plan and billed at its price, but :service itself could not be changed to match and is still running as it was. Nothing has been charged for the change.',
+            'body' => 'The plan change for :service was recorded on your subscription, which is now on the new plan and billed at its price, but the change to :service itself did not complete. Nothing has been charged for the change.',
         ],
         'plan_change_failed_after_payment' => [
             'title' => 'Could not change the plan for :service',
-            'body' => 'The plan change for :service did not complete, and :service is still running as it was. Your subscription is on the new plan, and a renewal before the change is completed is billed at its price. What you paid for the change is held until our team either completes the change or returns the payment to you.',
+            'body' => 'The plan change for :service did not complete. Your subscription is on the new plan, and a renewal before the change is completed is billed at its price. What you paid for the change is held until our team either completes the change or returns the payment to you.',
         ],
         'plan_change_needs_review' => [
             'title' => 'The plan change for :service is waiting for our team',
-            'body' => 'The plan change for :service could not be applied automatically, and a person is looking at it. :service keeps running as it was in the meantime, while your subscription is on the new plan and a renewal in the meantime is billed at its price. If you paid for the change, that payment is held until the change is applied, or returned if it cannot be.',
+            'body' => 'The plan change for :service could not be completed automatically, and a person is looking at it. Until they have, :service may not match the new plan, while your subscription is on the new plan and a renewal in the meantime is billed at its price. If you paid for the change, that payment is held until the change is applied, or returned if it cannot be.',
         ],
         'reinstall_completed' => [
             'title' => 'Reinstall of :service is complete',
