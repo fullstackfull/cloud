@@ -39,7 +39,9 @@ use Tests\TestCase;
  * parameter. It reads the committed `docs/openapi.yaml` by its generated
  * layout (two-space indentation, as `YamlEmitter` writes it), not with a YAML
  * parser, and fails by name if the layout stops matching. It compares names,
- * not types.
+ * not types. It also holds, by request, that a `per_page` of 100 is served
+ * and one of 101 or 0 refused with `validation.failed`, as the published
+ * parameter says.
  */
 final class TheFeedAnswersWhatTheDescriptionPublishesTest extends TestCase
 {
@@ -70,6 +72,24 @@ final class TheFeedAnswersWhatTheDescriptionPublishesTest extends TestCase
                 ."; {$meta['name']}, which the description publishes for it, declares ".implode(', ', $meta['properties']).'.',
             );
             $this->assertSame([], array_diff($meta['required'], array_keys($body['meta'])), "{$meta['name']} requires a key the feed's meta {$which} does not carry.");
+        }
+    }
+
+    /**
+     * The description's `cursorPerPage` and docs/api.md say a `per_page`
+     * outside 1 to 100 is refused rather than clamped.
+     */
+    #[Test]
+    public function a_per_page_outside_one_to_a_hundred_is_refused_not_clamped(): void
+    {
+        $user = $this->accountWithTwoEvents();
+
+        $this->actingAs($user)->getJson('/api/v1/activity?per_page=100')->assertOk()->assertJsonPath('meta.per_page', 100);
+
+        foreach ([101, 0] as $perPage) {
+            $this->actingAs($user)->getJson('/api/v1/activity?per_page='.$perPage)
+                ->assertStatus(422)
+                ->assertJsonPath('error.code', 'validation.failed');
         }
     }
 

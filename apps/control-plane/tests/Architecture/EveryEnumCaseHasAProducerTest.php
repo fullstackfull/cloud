@@ -155,19 +155,28 @@ use Tests\Support\EnumCaseReferences;
  *    wide enough to take in what makes it a write — the SQL alias it is
  *    selected as, the list or column default it is declared in, the array
  *    key or call it is handed to — which no read in its file spells; and a
- *    spelling that is only a case's name (`Enum::Case`, or `Enum::Case->value`)
- *    is refused as stale ({@see A_BARE_CASE_NAME}), because any read of the
- *    case keeps it. Where one spelling produces several cases, it cannot tell
- *    them apart: the six staff `Role` cases are granted through one walk of
- *    `Role::cases()`, and `NodeStatus::Active` and `::Draining` share the
- *    declaration of the list an operator may set. Each such entry also
- *    names, as `held`, the data provider of a behavioural test that
- *    exercises the write for each case, and the provider must still yield
- *    the case ({@see EveryStaffRoleCanBeGivenToAnOperatorTest} invites an
- *    operator with each staff role and grants it by a role change;
+ *    spelling whose only code is a case's name (`Enum::Case`, optionally
+ *    with `->value` or `?->value`, whatever parentheses, brackets, commas,
+ *    semicolons, comments and whitespace surround it; an empty `()` is a
+ *    call, not punctuation) is refused as stale
+ *    ({@see isOnlyACaseName()}), because any read of the case keeps it. Three
+ *    spellings are shared by more than one case. The six staff `Role` cases
+ *    share `array_filter(Role::cases(), …)`, a walk that names none of them;
+ *    `NodeStatus::Active` and `::Draining` share the declaration of the list
+ *    an operator may set, which names each; `VerificationLevel::CodeComplete`
+ *    and `::Tested` share the list literal
+ *    `PreflightReport::verificationLevels()` starts from, which names each. The `Role` and `NodeStatus` entries also name,
+ *    as `held`, the data provider of a behavioural test that exercises the
+ *    write for each case, and the provider must still yield the case
+ *    ({@see EveryStaffRoleCanBeGivenToAnOperatorTest} invites an operator
+ *    with each staff role and grants it by a role change;
  *    {@see AnOperatorPutsADiscoveredNodeIntoServiceTest} sets a node to each
- *    of the two through the route). The spelling cannot tell one of those
- *    cases from another; the test can.
+ *    of the two through the route). For `Role` the walk's spelling does not
+ *    change when one case stops being granted, and the test is what goes
+ *    red; for `NodeStatus` taking a case out of the list changes the
+ *    spelling, and the test also holds that the route accepts it. The
+ *    `VerificationLevel` entries have no `held`: taking either case out of
+ *    the list changes the spelling, and no test is named for them.
  *  - **`unwritten`**, for one case: nothing produces it. The entry names the
  *    module that owns the decision — build the writer, delete the case, or
  *    declare it prepared. These, with the sibling gate's `UNPRODUCED`, are the
@@ -192,13 +201,6 @@ use Tests\Support\EnumCaseReferences;
  */
 final class EveryEnumCaseHasAProducerTest extends TestCase
 {
-    /**
-     * A `spelled` entry's spelling that is only a case's name, optionally
-     * with `->value`: a read of the case spells it the same way, so it cannot
-     * tell the write from a read. Refused by {@see staleExcuses()}.
-     */
-    private const string A_BARE_CASE_NAME = '/^\s*[A-Za-z_\\\\][A-Za-z0-9_\\\\]*::[A-Za-z_][A-Za-z0-9_]*(\s*->\s*value)?\s*$/';
-
     /**
      * Enums whose cases arrive as a value or are a vocabulary.
      *
@@ -473,11 +475,25 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
         // A spelling that is only the case's name, as NodeStatus::Draining's
         // was: a read of the case in the same file kept it after the write
         // was gone. Refused with or without ->value, and beside a held entry.
-        foreach ([NodeStatus::class.'::Draining' => 'NodeStatus::Draining', ActorType::class.'::System' => 'ActorType::System->value'] as $case => $bare) {
+        foreach ([
+            [NodeStatus::class.'::Draining', 'NodeStatus::Draining'],
+            [ActorType::class.'::System', 'ActorType::System->value'],
+            [NodeStatus::class.'::Draining', '(NodeStatus::Draining)'],
+            [NodeStatus::class.'::Draining', 'NodeStatus::Draining,'],
+            [NodeStatus::class.'::Draining', 'NodeStatus::Draining->value;'],
+            [NodeStatus::class.'::Draining', 'NodeStatus::Draining?->value'],
+            [NodeStatus::class.'::Draining', ' [ \Lynomia\Modules\Compute\Domain\Enums\NodeStatus :: Draining ] '],
+            [NodeStatus::class.'::Draining', 'NodeStatus::Draining /* a comment */'],
+        ] as [$case, $bare]) {
             $cases = self::CASES;
             $cases[$case]['spelling'] = $bare;
 
             $this->assertTrue($reports(self::staleExcuses(self::WHOLE_ENUMS, $cases), "{$case} — the spelling {$bare} is only a case's name"), "A spelled entry whose spelling is the bare {$bare} stood.");
+        }
+
+        // And what it must not refuse: a spelling with anything else in it.
+        foreach (['NodeStatus::Draining->name', '=== NodeStatus::Draining', 'NodeStatus::cases()', '[NodeStatus::Active, NodeStatus::Draining]', 'NodeStatus::Draining->value."x"'] as $wider) {
+            $this->assertFalse(self::isOnlyACaseName($wider), "{$wider} is more than a case's name and was refused as one.");
         }
 
         // A held case whose provider does not yield it, or does not exist.
@@ -520,7 +536,7 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
                 $stale[] = "{$case} — {$excuse['site']} no longer contains {$excuse['spelling']}";
             }
 
-            if ($excuse['kind'] === 'spelled' && preg_match(self::A_BARE_CASE_NAME, $excuse['spelling']) === 1) {
+            if ($excuse['kind'] === 'spelled' && self::isOnlyACaseName($excuse['spelling'])) {
                 $stale[] = "{$case} — the spelling {$excuse['spelling']} is only a case's name, which a read in {$excuse['site']} spells the same way; spell the write";
             }
 
@@ -1110,6 +1126,50 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
     private static function enumOf(string $case): string
     {
         return substr($case, 0, (int) strrpos($case, '::'));
+    }
+
+    /**
+     * Is a `spelled` entry's spelling only a case's name? Read as PHP tokens:
+     * whitespace and comments, and the punctuation `( ) [ ] { } , ;`, are
+     * left out, and what remains must be exactly a class name (`Enum`,
+     * `\Qualified\Enum`, `self`, `static`), `::`, a name, and optionally
+     * `->value` or `?->value`. An empty `()` anywhere makes it a call
+     * (`Enum::cases()`), which is not refused. A read of the case spells a
+     * case's name the same way, so it cannot tell the write from a read.
+     * Refused by
+     * {@see staleExcuses()}; the controls are in
+     * {@see the_excuse_checks_refuse_the_variants_they_exist_for()}.
+     */
+    private static function isOnlyACaseName(string $spelling): bool
+    {
+        $significant = array_values(array_filter(
+            array_slice(PhpToken::tokenize('<?php '.$spelling), 1),
+            static fn (PhpToken $token): bool => ! $token->isIgnorable(),
+        ));
+
+        // `()` is a call (`Enum::cases()`), not punctuation around a name.
+        foreach ($significant as $i => $token) {
+            if ($token->text === '(' && ($significant[$i + 1]->text ?? null) === ')') {
+                return false;
+            }
+        }
+
+        $tokens = array_values(array_filter(
+            $significant,
+            static fn (PhpToken $token): bool => ! in_array($token->text, ['(', ')', '[', ']', '{', '}', ',', ';'], true),
+        ));
+
+        if (count($tokens) !== 3 && count($tokens) !== 5) {
+            return false;
+        }
+
+        if (! $tokens[0]->is([T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED, T_NAME_RELATIVE, T_STATIC])
+            || ! $tokens[1]->is(T_DOUBLE_COLON) || ! $tokens[2]->is(T_STRING)) {
+            return false;
+        }
+
+        return count($tokens) === 3
+            || ($tokens[3]->is([T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR]) && $tokens[4]->is(T_STRING) && $tokens[4]->text === 'value');
     }
 
     private static function fileSays(string $relative, string $spelling): bool
