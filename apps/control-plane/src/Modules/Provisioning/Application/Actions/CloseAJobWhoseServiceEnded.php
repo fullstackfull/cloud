@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobClosed;
 use Lynomia\Modules\Provisioning\Domain\Exceptions\CloseRefusedException;
 use Lynomia\Modules\Provisioning\Domain\StateMachines\ProvisioningJobStateMachine;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
@@ -29,9 +30,19 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  * machine already has for a person giving up, stamps finished_at and records
  * on the job's result who closed it and when (CLOSED); the controller audits
  * it with the evidence, in the same transaction. Nothing is asked of a
- * provider and nothing else is written: no money moves, and no reservation or
- * commitment is touched - what the service held is for the service's end to
- * give back, and closing does not check that it did. The address reaper
+ * provider. The close raises ProvisioningJobClosed in that transaction, and
+ * that is how money moves: a resize or package change delivering a paid plan
+ * change (queued under its invoice's key) that is closed has its payment
+ * returned to the wallet, with the close and in its transaction
+ * (ReturnAPaidChangeWhoseDeliveryStopped, which asks
+ * ReturnAnUpgradeTheEndPrevented - nothing, when the service's end already
+ * returned it). A close whose return fails is refused with it, so the last
+ * pointer to the money is not taken off the list while the money stays. It
+ * used to move no money at all, and a paid change closed here was kept (R10-M,
+ * the final audit). The locks: the job, then the invoice and the wallet
+ * (WhatAnInvoiceStillHolds, the lock order). Nothing else is written: no
+ * reservation or commitment is touched - what the service held is for the
+ * service's end to give back, and closing does not check that it did. The address reaper
  * (Ipam's ReapExpiredReservations) releases the reservations of a
  * `cancelled` job; no kind a close accepts reserves an address (the only
  * handlers that use the address allocator are the VPS create, the VPS
@@ -116,6 +127,14 @@ final readonly class CloseAJobWhoseServiceEnded
                 self::CLOSED => ['by' => $closedBy, 'at' => now()->toIso8601String(), 'service_status' => $service->status->value],
             ];
             $locked->save();
+
+            // Inside the transaction: what must happen with the close commits
+            // or fails with it (the class docblock).
+            event(new ProvisioningJobClosed(
+                provisioningJobId: (string) $locked->getKey(),
+                kind: $locked->kind,
+                serviceId: $locked->service_id,
+            ));
 
             return $locked;
         });

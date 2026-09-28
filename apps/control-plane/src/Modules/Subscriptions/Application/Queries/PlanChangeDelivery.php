@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Subscriptions\Application\Queries;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
@@ -12,6 +13,8 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Provisioning\Application\Services\LocalPlacementFeasibility;
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
+use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\SharedHosting\Application\Queries\HostingPackageForPlan;
@@ -19,6 +22,7 @@ use Lynomia\Modules\Subscriptions\Application\Actions\QueuePlanChangeAtProvider;
 use Lynomia\Modules\Subscriptions\Application\Actions\QuotePlanChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\ReturnAnUpgradeTheEndPrevented;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
+use Lynomia\Modules\Subscriptions\Application\Listeners\ReturnAPaidChangeWhoseDeliveryStopped;
 use Lynomia\Modules\Subscriptions\Domain\ValueObjects\PlanResources;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
@@ -89,14 +93,30 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  * ---------------------------------------------------------------------------
  *
  * {@see wasDelivered()} and {@see aLaterChangeWasSettled()} are what the end
- * of a subscription reads ({@see ReturnAnUpgradeTheEndPrevented}) and what
- * the settlement reads ({@see ResizeOnPlanChangeSettlement}), one answer for
- * both.
+ * of a subscription or of its service reads
+ * ({@see ReturnAnUpgradeTheEndPrevented}) and what the settlement reads
+ * ({@see ResizeOnPlanChangeSettlement}), one answer for both. Settled
+ * ({@see wasSettled()}) is not delivered: a settlement queues a resize or a
+ * package change, which can still stop in review or fail, and a change whose
+ * job stopped on a service that has ended was not delivered
+ * ({@see deliveryEndedWithItsService()}) - its payment goes back.
  */
 final readonly class PlanChangeDelivery
 {
     /** The least lookBackFrom() reads behind the current period, in days. */
     public const int LOOK_BACK_DAYS = 7;
+
+    /**
+     * Where a job that delivers a paid change stops without delivering it
+     * (deliveryEndedWithItsService()).
+     *
+     * @var list<ProvisioningJobStatus>
+     */
+    public const array STOPPED_UNDELIVERED = [
+        ProvisioningJobStatus::NeedsReview,
+        ProvisioningJobStatus::Failed,
+        ProvisioningJobStatus::Cancelled,
+    ];
 
     public function __construct(
         private HostingPackageForPlan $packages,
@@ -415,23 +435,239 @@ final readonly class PlanChangeDelivery
      * customer's raw Idempotency-Key, and one whose key the customer spelled
      * `invoice:<id>` for this invoice would still answer this; nothing
      * rewrites those rows.
+     *
+     * Settled is not delivered: what the settlement queued can still stop in
+     * review or fail. aPaidChangeAwaitsDelivery() reads this - a change
+     * settled is not one whose settlement is still awaited - and
+     * wasDelivered() reads it with deliveryEndedWithItsService().
      */
-    public function wasDelivered(string $subscriptionId, string $invoiceId): bool
+    public function wasSettled(string $subscriptionId, string $invoiceId): bool
     {
-        $delivered = PlanChange::query()
+        $settled = PlanChange::query()
             ->where('proration_invoice_id', $invoiceId)
             ->whereNotNull('delivered_at')
             ->exists();
 
-        return $delivered || ProvisioningJob::query()
-            ->where('idempotency_key', 'like', sprintf('plan-change:%s:%%:invoice:%s', $subscriptionId, $invoiceId))
-            ->exists();
+        return $settled || $this->deliveringJobs($subscriptionId, $invoiceId)->exists();
+    }
+
+    /**
+     * Whether this paid proration invoice's change was delivered, as the end
+     * of a subscription or of its service reads it
+     * ({@see ReturnAnUpgradeTheEndPrevented}): its settlement was heard
+     * (wasSettled()), and what that settlement queued has not ended
+     * undelivered with its service (deliveryEndedWithItsService()).
+     *
+     * A settlement that queued nothing - nothing to resize, or a later change
+     * already decided the machine - delivered the change all the same. It
+     * used to be read off `delivered_at` alone, so a resize that stopped in
+     * review or failed, on a service that then ended, read as delivered, and
+     * the payment was kept for a change never made (R10-M, the final audit).
+     */
+    public function wasDelivered(string $subscriptionId, string $invoiceId): bool
+    {
+        return $this->wasSettled($subscriptionId, $invoiceId)
+            && ! $this->deliveryEndedWithItsService($subscriptionId, $invoiceId);
+    }
+
+    /**
+     * Whether the resize or package change queued for this paid proration
+     * invoice (under its key, as wasSettled() reads it) can no longer deliver
+     * it: there is such a job, and every one of them stopped without
+     * succeeding - in review, failed, or closed (cancelled) - on a service
+     * that has ended (`terminated`).
+     *
+     * Both halves, because a stopped job on a live service is not the end of
+     * it: an operator's retry can still run it and deliver
+     * (RetryProvisioningJob), and the payment is held for that
+     * (docs/billing.md). A retry is refused once the service has ended, and a
+     * close does not run the job (CloseAJobWhoseServiceEnded), so a job
+     * stopped on an ended service never delivers. A job still queued or
+     * running is not stopped: it is asked again when it stops
+     * ({@see ReturnAPaidChangeWhoseDeliveryStopped}).
+     */
+    public function deliveryEndedWithItsService(string $subscriptionId, string $invoiceId): bool
+    {
+        return $this->endedWithItsService($this->deliveringJobs($subscriptionId, $invoiceId));
+    }
+
+    /**
+     * Whether a plan change recorded after this one was delivered, and so
+     * decided the machine's shape in its place: what the end of a
+     * subscription or a service asks before it keeps an earlier paid change
+     * undelivered ({@see ReturnAnUpgradeTheEndPrevented}).
+     *
+     * A later change counts only when it was delivered itself. It is not
+     * returned (`returned_at`), and either:
+     *  - it owed nothing (no proration invoice), and what it queued under its
+     *    own key (`...:change:<id>`) did not stop undelivered on a service
+     *    that has ended - or it queued nothing; or
+     *  - its invoice was paid and it was delivered (wasDelivered()).
+     *
+     * aLaterChangeWasSettled() - the settlement's question, "has a later
+     * change already decided what to build" - counted any later change that
+     * owed nothing or was paid. Read at the end, that kept an earlier paid
+     * upgrade because a later one was paid, although the later one failed
+     * too: 27.000 kept for nothing, and the answer turned on which of the two
+     * was asked first, since a later change already returned did not count
+     * (B2, the verification of round ten M: two paid upgrades that both
+     * failed; a paid upgrade followed by a downgrade whose shrink failed). A
+     * later change that was itself not delivered decided nothing, and the
+     * answer no longer depends on whether it has been returned yet.
+     */
+    public function aLaterChangeWasDelivered(PlanChange $change): bool
+    {
+        /** @var list<PlanChange> $later */
+        $later = PlanChange::query()
+            ->where('subscription_id', $change->subscription_id)
+            ->whereNull('returned_at')
+            ->where(static fn ($query) => $query
+                ->where('changed_at', '>', $change->changed_at)
+                ->orWhere(static fn ($same) => $same
+                    ->where('changed_at', $change->changed_at)
+                    ->where('id', '>', $change->id)))
+            ->get()
+            ->all();
+
+        $subscriptionId = (string) $change->subscription_id;
+
+        foreach ($later as $candidate) {
+            if ($candidate->proration_invoice_id === null) {
+                $queued = ProvisioningJob::query()->where('idempotency_key', 'like', sprintf('plan-change:%s:%%:change:%s', $subscriptionId, $candidate->getKey()));
+
+                if (! $this->endedWithItsService($queued)) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            $paid = Invoice::query()
+                ->whereKey($candidate->proration_invoice_id)
+                ->where('status', InvoiceStatus::Paid->value)
+                ->exists();
+
+            if ($paid && $this->wasDelivered($subscriptionId, (string) $candidate->proration_invoice_id)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether the paid plan change this proration invoice bills was not
+     * delivered: it is recorded, its invoice was paid, and it was not
+     * delivered by the reading of wasDeliveredWhileLive() - whether or not it
+     * has been returned or taken out of play since.
+     *
+     * The raw refund route is refused for such an invoice (B1, the
+     * verification of round ten M). While the change is in play - its
+     * settlement not heard, or its job queued, running, in review or failed
+     * - a refund by hand moved the money and left it there: the subscription
+     * on the new plan and billed at its price, a job in review holding every
+     * plan change (`service_busy`), a later downgrade crediting the refunded
+     * money a second time, a retry able to deliver a change already paid
+     * back. An operator returns it with ReturnAHeldPaidChange instead. And
+     * once it is out of play the invoice either holds nothing (it was
+     * returned in full) or holds what a later plan change was priced on and
+     * still draws on (it was taken out of play with nothing returned, O1 of
+     * the same verification): refunding that by hand paid the same money
+     * twice - once by hand and again as the later change's credit. What an
+     * undelivered change's invoice holds goes back by the return, by the end
+     * of the service (ReturnAnUpgradeTheEndPrevented), or by a later change's
+     * credit; not by hand.
+     *
+     * A delivered change's invoice, a renewal, and a proration invoice with
+     * no recorded change are not refused: they are an operator's to refund.
+     */
+    public function aPaidChangeWasNotDelivered(Invoice $invoice): bool
+    {
+        if ($invoice->status !== InvoiceStatus::Paid || $invoice->subscription_id === null) {
+            return false;
+        }
+
+        if (! PlanChange::query()->where('proration_invoice_id', $invoice->getKey())->exists()) {
+            return false;
+        }
+
+        return ! $this->wasDeliveredWhileLive((string) $invoice->subscription_id, (string) $invoice->getKey());
+    }
+
+    /**
+     * Whether this paid proration invoice's change was delivered, read
+     * strictly, as it stands on a live service: what its settlement queued
+     * under the invoice's key succeeded; or it queued nothing and its
+     * settlement was heard (`delivered_at`) - nothing needed changing, or a
+     * later change already decided the machine. A job queued, running, in
+     * review, failed or cancelled has not delivered it.
+     *
+     * wasDelivered() answers the end's question, and counts a job still able
+     * to run as delivering; this one asks whether it did.
+     */
+    public function wasDeliveredWhileLive(string $subscriptionId, string $invoiceId): bool
+    {
+        $jobs = $this->deliveringJobs($subscriptionId, $invoiceId)->get(['status'])->all();
+
+        if ($jobs === []) {
+            return PlanChange::query()
+                ->where('proration_invoice_id', $invoiceId)
+                ->whereNotNull('delivered_at')
+                ->exists();
+        }
+
+        foreach ($jobs as $job) {
+            if ($job->status === ProvisioningJobStatus::Succeeded) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether there is such a job and every one stopped without succeeding
+     * (STOPPED_UNDELIVERED) on a service that has ended.
+     *
+     * @param  Builder<ProvisioningJob>  $jobs
+     */
+    private function endedWithItsService(Builder $jobs): bool
+    {
+        /** @var list<ProvisioningJob> $found */
+        $found = $jobs->get(['id', 'status', 'service_id'])->all();
+
+        if ($found === []) {
+            return false;
+        }
+
+        foreach ($found as $job) {
+            if (! in_array($job->status, self::STOPPED_UNDELIVERED, true) || $job->service_id === null) {
+                return false;
+            }
+
+            if (Service::query()->find($job->service_id)?->status !== ServiceStatus::Terminated) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * The jobs queued under this invoice's key (wasSettled()).
+     *
+     * @return Builder<ProvisioningJob>
+     */
+    private function deliveringJobs(string $subscriptionId, string $invoiceId): Builder
+    {
+        return ProvisioningJob::query()
+            ->where('idempotency_key', 'like', sprintf('plan-change:%s:%%:invoice:%s', $subscriptionId, $invoiceId));
     }
 
     /**
      * Whether a change of this subscription has been paid for and not yet
      * delivered: its proration invoice is paid and its settlement has not
-     * been heard (wasDelivered() is false), and no later change was settled
+     * been heard (wasSettled() is false), and no later change was settled
      * after it.
      *
      * The window the queue's lag leaves between a capture and its settlement.
@@ -473,7 +709,7 @@ final readonly class PlanChangeDelivery
             ->all();
 
         foreach ($paid as $change) {
-            if (! $this->wasDelivered((string) $subscription->getKey(), (string) $change->proration_invoice_id)
+            if (! $this->wasSettled((string) $subscription->getKey(), (string) $change->proration_invoice_id)
                 && ! $this->aLaterChangeWasSettled($change)) {
                 return true;
             }

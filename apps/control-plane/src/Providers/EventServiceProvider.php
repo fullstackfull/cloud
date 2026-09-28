@@ -30,6 +30,7 @@ use Lynomia\Modules\ProductReadiness\Application\Listeners\ReassessProductsWhenA
 use Lynomia\Modules\Providers\Domain\Events\ProviderReadinessChanged;
 use Lynomia\Modules\Provisioning\Application\Listeners\AlertOnCriticalDrift;
 use Lynomia\Modules\Provisioning\Domain\Events\DriftRecorded;
+use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobClosed;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobFailed;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobNeedsReview;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobStarted;
@@ -40,6 +41,7 @@ use Lynomia\Modules\Subscriptions\Application\Listeners\EndTheSubscriptionWithIt
 use Lynomia\Modules\Subscriptions\Application\Listeners\EnforceServiceStateForSubscription;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
 use Lynomia\Modules\Subscriptions\Application\Listeners\RestorePlanOnVoidedUpgrade;
+use Lynomia\Modules\Subscriptions\Application\Listeners\ReturnAPaidChangeWhoseDeliveryStopped;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ReviveSubscriptionOnRenewalPayment;
 use Lynomia\Modules\Subscriptions\Application\Listeners\StartDunningOnFailedPayment;
 use Lynomia\Modules\Subscriptions\Domain\Events\SubscriptionStatusChanged;
@@ -68,6 +70,9 @@ use Lynomia\Modules\Subscriptions\Domain\Events\SubscriptionStatusChanged;
  *     …NeedsReview, …Failed     review, refused, ended (F-19); and a service
  *                               that has ended ends the subscription that
  *                               paid for it (I-1)
+ *     …NeedsReview, …Failed,  → a paid plan change whose job stopped on a
+ *     ProvisioningJobClosed     service that has ended is returned to the
+ *                               wallet (R10-M)
  *
  * The settlement event in the middle is what lets a zero-total order reach
  * fulfilment: it owes nothing, so it produces no invoice, and a chain that
@@ -171,9 +176,20 @@ final class EventServiceProvider extends BaseEventServiceProvider
         ],
         ProvisioningJobNeedsReview::class => [
             MoveTheOrderWithWhatItBought::class,
+
+            // A paid plan change whose job stops on a service that has ended
+            // goes back to the wallet (R10-M). After the caller commits, and
+            // never throwing.
+            ReturnAPaidChangeWhoseDeliveryStopped::class,
         ],
         ProvisioningJobFailed::class => [
             MoveTheOrderWithWhatItBought::class,
+            ReturnAPaidChangeWhoseDeliveryStopped::class,
+        ],
+        ProvisioningJobClosed::class => [
+            // Synchronous, inside the close's transaction: a close whose
+            // return fails is refused with it.
+            ReturnAPaidChangeWhoseDeliveryStopped::class,
         ],
 
         /*

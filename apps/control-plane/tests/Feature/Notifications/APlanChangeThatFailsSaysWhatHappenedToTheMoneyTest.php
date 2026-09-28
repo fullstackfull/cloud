@@ -8,13 +8,16 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Notifications\Application\Actions\RenderNotification;
 use Lynomia\Modules\Notifications\Application\Jobs\DeliverNotification;
 use Lynomia\Modules\Notifications\Application\Listeners\NotifyOnProvisioningOutcome;
+use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
+use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobFailed;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobNeedsReview;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
@@ -34,7 +37,8 @@ use Tests\TestCase;
  * proration invoice is paid, under a key naming that invoice
  * (`plan-change:<subscription>:<plan>:invoice:<id>`), so a failed resize or
  * package change queued that way has been charged: the payment is held for
- * an operator to complete the change or return it (docs/billing.md). The
+ * an operator to complete the change or return it while its service lives,
+ * and returned to the wallet if the service ends first (docs/billing.md). The
  * paid case now has its own message. The review message is one type for
  * both, and speaks of a payment only conditionally, which is true of each.
  */
@@ -182,6 +186,52 @@ final class APlanChangeThatFailsSaysWhatHappenedToTheMoneyTest extends TestCase
 
         $this->assertStringNotContainsString('What you paid', $this->renderedBody('en'));
         $this->assertStringContainsString('If you paid', $this->renderedBody('en'));
+    }
+
+    #[Test]
+    #[DataProvider('planChangeKinds')]
+    public function a_paid_change_whose_service_has_ended_is_not_told_its_payment_is_held(ProvisioningJobKind $kind): void
+    {
+        /*
+         * R10-M: a paid change whose job stops once its service has ended is
+         * not held - its payment goes back to the wallet as the job stops
+         * (ReturnAPaidChangeWhoseDeliveryStopped), and the customer is told
+         * that. "Held until our team completes the change" would be false of
+         * a change nothing can make any more.
+         */
+        $this->service->forceFill(['status' => ServiceStatus::Terminated])->save();
+        $paid = $this->job($kind, 'plan-change:'.Str::ulid().':'.Str::ulid().':invoice:'.Str::ulid());
+
+        app(NotifyOnProvisioningOutcome::class)->failed(new ProvisioningJobFailed((string) $paid->id, $kind, (string) $this->service->id, FailureClass::Permanent, 'vps.unknown_machine'));
+        app(NotifyOnProvisioningOutcome::class)->needsReview(new ProvisioningJobNeedsReview((string) $paid->id, $kind, (string) $this->service->id, null, FailureClass::Capacity, 'no room'));
+
+        $this->assertSame(0, Notification::query()->where('customer_id', $this->customer->id)->count());
+
+        // A change that owed nothing is still told what happened: nothing was held.
+        $unpaid = $this->job($kind, 'plan-change:'.Str::ulid().':'.Str::ulid().':change:'.Str::ulid());
+        app(NotifyOnProvisioningOutcome::class)->failed(new ProvisioningJobFailed((string) $unpaid->id, $kind, (string) $this->service->id, FailureClass::Permanent, 'vps.unknown_machine'));
+        $this->assertStringContainsString('Nothing has been charged', $this->renderedBody('en'));
+    }
+
+    #[Test]
+    public function the_return_at_the_end_says_the_service_ended_and_where_the_money_went(): void
+    {
+        app(NotifyCustomer::class)->execute(
+            customerId: (string) $this->customer->id,
+            type: NotificationType::PlanChangeReturnedAtTheEnd,
+            idempotencyKey: 'plan-change-returned:test',
+            subject: $this->service,
+            data: ['service' => 'web-01', 'amount' => '27.000 KWD'],
+            link: '/subscriptions',
+        );
+
+        $en = $this->renderedBody('en');
+        $ar = $this->renderedBody('ar');
+        $this->assertStringContainsString('web-01 ended before the plan change you paid for was completed', $en);
+        $this->assertStringContainsString('27.000 KWD, has been returned to your wallet', $en);
+        $this->assertStringContainsString('انتهى web-01', $ar);
+        $this->assertStringContainsString('27.000 KWD', $ar);
+        $this->assertStringContainsString('محفظتك', $ar);
     }
 
     private function job(ProvisioningJobKind $kind, string $key): ProvisioningJob

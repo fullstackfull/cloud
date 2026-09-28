@@ -60,6 +60,13 @@ final class ProvisioningJobStateMachine extends AbstractStateMachine
                 // Adoption of a resource found at the provider settles the job
                 // the build it belongs to should have settled.
                 ProvisioningJobStatus::Succeeded,
+                // A person giving up on it: an operator who returns the paid
+                // plan change a failed resize or package change was
+                // delivering takes the job out of play with it, so no retry
+                // delivers a change already paid back (ReturnAHeldPaidChange,
+                // B1 of the verification of round ten M). Nothing else
+                // travels this edge.
+                ProvisioningJobStatus::Cancelled,
             ],
 
             ProvisioningJobStatus::NeedsReview->value => [

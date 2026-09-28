@@ -180,6 +180,20 @@ Route::middleware(['auth:sanctum', 'verified', 'staff', 'throttle:api'])->group(
         ->name('provisioning.close');
 
     /*
+     * Returning a paid plan change held on a live service: the money to the
+     * wallet, the plan put back, the job cancelled (ReturnAHeldPaidChange).
+     * Behind payment.refund, the permission of the raw refund it replaces
+     * for such a change - it moves money back out, and the raw refund is
+     * refused while the change is in play, so whoever may refund must be
+     * able to do this. Cancelling the stopped job is part of the return,
+     * not a separate provisioning decision: it only stops the job
+     * delivering what was paid back.
+     */
+    Route::post('provisioning/jobs/{job}/return-payment', [ProvisioningController::class, 'returnPayment'])
+        ->middleware('permission:'.Permission::PaymentRefund->value)
+        ->name('provisioning.return_payment');
+
+    /*
      * Correcting the domain a stopped hosting build will serve: the repair a
      * retry cannot be, for a build refused because it names no domain or one
      * another live account serves. It writes one column of the job,

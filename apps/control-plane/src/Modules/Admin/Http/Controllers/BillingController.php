@@ -18,7 +18,9 @@ use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Provisioning\Domain\Exceptions\PaidChangeReturnRefusedException;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Subscriptions\Application\Queries\PlanChangeDelivery;
 
 /**
  * Invoices, payments and refunds across every account.
@@ -103,6 +105,26 @@ final class BillingController
             throw ValidationException::withMessages([
                 'transaction' => 'Only a succeeded capture can be refunded.',
             ]);
+        }
+
+        /*
+         * A capture that paid for a plan change that was not delivered is not
+         * refunded here (PlanChangeDelivery::aPaidChangeWasNotDelivered()
+         * says why): its money goes back by ReturnAHeldPaidChange, by the end
+         * of the service, or by a later change's credit (B1 and O1, the
+         * verification of round ten M). Read before the refund and outside
+         * its locks. The one move this read can race is a change being
+         * delivered meanwhile - its job succeeding - and then the refund is
+         * refused although it would now be allowed, and the operator asks
+         * again. No move turns a delivered change back into an undelivered
+         * one, so a refund this read allows is never of an undelivered
+         * change's money.
+         */
+        /** @var Invoice|null $paidFor */
+        $paidFor = $found->invoice_id === null ? null : Invoice::query()->find($found->invoice_id);
+
+        if ($paidFor !== null && app(PlanChangeDelivery::class)->aPaidChangeWasNotDelivered($paidFor)) {
+            throw PaidChangeReturnRefusedException::becauseTheChangeItPaidForWasNotDelivered((string) $found->getKey(), (string) $paidFor->getKey());
         }
 
         $user = $request->user();

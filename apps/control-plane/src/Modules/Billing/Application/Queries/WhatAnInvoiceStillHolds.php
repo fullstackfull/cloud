@@ -25,8 +25,10 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  *    cancelled order), RenewSubscription (an upgrade that lapsed unpaid) and
  *    WindUpAnEndedSubscription (the open invoices of a subscription that has
  *    ended, which it then voids) and ReturnAnUpgradeTheEndPrevented (a paid
- *    upgrade never delivered because its subscription ended, from the
- *    wind-up or from the settlement heard after the end - OA-3) and
+ *    upgrade never delivered because its subscription or its service ended,
+ *    from the wind-up, from the settlement heard after the end - OA-3 - or
+ *    from the stop or the close of its job on a service that has ended -
+ *    R10-M) and
  *    ReturnAPlanChangeNoLongerDeliverable (a paid plan change its settlement
  *    found could no longer be delivered);
  *  - CompensateUncollectableCapture credits a capture that landed on a
@@ -114,9 +116,28 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  * the subscription goes back to);
  * ApplyPlanChange (the subscription, its orders, then the paid invoices a
  * credit draws on, then - for a downgrade - the wallet, then the plan it
- * moves onto).
+ * moves onto); the close of a job whose service ended,
+ * CloseAJobWhoseServiceEnded (the provisioning job, then - returning the
+ * paid change it delivered, through ReturnAPaidChangeWhoseDeliveryStopped -
+ * the paid invoice and the wallet); an operator's return of a held paid
+ * change, ReturnAHeldPaidChange (the provisioning job; the open renewals it
+ * reprices, while still open, before the subscription, as the renewal and
+ * the wind-up take an open invoice; the subscription; the paid invoices -
+ * the change's and the paid renewals it reprices - in ascending id order;
+ * the wallet; then the plan the subscription goes back to). A
+ * provisioning job's row is outside the numbered order, and taken before a
+ * subscription or an invoice: the actions that lock a job (the provisioning
+ * engine's claim, RetryProvisioningJob, AdoptOrphanResource, DetectStaleJobs,
+ * CloseAJobWhoseServiceEnded, RepointReservedIdentity,
+ * NameTheDomainAHostingJobWillServe, ReturnAHeldPaidChange - `grep -rln "ProvisioningJob::query()->lockForUpdate" src`
+ * when this was written, which lists this file and
+ * ReturnAPaidChangeWhoseDeliveryStopped too; that listener locks a job only
+ * in a transaction of its own, after the return has failed, holding nothing
+ * else) hold no invoice, subscription or wallet while they wait for it. A
+ * job's stop in review or failure returns its paid change after the caller
+ * commits, holding no job lock.
  *
- * Those three take an invoice lock after a subscription, against the order
+ * Those four take an invoice lock after a subscription, against the order
  * above, and only ever a paid one (ApplyPlanChange: every non-open one it
  * draws on). That is safe because nothing holding a paid invoice's lock
  * waits for a subscription or an order. The wind-up used to lock its paid

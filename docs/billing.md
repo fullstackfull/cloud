@@ -104,25 +104,127 @@ nothing was changed after the returned change). A returned change counts afterwa
 nothing: it does not reprice the period's discount, supersede an earlier paid change, or
 hold the subscription's next change.
 
-That is the only automatic return. A paid change is **not** returned automatically when
-its failure comes after the settlement - a resize or package change that fails outright
-or stops in review - nor when its settlement's listener exhausts its retries: the money is
-held for an operator to complete the change or return it.
+While the service lives, that is the only automatic return. A paid change is **not**
+returned automatically while its service lives when its failure comes after the
+settlement - a resize or package change that fails outright or stops in review - nor
+when its settlement's listener exhausts its retries: the money is held for an operator to
+complete the change (retry the job) or return it, once its job has stopped
+(`POST /api/admin/provisioning/jobs/{job}/return-payment`, `ReturnAHeldPaidChange`, behind
+`payment.refund`; the steps in `docs/runbooks/provisioning-stuck.md` §6). It is one
+transaction, and either way the stopped job is cancelled (`needs_review` or `failed` ->
+`cancelled`), so it leaves the review list, stops holding plan changes (`service_busy`)
+and cannot be retried into delivering what was paid back; the change is stamped
+`returned_at`; and the operator's `provisioning.paid_change_returned` is audited with the
+evidence. What else it does depends on whether the plan was changed again after it:
+
+- **Not changed again** (no later change, or only later changes returned themselves):
+  what the proration invoice still holds goes back to the wallet against the invoice; the
+  subscription goes back to the plan and recurring amount the change came from; every
+  renewal issued since the change at its price is priced again at the old one
+  (`RepriceTheRenewalsAReturnedChangeBilled`: the same quantity, the tax rate on its line,
+  and the subscription's coupon terms when its line was discounted) - an open renewal is
+  withdrawn, what was paid on it going back to the wallet against it
+  (`ReturnWhatAnInvoiceStillHolds::andWithdraw()`), and issued again for the same period at
+  the old price, open; a paid renewal keeps its document and the difference goes back to
+  the wallet as a credit against it. A `subscription.plan_changed` entry with the reason
+  `held_plan_change_returned_by_an_operator` is audited, and the customer is told
+  (`billing.held_plan_change_returned`). The renewals used to be left alone: a renewal
+  issued at 90.000 while the change was held stayed open at 90.000, or at 17.000 owing
+  after 73.000 was paid from the wallet, for a period on the 9.000 plan (N1, the
+  verification of round ten M, `1af8ec1`). The part paid on an open renewal goes to the
+  wallet rather than onto the new invoice: the platform has no idiom that moves a
+  payment between invoices, and the wallet pays the new renewal as it paid the old.
+- **Changed again by a later change that was settled** (it owed nothing, or it was paid
+  and delivered): nothing is credited, and the plan stays where the later change put it.
+  The later change was priced from the plan this one moved onto and drew its credit on
+  this change's invoice, or charged only the difference from it; what this invoice still
+  holds is what the plan the subscription is on still consumes. It stays against the
+  invoice - returned at the service's end if nothing later was delivered, drawn on by a
+  later change's credit, never refunded by hand. A `subscription.plan_changed` entry with
+  the reason `held_plan_change_taken_out_of_play_by_an_operator` is audited, and the
+  customer is told (`billing.held_plan_change_returned_plan_kept`). It used to credit what
+  the invoice held as well, and a later move back to the small plan credited the same
+  money again: 109.000 against 100.000 (O1, the same verification).
+- **Changed again by a later paid change not yet delivered** (awaiting payment, running,
+  held): refused (`provisioning.return_a_later_paid_change_is_pending`). Complete or return
+  the later one first; a chain of held paid changes is returned latest first, each putting
+  the plan back one step.
+
+It is refused, too, while the service or the subscription has ended (the end returns
+it), and when the plan cannot go back (none recorded, or the subscription no longer on the
+plan and price the change moved it to).
+
+The raw refund of a paid change's capture (`POST /api/admin/transactions/{transaction}/refunds`)
+is refused (409 `provisioning.refund_of_an_undelivered_paid_change`) while the change was not
+delivered - whether or not it has been returned or taken out of play since
+(`PlanChangeDelivery::aPaidChangeWasNotDelivered()`). It used to be the documented return, and
+it moved the money only: the subscription stayed on the new plan and a renewal billed its
+price for a machine that never grew, a job in review kept refusing the customer's change
+back as `service_busy`, a downgrade after a failed job credited the refunded upgrade a
+second time (12.000 credited against 3.000 charged), and a retry could still deliver a
+change already paid back (B1, the verification of round ten M). A delivered change's
+invoice, a renewal, and a proration invoice with no recorded change stay refundable.
 
 What the settlement cannot see is a room that goes after it: a resize the node can no
 longer hold is retried and then stops in review, never failed, with the money held for an
 operator to grow the machine or return it. The customer is told the plan change is
-waiting for the team and that what they paid for it is held
-(`service.plan_change_needs_review`, which speaks of the payment conditionally: the same
-message goes to a change that owed nothing). A paid change whose resize or package change
-fails outright is not returned automatically either: the payment is held for an operator
-to complete the change or return it, and the customer is told exactly that
-(`service.plan_change_failed_after_payment`). Both messages also say what "held" does not:
-the subscription is on the new plan, and a renewal before the change is completed bills
-its price. A change that owed nothing and fails is told that nothing was charged, and that
-its subscription is on the new plan and billed at its price while the service runs as it
-was (`service.plan_change_failed`). Which of the two a failure is, is read off the job's
-key: an upgrade is queued under the invoice that paid for it.
+waiting for the team and that what they paid for it is held until the change is applied,
+or returned if it cannot be (`service.plan_change_needs_review`, which speaks of the
+payment conditionally: the same message goes to a change that owed nothing). A paid
+change whose resize or package change fails outright is not returned automatically
+either while the service lives: the payment is held for an operator to complete the
+change or return it, and the customer is told exactly that, and that what they paid and
+have not already had back is returned to the wallet if the service ends first and no
+later plan change was completed in its place (`service.plan_change_failed_after_payment`). Both
+messages also say what "held" does not: the subscription is on the new plan, and a
+renewal before the change is completed bills its price. A change that owed nothing and
+fails is told that nothing was charged, and that its subscription is on the new plan and
+billed at its price while the service runs as it was (`service.plan_change_failed`).
+Which of the two a failure is, is read off the job's key: an upgrade is queued under the
+invoice that paid for it.
+
+### A paid plan change the end of its service leaves undelivered goes back
+
+When the subscription or the service ends with a paid change undelivered, what its
+proration invoice still holds goes back to the wallet, against the invoice, without an
+operator (`ReturnAnUpgradeTheEndPrevented`):
+
+- the subscription ended before the change's settlement was heard (a capture in the
+  moment before the end: nothing is resized onto an ended subscription); or
+- its settlement was heard while the subscription was live (`delivered_at`), and its
+  resize or package change then stopped without succeeding - in review, failed, or
+  closed - on a service that has ended (`terminated`). A retry is refused once the
+  service has ended and a close does not run the job, so nothing will deliver it. This
+  used to be kept: `delivered_at` was read as delivered, and closing the job moved no
+  money (the final audit, R10-M).
+
+It is asked from every side, and credits once between them, because the return reads
+what the invoice still holds under the invoice's lock: the wind-up of the ended
+subscription (which runs again when the service is terminated after the subscription
+ended); the settlement heard after the end; the job's failure or move to review on a
+service that has already ended; and the close of the job
+(`POST /api/admin/provisioning/jobs/{job}/close`), inside the close's transaction - a
+close whose return fails is refused. A change is kept when its job succeeded (an
+operator's retry that grew the machine), when its job is still queued or running (asked
+again when it stops), when it queued nothing because nothing needed changing, or when a
+later change was **delivered** after it (`PlanChangeDelivery::aLaterChangeWasDelivered()`):
+not returned, owed nothing or paid, and its own resize or package change did not stop
+undelivered on the ended service. A later change that failed too supersedes nothing. It
+used to count once it was settled, so of two paid upgrades that both failed the earlier
+was kept (73.000 left of 100.000), and whether it was kept depended on which of the two
+the end asked about first (B2, the verification of round ten M); the answer no longer
+depends on the order. Each undelivered change gets back what its invoice still holds and
+no more. A later downgrade's credit drawn on the invoice has already left it, and no
+downgrade credit is reversed: after a 27.000 upgrade that failed and a downgrade that
+credited 15.000 against it and whose shrink failed too, the end returns the 12.000 the
+upgrade's invoice still holds, and the customer is back where they began. What an operator
+already returned is not returned again. A return that credits something stamps the change `returned_at` with its
+`return_reason`, writes a `subscription.plan_changed` audit entry with the reason
+`plan_change_not_delivered_before_the_end` (the invoice, the change, the amount), and
+tells the customer once (`billing.plan_change_returned_at_the_end`: the service ended
+before the change was completed, and the amount returned to the wallet). The
+failed or in-review message is not sent for a paid change whose service has already
+ended: it would say the payment is held.
 
 ### An unpaid plan change can be withdrawn by the customer
 

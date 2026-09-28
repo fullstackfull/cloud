@@ -9197,7 +9197,7 @@ paths:
         - "Operator"
       summary: "Close a job whose service has ended"
       description: |-
-        Takes a job off the review list without running it, once the service it worked for has ended: a resize, a package change or a power change stopped in `needs_review` on a `terminated` service, which a retry refuses (`provisioning.retry_after_the_service_ended`) and an adoption refuses (`provisioning.adoption_not_a_build`). The job becomes `cancelled`. Refuses (409) a job not in `needs_review` (`provisioning.close_not_in_review`), a job of any other kind (`provisioning.close_not_for_this_kind`: a build or a destroy may have left a resource at the provider, and a rebuild is settled by its operation's own verdict) - and a job whose service has not ended (`provisioning.close_service_not_ended`). Nothing is asked of a provider and no money moves. The evidence is required and audited (`provisioning.closed`).
+        Takes a job off the review list without running it, once the service it worked for has ended: a resize, a package change or a power change stopped in `needs_review` on a `terminated` service, which a retry refuses (`provisioning.retry_after_the_service_ended`) and an adoption refuses (`provisioning.adoption_not_a_build`). The job becomes `cancelled`. Refuses (409) a job not in `needs_review` (`provisioning.close_not_in_review`), a job of any other kind (`provisioning.close_not_for_this_kind`: a build or a destroy may have left a resource at the provider, and a rebuild is settled by its operation's own verdict) - and a job whose service has not ended (`provisioning.close_service_not_ended`). Nothing is asked of a provider. Money moves in one case: a resize or package change delivering a paid plan change has what its proration invoice still holds returned to the customer's wallet with the close, in the same transaction - usually nothing, since the service's end returned it already; a close whose return fails is refused. The evidence is required and audited (`provisioning.closed`).
 
         Requires the `provisioning.retry` permission.
       parameters:
@@ -9454,6 +9454,81 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/AdminRetriedJobResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/provisioning/jobs/{job}/return-payment":
+    post:
+      operationId: "api_admin_provisioning_return_payment"
+      tags:
+        - "Operator"
+      summary: "Return a paid plan change held on a live service"
+      description: |-
+        The way to return a paid plan change whose resize or package change stopped (`needs_review` or `failed`) while its service is still live - the payment is held for an operator to complete the change (retry) or return it (this). One transaction, and the job is cancelled either way, so it leaves the review list, stops holding plan changes, and cannot be retried into delivering a change already paid back. When the plan was not changed again after it (`plan_restored: true`): what the proration invoice still holds goes back to the customer's wallet, against the invoice; the subscription goes back to the plan and price the change came from; and every renewal issued since at the new price is priced again at the old one - an open one withdrawn (what was paid on it back to the wallet) and issued again, a paid one with the difference returned to the wallet against it. When a later change was settled from it (`plan_restored: false`): nothing is credited (`returned_to_wallet_minor: 0`) - the later change was priced from this one and draws on its invoice - and the change is only taken out of play. The customer is told. Refuses (409) a job that has not stopped (`provisioning.return_not_stopped`), one that delivers no paid plan change (`provisioning.return_not_a_paid_change`), one whose service has ended - close it instead (`provisioning.return_service_ended`) - one whose subscription has ended (`provisioning.return_subscription_ended`), a change already returned (`provisioning.return_already_returned`), a change followed by a later paid change not yet delivered (`provisioning.return_a_later_paid_change_is_pending` - complete or return that one first), a change whose plan cannot go back (`provisioning.return_plan_cannot_go_back`), and a return during which a renewal was issued or paid (`provisioning.return_renewal_moved` - ask again). The raw refund of an undelivered paid change's capture is refused (`provisioning.refund_of_an_undelivered_paid_change`). Nothing is asked of a provider. The evidence is required and audited (`provisioning.paid_change_returned`).
+
+        Requires the `payment.refund` permission.
+      parameters:
+        - name: "job"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                evidence:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminReturnedPaidChangeResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -10967,7 +11042,7 @@ paths:
         - "Operator"
       summary: "Refund a capture"
       description: |-
-        Its own permission: moving money back out is not implied by being able to look at payments. Records who issued it, because "who refunded this?" has to survive the operator leaving.
+        Its own permission: moving money back out is not implied by being able to look at payments. Records who issued it, because "who refunded this?" has to survive the operator leaving. Refused (409 `provisioning.refund_of_an_undelivered_paid_change`) for a capture on a proration invoice whose recorded plan change was not delivered - whether or not it has been returned or taken out of play since: its money goes back with the change (`POST /api/admin/provisioning/jobs/{job}/return-payment` while it is held on a live service, the end of the service, or a later change's credit), not by hand.
 
         Requires the `payment.refund` permission.
       parameters:
@@ -22005,6 +22080,31 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminRetriedJob"
+    AdminReturnedPaidChange:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        status:
+          type:
+            - "string"
+            - "null"
+        service_id:
+          type:
+            - "string"
+            - "null"
+        returned_to_wallet_minor:
+          type: "integer"
+        plan_restored:
+          type: "boolean"
+    AdminReturnedPaidChangeResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminReturnedPaidChange"
     AdminReturnedServer:
       type: "object"
       additionalProperties: false

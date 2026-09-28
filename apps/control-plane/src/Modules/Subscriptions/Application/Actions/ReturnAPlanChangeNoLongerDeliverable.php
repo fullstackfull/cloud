@@ -27,10 +27,18 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * delivering nothing and keeping the money.
  *
  * The rule: a paid plan change its settlement finds can no longer be
- * delivered goes back. Only that: a change that fails after its settlement
- * (a resize or package change that fails outright or stops in review), or
- * whose settlement is never heard, is not returned here - its money is held
- * for an operator to complete the change or return it (docs/billing.md).
+ * delivered goes back, here. A change that fails after its settlement (a
+ * resize or package change that fails outright or stops in review), or whose
+ * settlement is never heard, is not returned by execute(). While its service
+ * lives, its money is held for an operator to complete the change (a retry)
+ * or return it - through returnHeld() below, called by ReturnAHeldPaidChange,
+ * which takes it out of play as execute() does; the raw refund of its capture
+ * is refused (docs/billing.md, docs/runbooks/provisioning-stuck.md §6). When
+ * its service ends with the change undelivered - the job stopped, or closed,
+ * on a service that has ended - the money goes back to the wallet then
+ * (ReturnAnUpgradeTheEndPrevented), without an operator. This paragraph used
+ * to say that nothing else returned such a change, which was the defect's
+ * other half: the end kept it (R10-M, the final audit).
  * The payment of a proration invoice asks whether the change can still be
  * delivered (PlanChangeDelivery::refusalForTheInvoice()) when the payment is
  * opened, but a card payment is captured later, at the provider, and an
@@ -55,7 +63,8 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *  - The subscription goes back to the plan and the recurring amount the
  *    change recorded it came from, as a voided upgrade's does
  *    (RestorePlanOnVoidedUpgrade), when it is still where the change put it
- *    and no change was made after it. The machine or the account never left
+ *    and no change was made after it that was not itself returned
+ *    (restoreThePlan()). The machine or the account never left
  *    that plan's shape. A paid upgrade stops counting its unit against the
  *    plan it left, so that plan may have sold the unit in the window; the
  *    subscription goes back all the same, because that is what it runs. The
@@ -80,14 +89,17 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *  - The customer is told (`billing.plan_change_returned`), once the
  *    transaction commits: the change was not made, so the service was not
  *    changed, and what was returned to the wallet. Not which plan the
- *    subscription is on: it goes back only when nothing was changed after
- *    this change, and the sentence used to say the service "stays on its
+ *    subscription is on: it goes back only when nothing not itself returned
+ *    was changed after this change, and the sentence used to say the service "stays on its
  *    current plan" of a subscription left on the plan it was returned from
  *    (N4, the re-audit after round six).
  */
 final readonly class ReturnAPlanChangeNoLongerDeliverable
 {
     public const string AUDIT_REASON = 'plan_change_not_deliverable_at_settlement';
+
+    /** The audit reason of a held change an operator returned (returnHeld()). */
+    public const string HELD_AUDIT_REASON = 'held_plan_change_returned_by_an_operator';
 
     public function __construct(
         private ReturnWhatAnInvoiceStillHolds $returnWhatItHolds,
@@ -103,10 +115,46 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
      */
     public function execute(Subscription $locked, PlanChange $change, Invoice $invoice, string $refusal): int
     {
+        return $this->returnIt($locked, $change, $invoice, $refusal, held: false)['credited'];
+    }
+
+    /**
+     * The same return, for a paid change held for an operator on a live
+     * service - its resize or package change stopped in review or failed
+     * after its settlement - which the operator decided will not be
+     * delivered (ReturnAHeldPaidChange). What the invoice still holds goes
+     * back to the wallet, the subscription goes back to the plan it came from
+     * on the same terms as above, the change is stamped `returned_at`, and
+     * the audit entry carries the reason HELD_AUDIT_REASON. The customer is
+     * told with `billing.held_plan_change_returned`. ReturnAHeldPaidChange
+     * calls this only for a change whose plan can go back, and rolls the
+     * return back if it did not; it reprices the renewals the change billed
+     * after this, in the same transaction.
+     *
+     * The caller holds the job, any open renewal it reprices, the
+     * subscription and the paid invoices, in that order; the wallet and the
+     * plan are taken here, after them (WhatAnInvoiceStillHolds, the lock
+     * order).
+     *
+     * @param  Subscription  $locked  the subscription, locked by the caller
+     * @return array{credited: int, restored: bool}
+     */
+    public function returnHeld(Subscription $locked, PlanChange $change, Invoice $invoice, string $why): array
+    {
+        return $this->returnIt($locked, $change, $invoice, $why, held: true);
+    }
+
+    /**
+     * @return array{credited: int, restored: bool}
+     */
+    private function returnIt(Subscription $locked, PlanChange $change, Invoice $invoice, string $refusal, bool $held): array
+    {
         $credited = $this->returnWhatItHolds->toTheWallet(
             $invoice,
-            'plan-change-not-deliverable',
-            sprintf('Payment for invoice %s returned: the plan change it paid for could no longer be made', $invoice->number),
+            $held ? 'held-plan-change-returned' : 'plan-change-not-deliverable',
+            $held
+                ? sprintf('Payment for invoice %s returned: the plan change it paid for could not be completed and was cancelled', $invoice->number)
+                : sprintf('Payment for invoice %s returned: the plan change it paid for could no longer be made', $invoice->number),
             ['subscription_id' => (string) $locked->getKey(), 'plan_change_id' => (string) $change->getKey()],
         );
 
@@ -126,7 +174,7 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
             context: [
                 'from_plan_id' => $change->to_plan_id,
                 'to_plan_id' => $restored ? $change->from_plan_id : $change->to_plan_id,
-                'reason' => self::AUDIT_REASON,
+                'reason' => $held ? self::HELD_AUDIT_REASON : self::AUDIT_REASON,
                 'refusal' => $refusal,
                 'plan_restored' => $restored,
                 'plan_stock_exceeded_by' => $exceededBy,
@@ -137,20 +185,22 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
             ],
         );
 
-        Log::warning('A paid plan change could no longer be delivered when its payment was captured; the payment was returned to the wallet and the plan put back.', [
-            'invoice_id' => (string) $invoice->getKey(),
-            'subscription_id' => (string) $locked->getKey(),
-            'plan_change_id' => (string) $change->getKey(),
-            'refusal' => $refusal,
-            'plan_restored' => $restored,
-            'plan_stock_exceeded_by' => $exceededBy,
-            'plan_per_customer_limit_exceeded_by' => $customerExceededBy,
-            'returned_to_wallet_minor' => $credited,
-        ]);
+        Log::warning($held
+            ? 'A paid plan change held for an operator was returned by one: the payment went back to the wallet, the plan put back when it could be, and the job cancelled.'
+            : 'A paid plan change could no longer be delivered when its payment was captured; the payment was returned to the wallet and the plan put back.', [
+                'invoice_id' => (string) $invoice->getKey(),
+                'subscription_id' => (string) $locked->getKey(),
+                'plan_change_id' => (string) $change->getKey(),
+                'refusal' => $refusal,
+                'plan_restored' => $restored,
+                'plan_stock_exceeded_by' => $exceededBy,
+                'plan_per_customer_limit_exceeded_by' => $customerExceededBy,
+                'returned_to_wallet_minor' => $credited,
+            ]);
 
-        $this->tellTheCustomerOnceCommitted($locked, $change, $invoice, $credited);
+        $this->tellTheCustomerOnceCommitted($locked, $change, $invoice, $credited, $held, $restored);
 
-        return $credited;
+        return ['credited' => $credited, 'restored' => $restored];
     }
 
     /**
@@ -158,7 +208,7 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
      * about a return that rolled back would tell the customer of money that
      * never moved.
      */
-    private function tellTheCustomerOnceCommitted(Subscription $subscription, PlanChange $change, Invoice $invoice, int $credited): void
+    private function tellTheCustomerOnceCommitted(Subscription $subscription, PlanChange $change, Invoice $invoice, int $credited, bool $held, bool $restored): void
     {
         $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
         $label = $service?->label;
@@ -167,10 +217,15 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
             : (is_string($label) && $label !== '' ? $label : (string) $service->getKey());
         $amount = Money::ofMinor($credited, (string) $invoice->currency)->format();
 
-        DB::afterCommit(function () use ($subscription, $change, $name, $amount): void {
+        // A held change is returned here only when its plan goes back
+        // (ReturnAHeldPaidChange refuses, or rolls back, anything else); one
+        // taken out of play with its plan kept is told by that action.
+        $type = $held ? NotificationType::HeldPlanChangeReturned : NotificationType::PlanChangeReturned;
+
+        DB::afterCommit(function () use ($subscription, $change, $name, $amount, $type): void {
             $this->notify->execute(
                 customerId: (string) $subscription->customer_id,
-                type: NotificationType::PlanChangeReturned,
+                type: $type,
                 idempotencyKey: 'plan-change-returned:'.$change->getKey(),
                 subject: $subscription,
                 data: ['service' => $name, 'amount' => $amount],
@@ -181,7 +236,11 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
 
     /**
      * Back to the plan the change left, when the subscription is still where
-     * the change put it and nothing was changed after it.
+     * the change put it and nothing was changed after it - a later change
+     * that was returned itself counts as no change: it bought nothing, and
+     * its own return put the subscription back where this change had put it.
+     * So a chain of held paid changes returned latest first goes back one
+     * step at a time, to where the first of them started.
      */
     private function restoreThePlan(Subscription $locked, PlanChange $change): bool
     {
@@ -194,6 +253,7 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
 
         $later = PlanChange::query()
             ->where('subscription_id', $change->subscription_id)
+            ->whereNull('returned_at')
             ->where(static fn ($query) => $query
                 ->where('changed_at', '>', $change->changed_at)
                 ->orWhere(static fn ($same) => $same

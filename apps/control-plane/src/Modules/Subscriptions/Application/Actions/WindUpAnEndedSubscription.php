@@ -49,13 +49,21 @@ use Throwable;
  * no resize queued and never will (ResizeOnPlanChangeSettlement suppresses it
  * on an ended subscription), so it bought nothing. That one is returned to
  * the wallet here, recorded against it ({@see ReturnAnUpgradeTheEndPrevented},
- * OA-3). One is kept when its settlement was heard while the subscription was
- * live (PlanChange::$delivered_at, whatever that settlement queued), when -
- * settled before that was recorded - a resize or package-change job keyed on
- * its invoice exists, or when a later change was settled after it (owed
- * nothing, or its invoice was paid); ReturnAnUpgradeTheEndPrevented states
- * the rule. The settlement heard after the end asks the same question, for an
- * upgrade this did not see, and the two credit it once between them.
+ * OA-3). So is one whose settlement was heard while the subscription was live
+ * and whose resize or package change then stopped - in review, failed or
+ * closed - on a service that has ended: nothing will deliver it (R10-M, the
+ * final audit; it used to be kept because its settlement had been heard). One
+ * is kept when its settlement was heard while the subscription was live
+ * (PlanChange::$delivered_at) and what it queued was not stopped on an ended
+ * service - it succeeded, it is still queued or running (asked again when it
+ * stops, ReturnAPaidChangeWhoseDeliveryStopped), its service has not ended
+ * (this runs again when the service is terminated), or it queued nothing
+ * because nothing needed changing; when - settled before `delivered_at` was
+ * recorded - a resize or package-change job keyed on its invoice exists, on
+ * the same terms; or when a later change was settled after it (owed nothing,
+ * or its invoice was paid). ReturnAnUpgradeTheEndPrevented states the rule.
+ * The settlement heard after the end, the stop of the job and the close of
+ * it ask the same question, and they credit it once between them.
  *
  * ---------------------------------------------------------------------------
  * Locks, and the plan an upgrade is not put back to

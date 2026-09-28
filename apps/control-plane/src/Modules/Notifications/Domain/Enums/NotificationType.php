@@ -76,6 +76,28 @@ enum NotificationType: string
      * a change and did not get it, and is told where the money went.
      */
     case PlanChangeReturned = 'billing.plan_change_returned';
+    /*
+     * A paid plan change returned because its subscription or its service
+     * ended before it was delivered: the settlement heard after the end, or
+     * the resize or package change that stopped (in review, failed, closed)
+     * on a service that then ended (ReturnAnUpgradeTheEndPrevented). The
+     * sibling above says the change "could no longer be made when your
+     * payment arrived", which is not what happened here; this one says the
+     * service ended before the change was completed, and where the money went.
+     */
+    case PlanChangeReturnedAtTheEnd = 'billing.plan_change_returned_at_the_end';
+    /*
+     * A paid plan change held for an operator on a live service - its resize
+     * or package change stopped in review or failed - that the operator
+     * returned (ReturnAHeldPaidChange, through
+     * ReturnAPlanChangeNoLongerDeliverable::returnHeld()): the change is
+     * cancelled and the payment is in the wallet. Two types, because what
+     * the customer is billed next differs and each sentence must be true: the
+     * subscription went back to its earlier plan, or it did not (it was
+     * changed again since, or it has ended).
+     */
+    case HeldPlanChangeReturned = 'billing.held_plan_change_returned';
+    case HeldPlanChangeReturnedPlanKept = 'billing.held_plan_change_returned_plan_kept';
 
     /*
      * The account's country or currency, decided. Applied says from when
@@ -138,7 +160,10 @@ enum NotificationType: string
      * of round eight A). An
      * upgrade is queued only once its proration invoice is paid, so its
      * failure has been charged, and the payment is held for an operator to
-     * complete the change or return it: PlanChangeFailedAfterPayment. The one
+     * complete the change or return it, or returned to the wallet without one
+     * if the service ends first (ReturnAnUpgradeTheEndPrevented, which tells
+     * the customer with PlanChangeReturnedAtTheEnd):
+     * PlanChangeFailedAfterPayment. The one
      * message used to tell both that nothing had been charged.
      * PlanChangeFailedAfterPayment says nothing of the state the service is
      * in: it said the service was "still running as it was", which was false
@@ -155,7 +180,9 @@ enum NotificationType: string
      * The build's "needs our attention" says setting the service up did not
      * finish, which is not what happened: the customer is told the change is
      * waiting for the team and what they paid for it is held
-     * (NotifyOnProvisioningOutcome). Not that the service runs as it was: a
+     * (NotifyOnProvisioningOutcome) - until the change is applied, or
+     * returned: by an operator while the service lives, and without one when
+     * the service ends first (PlanChangeReturnedAtTheEnd). Not that the service runs as it was: a
      * resize that could not be confirmed may have been made, so the message
      * says only that the service may not match the new plan yet.
      */
@@ -263,6 +290,9 @@ enum NotificationType: string
             self::GracePeriodStarted,
             self::CancellationScheduled,
             self::PlanChangeReturned,
+            self::PlanChangeReturnedAtTheEnd,
+            self::HeldPlanChangeReturned,
+            self::HeldPlanChangeReturnedPlanKept,
             self::CountryCurrencyChangeApplied,
             self::CountryCurrencyChangeRejected,
             self::CountryCurrencyChangeNeedsReview => NotificationCategory::Billing,
@@ -287,7 +317,8 @@ enum NotificationType: string
         $emailed = [
             self::PasswordChanged, self::TwoFactorEnabled, self::TwoFactorDisabled, self::NewSignIn,
             self::InvoiceIssued, self::PaymentFailed, self::RefundIssued,
-            self::GracePeriodStarted, self::CancellationScheduled, self::PlanChangeReturned,
+            self::GracePeriodStarted, self::CancellationScheduled, self::PlanChangeReturned, self::PlanChangeReturnedAtTheEnd,
+            self::HeldPlanChangeReturned, self::HeldPlanChangeReturnedPlanKept,
             self::CountryCurrencyChangeApplied, self::CountryCurrencyChangeRejected,
             self::ServiceReady, self::ServiceProvisioningFailed,
             self::ServiceSuspended, self::ServiceRestored, self::ServiceReactivationFailed,

@@ -102,7 +102,10 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * trace. What this cannot see is a change that becomes undeliverable after
  * the settlement: a resize the node refuses at the build stops in review with
  * the money held for an operator, and the customer is told the change is
- * waiting (NotifyOnProvisioningOutcome).
+ * waiting (NotifyOnProvisioningOutcome). If the service ends while it is
+ * stopped (in review, failed, or then closed), the money goes back then
+ * (ReturnAnUpgradeTheEndPrevented, asked by the wind-up and by
+ * ReturnAPaidChangeWhoseDeliveryStopped).
  *
  * Queued on payments beside the other settlement work, and idempotent twice
  * over: the provisioning job is keyed on the invoice that paid for it, so a
@@ -227,12 +230,15 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
             }
 
             /*
-             * Delivered: the settlement was heard while the subscription was
+             * Settled: the settlement was heard while the subscription was
              * live and the change could still be delivered, whatever it
              * queues below - a resize, nothing because a later change already
              * decided the machine, or nothing because there was nothing to
-             * resize. What the end does not return
-             * (ReturnAnUpgradeTheEndPrevented).
+             * resize. The column is `delivered_at`, and a settlement that
+             * queued nothing did deliver; one that queued a job delivers when
+             * the job succeeds. What the end does not return, unless that job
+             * stopped undelivered on a service that has ended
+             * (PlanChangeDelivery::wasDelivered(), ReturnAnUpgradeTheEndPrevented).
              */
             PlanChange::query()
                 ->whereKey($change->getKey())

@@ -125,6 +125,11 @@ enum AuditAction: string
     // A job taken off the review list without running, because the service
     // it worked for has ended (CloseAJobWhoseServiceEnded, X9-1).
     case ProvisioningClosed = 'provisioning.closed';
+    // A paid plan change held on a live service - its job stopped in review
+    // or failed - returned by a person: the money to the wallet, the plan put
+    // back, the job cancelled (ReturnAHeldPaidChange, B1 of the verification
+    // of round ten M).
+    case ProvisioningPaidChangeReturned = 'provisioning.paid_change_returned';
     // The domain a stopped hosting build will serve, corrected by a person —
     // the repair a retry cannot be, recorded before the retry that follows it.
     case HostingJobDomainNamed = 'provisioning.hosting_domain_named';
