@@ -24,6 +24,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\Enums\CustomerOperationState;
 use Lynomia\Modules\Shared\Domain\Enums\RetryAdvice;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -412,6 +413,94 @@ final class AnAccountKnowsWhatHappenedTest extends TestCase
             ->getJson('/api/v1/activity?cursor=not-a-cursor')
             ->assertOk()
             ->assertJsonCount(1, 'data');
+    }
+
+    /**
+     * Cursors that decode, and still cannot be read as a position in the
+     * feed. Each is the base64url of what the server would find inside it.
+     * `{between}` is a well-formed timestamp between the two events the test
+     * writes, so a cursor whose id alone is unreadable, read anyway, would
+     * answer one row rather than both.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function cursorsTheServerCannotRead(): iterable
+    {
+        yield 'an id that is not UTF-8' => ["{between}|\xff\xfe"];
+        yield 'a timestamp that is not UTF-8' => ["\xff|provisioning_job:01jx"];
+        yield 'a NUL in the id' => ["{between}|provisioning_job:a\x00b"];
+        yield 'a line break in the id' => ["{between}|provisioning_job:a\nb"];
+        yield 'a timestamp in the year 3170843' => ['@99999999999999|provisioning_job:01jx'];
+        yield 'a five-digit year' => ['+10000-01-01T00:00:00+00:00|provisioning_job:01jx'];
+        yield 'the year zero' => ['0000-01-01T00:00:00+00:00|provisioning_job:01jx'];
+        yield 'a day that does not exist' => ['2026-02-31T00:00:00+00:00|provisioning_job:01jx'];
+        yield 'a relative date' => ['last monday|provisioning_job:01jx'];
+        yield 'an id with no source' => ['{between}|01jx'];
+        yield 'an id with a space' => ['{between}|provisioning_job:01 jx'];
+    }
+
+    /**
+     * The published `cursor` parameter says a cursor the server cannot read
+     * "is answered with the newest page rather than refused", and so does
+     * `CustomerActivity::page()`. An id that was not UTF-8 answered 500
+     * (PostgreSQL refused the bytes), as did the year zero, and a NUL in the
+     * id or a timestamp in the year 3170843 answered an empty page.
+     */
+    #[Test]
+    #[DataProvider('cursorsTheServerCannotRead')]
+    public function a_cursor_that_decodes_to_something_unreadable_is_answered_with_the_newest_page(string $inside): void
+    {
+        [$customer, $user] = $this->account();
+        $machine = $this->machineFor($customer, 'web-kw-16');
+
+        for ($i = 0; $i < 2; $i++) {
+            ProvisioningJob::factory()->create([
+                'customer_id' => $customer->id,
+                'service_id' => $machine->service_id,
+                'kind' => ProvisioningJobKind::Restart,
+                'status' => ProvisioningJobStatus::Succeeded,
+                'idempotency_key' => 'unreadable:'.$i,
+                'created_at' => now()->subMinutes(2 - $i),
+            ]);
+        }
+
+        $newest = $this->actingAs($user)->getJson('/api/v1/activity')->assertOk()->json('data.*.id');
+        self::assertCount(2, $newest);
+
+        $inside = str_replace('{between}', now()->subSeconds(90)->toIso8601String(), $inside);
+        $cursor = rtrim(strtr(base64_encode($inside), '+/', '-_'), '=');
+
+        $this->actingAs($user)
+            ->getJson('/api/v1/activity?cursor='.urlencode($cursor))
+            ->assertOk()
+            ->assertJsonPath('data.*.id', $newest)
+            ->assertJsonPath('meta.next_cursor', null);
+    }
+
+    /**
+     * The other side of the one above: a cursor the server can read is a
+     * position, and one older than everything is an empty page, not the
+     * newest one. Without this, reading every cursor as absent would pass.
+     */
+    #[Test]
+    public function a_readable_cursor_older_than_everything_is_an_empty_page(): void
+    {
+        [$customer, $user] = $this->account();
+        $machine = $this->machineFor($customer, 'web-kw-17');
+
+        ProvisioningJob::factory()->create([
+            'customer_id' => $customer->id,
+            'service_id' => $machine->service_id,
+            'kind' => ProvisioningJobKind::Restart,
+            'status' => ProvisioningJobStatus::Succeeded,
+        ]);
+
+        $cursor = rtrim(strtr(base64_encode('2000-01-01T00:00:00+00:00|provisioning_job:01jx'), '+/', '-_'), '=');
+
+        $this->actingAs($user)
+            ->getJson('/api/v1/activity?cursor='.urlencode($cursor))
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
     }
 
     #[Test]

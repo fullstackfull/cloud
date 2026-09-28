@@ -73,6 +73,13 @@ final readonly class CustomerActivity
     /** Above this, a "page" is a data export with a different set of rules. */
     public const MAX_PER_PAGE = 100;
 
+    /**
+     * The shape of an activity id: `source:rowid`, as every branch in
+     * `ActivitySources` writes one: a lower-case source name, a colon, and a
+     * row id of letters, digits and hyphens.
+     */
+    private const string ACTIVITY_ID = '/\A[a-z][a-z_]*:[0-9A-Za-z-]+\z/';
+
     public function __construct(
         private ActivitySources $sources,
         private ActivityProjection $projection,
@@ -220,6 +227,18 @@ final readonly class CustomerActivity
     }
 
     /**
+     * The position a cursor names, or null for one this cannot read.
+     *
+     * Read means: it decodes, it is `<timestamp>|<id>`, the id has the shape
+     * every branch gives one (`ACTIVITY_ID`), and the timestamp is spelled
+     * exactly as `encodeCursor()` spells one: ISO 8601 with an offset, a date
+     * that exists, a year from 1 to 9999. Both shapes are ASCII, so bytes that
+     * are not UTF-8, and control characters, match neither. Anything else is
+     * treated as no cursor, which is what the published `cursor` parameter
+     * promises. Checking the shape here is what keeps the bytes away from
+     * PostgreSQL: an id that was not UTF-8 was a 500, the year zero was a 500,
+     * and a NUL in the id or a timestamp in the year 3170843 was an empty page.
+     *
      * @return ?array{occurred_at: string, id: string}
      */
     private function decodeCursor(?string $cursor): ?array
@@ -242,17 +261,28 @@ final readonly class CustomerActivity
          */
         $parts = explode('|', $decoded, 2);
 
-        if (count($parts) !== 2 || $parts[0] === '' || $parts[1] === '') {
+        if (count($parts) !== 2 || preg_match(self::ACTIVITY_ID, $parts[1]) !== 1) {
             return null;
         }
 
         try {
-            $at = CarbonImmutable::parse($parts[0]);
+            // A four-digit year at most: the format reads no more than four.
+            $at = CarbonImmutable::createFromFormat(DATE_ATOM, $parts[0]);
         } catch (\Throwable) {
             return null;
         }
 
-        return ['occurred_at' => $at->toIso8601String(), 'id' => $parts[1]];
+        /*
+         * Spelling it back is what refuses a date that does not exist (the
+         * parser rolls the 31st of February into March) and anything the
+         * format tolerates that the encoder never writes. The year zero is
+         * spelled back faithfully, and PostgreSQL refuses it.
+         */
+        if (! $at instanceof CarbonImmutable || $at->year < 1 || $at->toIso8601String() !== $parts[0]) {
+            return null;
+        }
+
+        return ['occurred_at' => $parts[0], 'id' => $parts[1]];
     }
 
     private function encodeCursor(ActivityItem $last): string
