@@ -28,7 +28,9 @@ use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
  * people out of addresses that do receive mail (verifier of round eight, on
  * 9bbf092, where this required UTS #46 to accept the domain and so refused
  * `x@mail.ab--cd.example.com`). A domain UTS #46 refuses is not refused
- * here. A login stored before this rule under an address that would not be
+ * here for that reason: it is refused only when its typed form already holds
+ * a separator or a control character (U+1680, U+2028, U+2029, which the
+ * email rules let through; the C1 controls, which they refuse first). A login stored before this rule under an address that would not be
  * delivered where it is written is refused nowhere: it simply gets no mail,
  * as before this round.
  *
