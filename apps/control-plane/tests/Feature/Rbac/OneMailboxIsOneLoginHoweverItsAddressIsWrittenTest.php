@@ -10,6 +10,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Password;
 use Illuminate\Testing\TestResponse;
 use Lynomia\Modules\Identity\Application\Actions\InviteMember;
 use Lynomia\Modules\Identity\Application\Actions\RegisterCustomer;
@@ -154,6 +155,82 @@ final class OneMailboxIsOneLoginHoweverItsAddressIsWrittenTest extends TestCase
         $this->freshClient();
         $this->postJson('/api/v1/password/forgot', ['email' => $other])->assertAccepted();
         Notification::assertSentTo($login, QueuedResetPassword::class);
+    }
+
+    /**
+     * Redeeming a reset link under another spelling of the address sets the
+     * password.
+     */
+    #[Test]
+    public function a_reset_link_is_redeemed_under_another_spelling(): void
+    {
+        $this->register('Ärger@lynomia.test')->assertAccepted();
+        $login = User::query()->sole();
+        $token = Password::broker()->createToken($login);
+
+        $this->freshClient();
+        $this->postJson('/api/v1/password/reset', [
+            'token' => $token,
+            'email' => "A\u{0308}RGER@lynomia.test",
+            'password' => 'A-New-Password-Chosen-1!',
+            'password_confirmation' => 'A-New-Password-Chosen-1!',
+        ])->assertNoContent();
+
+        $this->assertTrue(Hash::check('A-New-Password-Chosen-1!', (string) $login->fresh()?->password));
+    }
+
+    /**
+     * The console bootstrap refuses another spelling of an existing login's
+     * address with its own refusal, not a unique violation.
+     */
+    #[Test]
+    public function the_bootstrap_refuses_another_spelling_of_an_existing_login(): void
+    {
+        User::factory()->create(['email' => 'ärger@lynomia.test']);
+
+        $this->artisan('operator:bootstrap', ['email' => "A\u{0308}RGER@lynomia.test", '--show-link' => true])
+            ->expectsOutputToContain('That address already belongs to an account on this deployment.')
+            ->assertExitCode(1);
+
+        $this->assertSame(1, User::query()->count());
+    }
+
+    /**
+     * Σ lowercases to ς at the end of a word and to σ elsewhere; typed in
+     * lower case, an address may carry either. One mailbox, one spelling.
+     */
+    #[Test]
+    public function a_final_sigma_is_the_same_letter_as_a_sigma(): void
+    {
+        $this->assertSame("\u{03BF}\u{03B4}\u{03BF}\u{03C3}@lynomia.test", LoginAddress::normalise('ΟΔΟΣ@lynomia.test'));
+        $this->assertSame(LoginAddress::normalise('ΟΔΟΣ@lynomia.test'), LoginAddress::normalise('οδοσ@lynomia.test'));
+        $this->assertSame(LoginAddress::normalise('ΟΔΟΣ@lynomia.test'), LoginAddress::normalise('οδος@lynomia.test'));
+
+        $this->register('ΟΔΟΣ@lynomia.test')->assertAccepted();
+        $login = User::query()->sole();
+
+        $this->actingAs($this->operator(super: true))
+            ->postJson('/api/admin/operators', ['email' => 'οδοσ@lynomia.test', 'name' => 'N', 'roles' => [Role::Noc->value]])
+            ->assertCreated()
+            ->assertJsonPath('data.id', (string) $login->id);
+    }
+
+    /**
+     * Normalising a normalised address changes nothing.
+     */
+    #[Test]
+    public function normalising_twice_is_normalising_once(): void
+    {
+        $samples = [
+            'Ärger@lynomia.test', "A\u{0308}RGER@lynomia.test", 'ΟΔΟΣ@x.test', 'ΑΣ Σ@x.test', 'İstanbul@x.test',
+            'ẞTRASSE@x.test', "\u{212A}elvin@x.test", 'ｆｕｌｌ@x.test', 'ǅ@x.test', 'ﬃ@x.test', ' Mixed@Lynomia.Test ',
+            "\u{1E9B}\u{0323}@x.test", "\u{0399}\u{0308}\u{0301}@x.test",
+        ];
+
+        foreach ($samples as $sample) {
+            $once = LoginAddress::normalise($sample);
+            $this->assertSame($once, LoginAddress::normalise($once), json_encode($sample) ?: $sample);
+        }
     }
 
     /**

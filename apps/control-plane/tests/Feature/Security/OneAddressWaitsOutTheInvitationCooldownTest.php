@@ -140,7 +140,9 @@ final class OneAddressWaitsOutTheInvitationCooldownTest extends TeamApiTestCase
         DB::listen(static function (QueryExecuted $query) use (&$locks): void {
             $sql = strtolower($query->sql);
 
-            if (str_contains($sql, 'customer_invitations') && str_contains($sql, 'lower(email)') && str_contains($sql, 'for update')) {
+            // The cooldown's read: this account's offers to the address, by
+            // equality on the stored spelling (LoginAddress), locked.
+            if (str_contains($sql, 'customer_invitations') && str_contains($sql, '"email" = ?') && str_contains($sql, 'for update')) {
                 $locks[] = $sql;
             }
         });

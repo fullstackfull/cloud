@@ -7,7 +7,6 @@ namespace Lynomia\Modules\Identity\Application\Actions;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Identity\Domain\Exceptions\MembershipRefusedException;
-use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
@@ -31,7 +30,7 @@ final readonly class DeclineInvitation
                 throw MembershipRefusedException::becauseTheOfferIsNotOpen();
             }
 
-            if (! hash_equals(LoginAddress::normalise($invitation->email), LoginAddress::normalise((string) $user->email))) {
+            if (! hash_equals($invitation->email, (string) $user->email)) {
                 throw MembershipRefusedException::becauseTheOfferWasMadeToSomebodyElse();
             }
 

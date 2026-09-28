@@ -84,7 +84,8 @@ final readonly class InviteMember
     /**
      * A membership is a user and this is an address, so the check is a join
      * rather than a lookup: the address may belong to a login that is already
-     * in this account under a different capitalisation.
+     * in this account, however the inviter wrote it — both sides are in the
+     * one spelling by now.
      */
     private function assertNotAlreadyAMember(Customer $customer, string $address): void
     {
@@ -151,7 +152,10 @@ final readonly class InviteMember
     {
         $again = CustomerInvitation::query()
             ->where('customer_id', $customer->getKey())
-            ->whereRaw('lower(email) = ?', [$address])
+            // Both in the one spelling (LoginAddress; CustomerInvitation::
+            // email()), so an equality — not lower(), which saw a decomposed
+            // `ä` and a composed one as two addresses.
+            ->where('email', $address)
             ->orderBy('id')
             ->lockForUpdate()
             ->get()
