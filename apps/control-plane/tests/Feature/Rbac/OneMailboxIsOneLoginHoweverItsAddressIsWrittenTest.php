@@ -216,6 +216,54 @@ final class OneMailboxIsOneLoginHoweverItsAddressIsWrittenTest extends TestCase
     }
 
     /**
+     * The domain is not the local part: it goes to a resolver, and under
+     * UTS #46 non-transitional processing ς is a deviation character, so
+     * `οδος.gr` and `οδοσ.gr` are two domains (xn--pxavbm.gr, xn--pxavbq.gr)
+     * and stay two spellings. A capital Σ in a domain is mapped as UTS #46
+     * maps it, to σ, wherever it stands — the domain a resolver reaches for
+     * `ΟΔΟΣ.gr` is `οδοσ.gr`.
+     */
+    #[Test]
+    public function a_domain_keeps_its_final_sigma_and_maps_a_capital_one_as_a_resolver_does(): void
+    {
+        $idna = IDNA_NONTRANSITIONAL_TO_ASCII;
+
+        $this->assertSame('ops@οδος.gr', LoginAddress::normalise('ops@οδος.gr'));
+        $this->assertSame('ops@οδοσ.gr', LoginAddress::normalise('ops@οδοσ.gr'));
+        $this->assertSame('xn--pxavbm.gr', idn_to_ascii('οδος.gr', $idna, INTL_IDNA_VARIANT_UTS46));
+        $this->assertSame('xn--pxavbq.gr', idn_to_ascii('οδοσ.gr', $idna, INTL_IDNA_VARIANT_UTS46));
+
+        // Uppercase: where UTS #46 sends it, not where mb_strtolower() would.
+        $this->assertSame('ops@οδοσ.gr', LoginAddress::normalise('ops@ΟΔΟΣ.gr'));
+        $this->assertSame(idn_to_ascii('ΟΔΟΣ.gr', $idna, INTL_IDNA_VARIANT_UTS46), idn_to_ascii('οδοσ.gr', $idna, INTL_IDNA_VARIANT_UTS46));
+        $this->assertSame('ops@gr.οδοσ', LoginAddress::normalise('ops@GR.ΟΔΟΣ'));
+
+        // The local part of the same address still folds ς to σ.
+        $this->assertSame('οδοσ@οδος.gr', LoginAddress::normalise('ΟΔΟΣ@οδος.gr'));
+        $this->assertSame('οδοσ@οδος.gr', LoginAddress::normalise('οδος@οδος.gr'));
+
+        // The domain is what follows the last `@`: a quoted local part may
+        // hold one of its own.
+        $this->assertSame('"οδοσ@οδοσ"@οδος.gr', LoginAddress::normalise('"οδος@οδος"@οδος.gr'));
+
+        // An ASCII-compatible label is the same domain as its Unicode form.
+        $this->assertSame('ops@οδος.gr', LoginAddress::normalise('ops@XN--PXAVBM.gr'));
+
+        // A domain UTS #46 refuses keeps everything but ASCII case.
+        $this->assertSame('ops@-lead.test', LoginAddress::normalise('ops@-LEAD.test'));
+        $this->assertSame("ops@\u{04C0}\u{03A3}.gr", LoginAddress::normalise("ops@\u{04C0}\u{03A3}.gr"));
+
+        // Registered under one, invited under the other: two logins, because
+        // they are two mailboxes.
+        $this->register('ops@οδος.gr')->assertAccepted();
+        $this->actingAs($this->operator(super: true))
+            ->postJson('/api/admin/operators', ['email' => 'ops@οδοσ.gr', 'name' => 'N', 'roles' => [Role::Noc->value]])
+            ->assertCreated()
+            ->assertJsonPath('data.promoted_existing_account', false);
+        $this->assertSame(1, User::query()->where('email', 'ops@οδος.gr')->count());
+    }
+
+    /**
      * Normalising a normalised address changes nothing.
      */
     #[Test]
@@ -225,6 +273,7 @@ final class OneMailboxIsOneLoginHoweverItsAddressIsWrittenTest extends TestCase
             'Ärger@lynomia.test', "A\u{0308}RGER@lynomia.test", 'ΟΔΟΣ@x.test', 'ΑΣ Σ@x.test', 'İstanbul@x.test',
             'ẞTRASSE@x.test', "\u{212A}elvin@x.test", 'ｆｕｌｌ@x.test', 'ǅ@x.test', 'ﬃ@x.test', ' Mixed@Lynomia.Test ',
             "\u{1E9B}\u{0323}@x.test", "\u{0399}\u{0308}\u{0301}@x.test",
+            'ops@ΟΔΟΣ.gr', 'ops@οδος.gr', 'ops@GR.ΟΔΟΣ', "x@\u{04C0}\u{0345}\u{03A3}.gr", "x@\u{2F868}.gr", 'ops@XN--PXAVBM.gr', 'x@-LEAD.test',
         ];
 
         foreach ($samples as $sample) {

@@ -12,6 +12,7 @@ use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Domain\Exceptions\MembershipRefusedException;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
 
@@ -36,6 +37,10 @@ final class ALegacyInvitationSpellingIsTheSameAddressTest extends TeamApiTestCas
     private const string DECOMPOSED = "a\u{0308}rger@lynomia.test";
 
     private const string COMPOSED = 'ärger@lynomia.test';
+
+    private const string DECLINE_TOKEN = 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+
+    private const string SHOW_TOKEN = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
     /**
      * The verifier's reproduction, after the migration has run over it.
@@ -134,6 +139,49 @@ final class ALegacyInvitationSpellingIsTheSameAddressTest extends TeamApiTestCas
         } catch (MembershipRefusedException $e) {
             $this->assertSame('membership.invitation_sent_too_recently', $e->errorCode());
         }
+    }
+
+    /**
+     * A forwarded invitation is not declined by whoever it was forwarded to:
+     * the offer stays open for the person it was made to.
+     */
+    #[Test]
+    public function a_forwarded_invitation_cannot_be_declined_by_another_login(): void
+    {
+        [$customer] = $this->accountWithOwner();
+        $offer = $this->offer($customer, self::DECLINE_TOKEN, ['email' => 'intended@lynomia.test']);
+        $someoneElse = User::factory()->create(['email' => 'forwarded@lynomia.test', 'email_verified_at' => now()]);
+
+        $this->actingAs($someoneElse)
+            ->postJson('/api/v1/invitations/'.self::DECLINE_TOKEN.'/decline')
+            ->assertForbidden()
+            ->assertJsonPath('error.code', 'membership.invitation_not_yours');
+
+        $this->assertNull($offer->fresh()?->declined_at);
+
+        // Positive control: the person it was made to, under another spelling.
+        $intended = User::factory()->create(['email' => 'INTENDED@lynomia.test', 'email_verified_at' => now()]);
+        $this->actingAs($intended)
+            ->postJson('/api/v1/invitations/'.self::DECLINE_TOKEN.'/decline')
+            ->assertNoContent();
+        $this->assertNotNull($offer->fresh()?->declined_at);
+    }
+
+    /**
+     * `is_for_you` is true for the person the offer was made to and false for
+     * any other login holding the token.
+     */
+    #[Test]
+    public function a_forwarded_invitation_is_not_shown_as_for_another_login(): void
+    {
+        [$customer] = $this->accountWithOwner();
+        $this->offer($customer, self::SHOW_TOKEN, ['email' => "A\u{0308}RGER@lynomia.test"]);
+        $someoneElse = User::factory()->create(['email' => 'forwarded@lynomia.test', 'email_verified_at' => now()]);
+        $intended = User::factory()->create(['email' => 'ärger@lynomia.test', 'email_verified_at' => now()]);
+        $url = '/api/v1/invitations/'.self::SHOW_TOKEN;
+
+        $this->actingAs($someoneElse)->getJson($url)->assertOk()->assertJsonPath('data.is_for_you', false);
+        $this->actingAs($intended)->getJson($url)->assertOk()->assertJsonPath('data.is_for_you', true);
     }
 
     /**
