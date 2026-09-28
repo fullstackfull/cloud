@@ -617,7 +617,9 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
         $unenterable = self::unenterable();
 
         $this->assertContains('Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus::Uncollectible', $unenterable);
-        $this->assertContains('Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus::Cancelled', $unenterable);
+        // Admitted by the machine gate until the close of a job whose service
+        // has ended wrote it (X9-1); an admission that went leaves this list.
+        $this->assertNotContains('Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus::Cancelled', $unenterable);
         $this->assertContains(PaymentMethodKind::class.'::BankTransfer', $unenterable);
         $this->assertNotContains(ActorType::class.'::System', $unenterable, 'A spelled case is produced; it is not a state nothing can enter.');
     }
