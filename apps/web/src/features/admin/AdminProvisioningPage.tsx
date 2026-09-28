@@ -17,6 +17,7 @@ import { formatDateTime } from '@/lib/format'
 import {
   useAdminProvisioningJobs,
   useAdoptProvisioningJob,
+  useCloseProvisioningJob,
   useJobsNeedingReview,
   useRepointProvisioningJob,
   useRetryProvisioningJob,
@@ -51,8 +52,8 @@ function adoptableReference(job: AdminProvisioningJob): string | null {
  * and its reason, the whole error rather than a truncation of it, and for a
  * VPS create the provider identity it reserved, with every node an attempt
  * under it was placed on and every name a create under it was sent with.
- * And the three ways out — retry, adopt and repoint — are offered wherever
- * the page has what the act needs. Retry is offered on every job. Adopt is
+ * And the four ways out — retry, adopt, repoint and close — are offered
+ * wherever the page has what the act needs. Retry is offered on every job. Adopt is
  * labelled for the machine rather than for "what it built", since it is
  * offered, with the reserved id, on jobs that may have built nothing — right
  * after a repoint, say — and attaches a reference rather than asking for
@@ -62,7 +63,10 @@ function adoptableReference(job: AdminProvisioningJob): string | null {
  * every job but a VPS create; a shared-hosting create whose answer was lost
  * is one, and the API can adopt it where this page cannot. Repoint is
  * offered only on a job that holds a reserved identity, since that is all it
- * can move. Beyond that, which of them a job may take is the server's to say,
+ * can move. Close is offered only where the server published the job as
+ * `closable` (X9-1): in review, a power change, a resize or a package change,
+ * on a service that has ended - a job a retry and an adoption both refuse.
+ * Beyond that, which of them a job may take is the server's to say,
  * and the page shows its refusal when it gives one. The one thing the page
  * withholds on its own reading of a finding is Adopt with an identity the
  * job's current finding says somebody else's machine holds.
@@ -74,12 +78,14 @@ export function AdminProvisioningPage() {
   const [retrying, setRetrying] = useState<AdminProvisioningJob | null>(null)
   const [adopting, setAdopting] = useState<AdminProvisioningJob | null>(null)
   const [repointing, setRepointing] = useState<AdminProvisioningJob | null>(null)
+  const [closing, setClosing] = useState<AdminProvisioningJob | null>(null)
 
   const { data, isPending, error: jobsError } = useAdminProvisioningJobs(page)
   const { data: review, error: reviewError } = useJobsNeedingReview()
   const retry = useRetryProvisioningJob()
   const adopt = useAdoptProvisioningJob()
   const repoint = useRepointProvisioningJob()
+  const close = useCloseProvisioningJob()
 
   const columns: Array<Column<AdminProvisioningJob>> = [
     {
@@ -195,6 +201,11 @@ export function AdminProvisioningPage() {
                         {t('admin.provisioning.repoint')}
                       </Button>
                     )}
+                    {job.closable === true ? (
+                      <Button size="sm" variant="secondary" onClick={() => { setClosing(job); }}>
+                        {t('admin.provisioning.close')}
+                      </Button>
+                    ) : null}
                   </div>
                 </li>
               ))}
@@ -299,6 +310,30 @@ export function AdminProvisioningPage() {
           repoint.mutate(
             { id: repointing.id, evidence },
             { onSuccess: () => { setRepointing(null); } },
+          )
+        }}
+      />
+
+      <ConfirmDialog
+        open={closing !== null}
+        title={t('admin.provisioning.closeTitle')}
+        body={
+          <div className="flex flex-col gap-2">
+            <p>{t('admin.provisioning.closeBody')}</p>
+          </div>
+        }
+        evidenceLabel={t('admin.provisioning.closeEvidence')}
+        evidenceHint={t('admin.provisioning.closeEvidenceHint')}
+        confirmLabel={t('admin.provisioning.close')}
+        loading={close.isPending}
+        error={close.error === null ? undefined : close.error.message}
+        onCancel={() => { setClosing(null); close.reset(); }}
+        onConfirm={(_phrase, evidence) => {
+          if (closing === null) return
+
+          close.mutate(
+            { id: closing.id, evidence },
+            { onSuccess: () => { setClosing(null); } },
           )
         }}
       />

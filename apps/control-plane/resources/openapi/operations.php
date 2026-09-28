@@ -614,7 +614,7 @@ return [
     'api.admin.provisioning.needs_review' => [
         'tag' => 'Operator',
         'summary' => 'Jobs waiting for a person',
-        'description' => 'Where an indeterminate provider call goes. Nothing here is retried automatically, which is the point of the state. Each row carries the job\'s current finding (`error_code`, `error_reason`) — its last attempt\'s, about the identity it holds now, or none — and, for a VPS create, the provider identity it reserved, every node an attempt under it was placed on, and every name a create under it was sent with.',
+        'description' => 'Where an indeterminate provider call goes. Nothing here is retried automatically, which is the point of the state. Each row carries the job\'s current finding (`error_code`, `error_reason`) — its last attempt\'s, about the identity it holds now, or none — and, for a VPS create, the provider identity it reserved, every node an attempt under it was placed on, and every name a create under it was sent with. `closable` says whether the close route would take the job off the list now.',
         'permission' => 'provisioning.view',
         'response' => $many('AdminProvisioningJob'),
     ],
@@ -1261,6 +1261,14 @@ return [
         'body' => ['provider_reference', 'remote_job_id', 'evidence'],
         'response' => $one('AdminAdoptedJob'),
     ],
+    'api.admin.provisioning.close' => [
+        'tag' => 'Operator',
+        'summary' => 'Close a job whose service has ended',
+        'description' => 'Takes a job off the review list without running it, once the service it worked for has ended: a resize, a package change or a power change stopped in `needs_review` on a `terminated` service, which a retry refuses (`provisioning.retry_after_the_service_ended`) and an adoption refuses (`provisioning.adoption_not_a_build`). The job becomes `cancelled`. Refuses (409) a job not in `needs_review` (`provisioning.close_not_in_review`), a job of any other kind (`provisioning.close_not_for_this_kind`: a build or a destroy may have left a resource at the provider, and a rebuild is settled by its operation\'s own verdict) - and a job whose service has not ended (`provisioning.close_service_not_ended`). Nothing is asked of a provider and no money moves. The evidence is required and audited (`provisioning.closed`).',
+        'permission' => 'provisioning.retry',
+        'body' => ['evidence'],
+        'response' => $one('AdminClosedJob'),
+    ],
     'api.admin.provisioning.hosting_domain' => [
         'tag' => 'Operator',
         'summary' => 'Correct the domain a stopped hosting build will serve',
@@ -1280,7 +1288,7 @@ return [
     'api.admin.provisioning.retry' => [
         'tag' => 'Operator',
         'summary' => 'Run a stopped job again',
-        'description' => 'The safe half of recovery: a build that failed on a full cluster or a control panel that was briefly down will succeed on a second run. Refuses (409) a job that has not stopped, one that already has a resource at the provider — adopt that instead — and any operation that has already destroyed data. The evidence the operator checked is required and audited.',
+        'description' => 'The safe half of recovery: a build that failed on a full cluster or a control panel that was briefly down will succeed on a second run. Refuses (409) a job that has not stopped, one that already has a resource at the provider — adopt that instead — any operation that has already destroyed data, and a job whose service has ended (close such a job instead, where the close route accepts it). The evidence the operator checked is required and audited.',
         'permission' => 'provisioning.retry',
         'body' => ['evidence'],
         'response' => $one('AdminRetriedJob'),

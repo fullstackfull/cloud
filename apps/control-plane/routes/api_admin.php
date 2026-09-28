@@ -170,6 +170,16 @@ Route::middleware(['auth:sanctum', 'verified', 'staff', 'throttle:api'])->group(
         ->name('provisioning.adopt');
 
     /*
+     * Closing: taking a resize, a package change or a power change off the
+     * review list, without running it, once its service has ended (X9-1) - a
+     * retry and an adoption both refuse such a job. Behind provisioning.retry
+     * with the other ways out of review.
+     */
+    Route::post('provisioning/jobs/{job}/close', [ProvisioningController::class, 'close'])
+        ->middleware('permission:'.Permission::ProvisioningRetry->value)
+        ->name('provisioning.close');
+
+    /*
      * Correcting the domain a stopped hosting build will serve: the repair a
      * retry cannot be, for a build refused because it names no domain or one
      * another live account serves. It writes one column of the job,

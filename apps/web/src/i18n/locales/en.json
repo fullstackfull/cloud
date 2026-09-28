@@ -1511,7 +1511,12 @@
       "repointTitle": "Move this build to a new provider identity",
       "repointBody": "Only when somebody else's machine, by name, holds the identity this build reserved. The platform refuses it whenever the machine there could be this build's own, and after a move you retry the job yourself.",
       "repointEvidence": "Whose machine is at the identity?",
-      "repointEvidenceHint": "Recorded in the audit trail. What you checked that shows the machine is not this build's."
+      "repointEvidenceHint": "Recorded in the audit trail. What you checked that shows the machine is not this build's.",
+      "close": "Close the job",
+      "closeTitle": "Close a job whose service has ended",
+      "closeBody": "Takes this job off the review list without running it. Only for a power change, a resize or a package change on a service that has ended, which a retry and an adoption both refuse. Nothing is asked of the provider and no money moves.",
+      "closeEvidence": "What did you check?",
+      "closeEvidenceHint": "Recorded in the audit trail. That the service has ended and nothing is left for this job to do."
     },
     "readiness": {
       "title": "Product readiness",

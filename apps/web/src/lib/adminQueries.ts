@@ -93,6 +93,12 @@ export interface AdminProvisioningJob {
   reserved_cluster_id?: string | null
   reserved_provider_nodes?: string[]
   reserved_provider_hostnames?: string[]
+  /*
+   * Published by the needs-review list only (X9-1): whether the close route
+   * would take the job off the list now — in review, a power change, a resize
+   * or a package change, and its service ended.
+   */
+  closable?: boolean
   correlation_id?: string | null
   created_at: string | null
 }
@@ -157,6 +163,26 @@ export function useAdoptProvisioningJob() {
  * machine; the refusal is shown rather than pre-empted, because only the
  * server can tell whose the machine at the identity is.
  */
+/**
+ * Take a job off the review list, without running it, because its service
+ * has ended (X9-1). The server refuses any job it would not close; the
+ * evidence is required and audited.
+ */
+export function useCloseProvisioningJob() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, evidence }: { id: string; evidence: string }) =>
+      admin.post<Envelope<AdminProvisioningJob>>(
+        `/provisioning/jobs/${encodeURIComponent(id)}/close`,
+        { evidence },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'provisioning'] })
+    },
+  })
+}
+
 export function useRepointProvisioningJob() {
   const queryClient = useQueryClient()
 

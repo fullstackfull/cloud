@@ -37,7 +37,9 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
  *    review for an unverified read-back was settled that way, its machine
  *    row never written, and a downgrade was then credited from the stale row
  *    (B-1, the verification of round eight A). Such a job is retried, and
- *    the retry looks at the resource first;
+ *    the retry looks at the resource first - or, a power change, a resize
+ *    or a package change whose service has ended, which a retry refuses, is
+ *    closed (CloseAJobWhoseServiceEnded);
  *  - a running job is refused, because a live attempt may be about to write
  *    its own reference over the one being adopted;
  *  - a settled job is refused, because it already points at a resource and

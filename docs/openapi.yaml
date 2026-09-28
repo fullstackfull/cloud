@@ -9166,6 +9166,81 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/provisioning/jobs/{job}/close":
+    post:
+      operationId: "api_admin_provisioning_close"
+      tags:
+        - "Operator"
+      summary: "Close a job whose service has ended"
+      description: |-
+        Takes a job off the review list without running it, once the service it worked for has ended: a resize, a package change or a power change stopped in `needs_review` on a `terminated` service, which a retry refuses (`provisioning.retry_after_the_service_ended`) and an adoption refuses (`provisioning.adoption_not_a_build`). The job becomes `cancelled`. Refuses (409) a job not in `needs_review` (`provisioning.close_not_in_review`), a job of any other kind (`provisioning.close_not_for_this_kind`: a build or a destroy may have left a resource at the provider, and a rebuild is settled by its operation's own verdict) - and a job whose service has not ended (`provisioning.close_service_not_ended`). Nothing is asked of a provider and no money moves. The evidence is required and audited (`provisioning.closed`).
+
+        Requires the `provisioning.retry` permission.
+      parameters:
+        - name: "job"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                evidence:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminClosedJobResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/provisioning/jobs/{job}/hosting-domain":
     put:
       operationId: "api_admin_provisioning_hosting_domain"
@@ -9325,7 +9400,7 @@ paths:
         - "Operator"
       summary: "Run a stopped job again"
       description: |-
-        The safe half of recovery: a build that failed on a full cluster or a control panel that was briefly down will succeed on a second run. Refuses (409) a job that has not stopped, one that already has a resource at the provider — adopt that instead — and any operation that has already destroyed data. The evidence the operator checked is required and audited.
+        The safe half of recovery: a build that failed on a full cluster or a control panel that was briefly down will succeed on a second run. Refuses (409) a job that has not stopped, one that already has a resource at the provider — adopt that instead — any operation that has already destroyed data, and a job whose service has ended (close such a job instead, where the close route accepts it). The evidence the operator checked is required and audited.
 
         Requires the `provisioning.retry` permission.
       parameters:
@@ -9400,7 +9475,7 @@ paths:
         - "Operator"
       summary: "Jobs waiting for a person"
       description: |-
-        Where an indeterminate provider call goes. Nothing here is retried automatically, which is the point of the state. Each row carries the job's current finding (`error_code`, `error_reason`) — its last attempt's, about the identity it holds now, or none — and, for a VPS create, the provider identity it reserved, every node an attempt under it was placed on, and every name a create under it was sent with.
+        Where an indeterminate provider call goes. Nothing here is retried automatically, which is the point of the state. Each row carries the job's current finding (`error_code`, `error_reason`) — its last attempt's, about the identity it holds now, or none — and, for a VPS create, the provider identity it reserved, every node an attempt under it was placed on, and every name a create under it was sent with. `closable` says whether the close route would take the job off the list now.
 
         Requires the `provisioning.view` permission.
       parameters:
@@ -20384,6 +20459,27 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminBmcEndpoint"
+    AdminClosedJob:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        status:
+          type:
+            - "string"
+            - "null"
+        service_id:
+          type:
+            - "string"
+            - "null"
+    AdminClosedJobResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminClosedJob"
     AdminComputeCluster:
       type: "object"
       additionalProperties: false
@@ -21500,6 +21596,9 @@ components:
           items:
             type: "string"
           description: "Every name a create under the reserved id was sent with."
+        closable:
+          type: "boolean"
+          description: "Whether the close route would take the job off the review list now: it is in `needs_review`, it is a power change, a resize or a package change, and its service has ended."
         correlation_id:
           type:
             - "string"

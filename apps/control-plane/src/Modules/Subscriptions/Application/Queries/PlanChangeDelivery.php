@@ -334,14 +334,17 @@ final readonly class PlanChangeDelivery
      * (`vps.resize_unverified`, the job in review). While the job is queued,
      * running or in review, QuotePlanChange refuses every change of plan
      * (ServiceBusy), and so does the change itself, which asks the quote's
-     * refusals again. Of what writes a job's status under src/Modules, three
-     * move one out of review, and two of them can reach a resize - the
-     * third, OperationsController's settling of a reinstall, reaches only a
-     * reinstall's job (a VmReinstall's or a DedicatedReinstall's). The two
+     * refusals again. Of what writes a job's status under src/Modules, four
+     * move one out of review, and three of them can reach a resize - the
+     * fourth, OperationsController's settling of a reinstall, reaches only a
+     * reinstall's job (a VmReinstall's or a DedicatedReinstall's). The three
      * that can are its retry (RetryProvisioningJob), which runs
-     * it - a resize looks at the machine and writes the row - and an
-     * adoption (AdoptOrphanResource), which settles it without running it
-     * and is refused for a job that builds no resource, a resize among them. `vps.resize_unverified` used to fail the job, which holds
+     * it - a resize looks at the machine and writes the row - an
+     * adoption (AdoptOrphanResource), which would settle it without running
+     * it and is refused for a job that builds no resource, a resize among
+     * them, and a close (CloseAJobWhoseServiceEnded), which cancels it
+     * without running it and only once its service has ended - a service no
+     * change of plan is quoted for (ServiceNotActive). `vps.resize_unverified` used to fail the job, which holds
      * nothing, and an adoption could settle it too; either way a downgrade
      * was then quoted from the row as no change of shape - credited, with no
      * resize queued, and the machine left large (A8-1, the re-audit after

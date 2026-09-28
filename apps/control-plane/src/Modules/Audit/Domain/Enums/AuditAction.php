@@ -122,6 +122,9 @@ enum AuditAction: string
     // the platform could not verify itself.
     case OrphanAdopted = 'provisioning.orphan_adopted';
     case ProvisioningRetried = 'provisioning.retried';
+    // A job taken off the review list without running, because the service
+    // it worked for has ended (CloseAJobWhoseServiceEnded, X9-1).
+    case ProvisioningClosed = 'provisioning.closed';
     // The domain a stopped hosting build will serve, corrected by a person —
     // the repair a retry cannot be, recorded before the retry that follows it.
     case HostingJobDomainNamed = 'provisioning.hosting_domain_named';
