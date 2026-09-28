@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Identity\Http\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 
 /**
  * The two things an invitation needs, and nothing else.
@@ -45,7 +46,7 @@ final class InviteMemberRequest extends FormRequest
 
     public function email(): string
     {
-        return mb_strtolower(trim((string) $this->input('email')));
+        return LoginAddress::normalise((string) $this->input('email'));
     }
 
     public function role(): CustomerRole

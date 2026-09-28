@@ -11,6 +11,7 @@ use Illuminate\Validation\ValidationException;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Identity\Infrastructure\Notifications\OperatorInvitation;
 use Lynomia\Modules\Rbac\Application\DTOs\InvitedOperator;
@@ -57,6 +58,13 @@ use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
  * and still a customer — and a delegate promoting a registered customer is
  * not refused for "removing" a role it does not hold, which used to tell it
  * that the address had a login (re-audit after round six).
+ *
+ * "A login under the address" means under any spelling of it: the address
+ * is looked up in its one spelling (LoginAddress), the one every login
+ * address is stored in. Registration used to store `Ärger@…` as written
+ * while this looked for `ärger@…`, found nothing, and made a second login
+ * beside the registrant's, which kept its password (R4, verifier of round
+ * eight).
  *
  * A deleted login's address is invited the same way: the row is restored and
  * promoted, without the staff roles it held when it was deleted — see
@@ -105,7 +113,7 @@ final readonly class InviteOperator
      */
     public function execute(User $actor, string $email, string $name, array $roles): InvitedOperator
     {
-        $address = Str::lower(trim($email));
+        $address = LoginAddress::normalise($email);
 
         [$operator, $promoted] = DB::transaction(fn (): array => $this->inviteAndGrant($actor, $address, $name, $roles));
 
@@ -329,7 +337,7 @@ final readonly class InviteOperator
     public static function alreadyAnOperator(string $email): bool
     {
         /** @var User|null $user */
-        $user = User::query()->where('email', Str::lower(trim($email)))->first();
+        $user = User::query()->where('email', LoginAddress::normalise($email))->first();
 
         if ($user === null) {
             return false;

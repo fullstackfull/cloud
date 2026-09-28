@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Identity\Application\DTOs\IssuedInvitation;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Domain\Exceptions\MembershipRefusedException;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerMember;
@@ -46,7 +47,7 @@ final readonly class InviteMember
             throw MembershipRefusedException::becauseOwnershipIsTransferredNotGranted();
         }
 
-        $address = mb_strtolower(trim($email));
+        $address = LoginAddress::normalise($email);
         $token = bin2hex(random_bytes(32));
 
         return DB::transaction(function () use ($customer, $address, $role, $invitedBy, $token): IssuedInvitation {
@@ -89,7 +90,10 @@ final readonly class InviteMember
     {
         $already = CustomerMember::query()
             ->where('customer_id', $customer->getKey())
-            ->whereIn('user_id', User::query()->whereRaw('lower(email) = ?', [$address])->select('id'))
+            // Stored in its one spelling, as $address is (LoginAddress): an
+            // equality, not PostgreSQL's lower(), whose idea of a non-ASCII
+            // capital depends on the database's LC_CTYPE.
+            ->whereIn('user_id', User::query()->where('email', $address)->select('id'))
             ->exists();
 
         if ($already) {

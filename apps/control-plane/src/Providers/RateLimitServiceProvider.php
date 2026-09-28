@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Throwable;
 
@@ -275,6 +276,6 @@ final class RateLimitServiceProvider extends ServiceProvider
          * error handler turns into a 500 thrown before RateLimiter::attempt()
          * — a request shape that always fails and is never counted.
          */
-        return is_string($email) ? strtolower(trim($email)) : 'non-string';
+        return is_string($email) ? LoginAddress::normalise($email) : 'non-string';
     }
 }

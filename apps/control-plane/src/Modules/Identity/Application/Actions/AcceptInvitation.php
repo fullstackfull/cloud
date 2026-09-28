@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Identity\Domain\Exceptions\MembershipRefusedException;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerMember;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
@@ -46,7 +47,7 @@ final readonly class AcceptInvitation
                 throw MembershipRefusedException::becauseTheOfferIsNotOpen();
             }
 
-            if (! hash_equals($invitation->email, mb_strtolower((string) $user->email))) {
+            if (! hash_equals(LoginAddress::normalise($invitation->email), LoginAddress::normalise((string) $user->email))) {
                 throw MembershipRefusedException::becauseTheOfferWasMadeToSomebodyElse();
             }
 

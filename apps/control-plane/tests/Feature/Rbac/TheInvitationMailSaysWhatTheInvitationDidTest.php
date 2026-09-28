@@ -6,9 +6,14 @@ namespace Tests\Feature\Rbac;
 
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Notifications\ChannelManager;
+use Illuminate\Notifications\SendQueuedNotifications;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Identity\Infrastructure\Notifications\OperatorInvitation;
 use Lynomia\Modules\Identity\Infrastructure\Notifications\QueuedResetPassword;
@@ -89,6 +94,42 @@ final class TheInvitationMailSaysWhatTheInvitationDidTest extends TestCase
     }
 
     /**
+     * The lifetime the mail names is the one the broker enforces, read from
+     * the same setting: changed, the sentence follows it.
+     */
+    #[Test]
+    public function the_mail_names_the_lifetime_the_reset_token_has(): void
+    {
+        config(['auth.passwords.users.expire' => 45]);
+        $this->assertSame('users', config('auth.defaults.passwords'));
+
+        $customer = $this->aCustomerWithEverything('lifetime@lynomia.test');
+        $this->invite($this->delegate(), 'lifetime@lynomia.test');
+
+        $text = $this->rendered($this->mailTo($customer), $customer);
+
+        $this->assertStringContainsString('it stops working in 45 minutes.', $text);
+    }
+
+    /**
+     * Queued, as the reset mail it replaced was: the invitation's response
+     * does not wait on an SMTP transaction.
+     */
+    #[Test]
+    public function the_mail_goes_through_the_queue(): void
+    {
+        Notification::swap(new ChannelManager($this->app));
+        Queue::fake();
+
+        $this->invite($this->delegate(), 'queued@lynomia.test');
+
+        Queue::assertPushed(
+            SendQueuedNotifications::class,
+            static fn (SendQueuedNotifications $job): bool => $job->notification instanceof OperatorInvitation,
+        );
+    }
+
+    /**
      * Rendered where a queue worker renders it: in the platform's language,
      * which is not the inviting request's.
      */
@@ -109,12 +150,51 @@ final class TheInvitationMailSaysWhatTheInvitationDidTest extends TestCase
         $this->assertStringNotContainsString('invitations.operator', $text);
     }
 
+    /**
+     * The mail must not depend on the login it goes to, so the promoted login
+     * differs from a new one in everything a real one would: made three
+     * years ago, verified, signed in, with its own name, language, time zone
+     * and telephone, a second factor, a personal access token, a session and
+     * a sign-in history.
+     */
     private function aCustomerWithEverything(string $email): User
     {
-        $user = User::factory()->create(['email' => $email, 'password' => self::PASSWORD]);
+        $longAgo = now()->subYears(3);
+
+        $user = User::factory()->create(['email' => $email, 'password' => self::PASSWORD, 'name' => 'Registrant Chose This']);
         $user->syncRoles([Role::Customer->value]);
-        $user->forceFill(['two_factor_secret' => encrypt('secret'), 'two_factor_confirmed_at' => now()])->save();
+        $user->forceFill([
+            'created_at' => $longAgo,
+            'updated_at' => $longAgo->copy()->addMonth(),
+            'email_verified_at' => $longAgo->copy()->addHour(),
+            'password_changed_at' => $longAgo->copy()->addDay(),
+            'last_login_at' => now()->subDay(),
+            'last_login_ip' => '198.51.100.23',
+            'locale' => 'ar',
+            'timezone' => 'Asia/Kuwait',
+            'phone' => '+96550000000',
+            'two_factor_secret' => encrypt('secret'),
+            'two_factor_recovery_codes' => ['code-one', 'code-two'],
+            'two_factor_confirmed_at' => $longAgo->copy()->addWeek(),
+        ])->save();
         $user->createToken('registrants');
+        DB::table('sessions')->insert([
+            'id' => 'registrants-device-'.$user->id,
+            'user_id' => $user->id,
+            'ip_address' => '198.51.100.23',
+            'user_agent' => 'the registrant',
+            'payload' => '',
+            'last_activity' => time(),
+        ]);
+        DB::table('login_activities')->insert([
+            'id' => strtolower((string) Str::ulid()),
+            'user_id' => $user->id,
+            'email_attempted' => $email,
+            'outcome' => 'success',
+            'ip_address' => '198.51.100.23',
+            'user_agent' => 'the registrant',
+            'created_at' => $longAgo->copy()->addDay(),
+        ]);
 
         return $user;
     }

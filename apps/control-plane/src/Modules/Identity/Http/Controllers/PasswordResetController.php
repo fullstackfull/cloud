@@ -17,6 +17,7 @@ use Lynomia\Http\Responses\ErrorCatalogue;
 use Lynomia\Modules\Identity\Application\Actions\NotifyAboutAccountSecurity;
 use Lynomia\Modules\Identity\Application\Actions\RecordLoginActivity;
 use Lynomia\Modules\Identity\Domain\Enums\LoginOutcome;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
 final class PasswordResetController
@@ -27,7 +28,7 @@ final class PasswordResetController
             'email' => ['required', 'string', 'email', 'max:255'],
         ]);
 
-        Password::sendResetLink(['email' => strtolower(trim($validated['email']))]);
+        Password::sendResetLink(['email' => LoginAddress::normalise($validated['email'])]);
 
         /*
          * Always 202, whatever the outcome.
@@ -52,7 +53,7 @@ final class PasswordResetController
 
         $status = Password::reset(
             [
-                'email' => strtolower(trim($validated['email'])),
+                'email' => LoginAddress::normalise($validated['email']),
                 'password' => $validated['password'],
                 'password_confirmation' => $request->input('password_confirmation'),
                 'token' => $validated['token'],

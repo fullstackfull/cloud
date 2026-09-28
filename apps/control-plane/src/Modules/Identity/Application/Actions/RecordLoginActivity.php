@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Identity\Application\Actions;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Context;
 use Lynomia\Modules\Identity\Domain\Enums\LoginOutcome;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 use Lynomia\Modules\Identity\Infrastructure\Models\LoginActivity;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
@@ -38,7 +39,7 @@ final readonly class RecordLoginActivity
     ): LoginActivity {
         $activity = LoginActivity::create([
             'user_id' => $user?->id,
-            'email_attempted' => $emailAttempted !== null ? strtolower(trim($emailAttempted)) : null,
+            'email_attempted' => $emailAttempted !== null ? LoginAddress::normalise($emailAttempted) : null,
             'outcome' => $outcome,
             'ip_address' => $request->ip(),
             'user_agent' => substr((string) $request->userAgent(), 0, 1000),

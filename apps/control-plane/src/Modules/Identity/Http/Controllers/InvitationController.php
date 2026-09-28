@@ -12,6 +12,7 @@ use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Identity\Application\Actions\AcceptInvitation;
 use Lynomia\Modules\Identity\Application\Actions\DeclineInvitation;
 use Lynomia\Modules\Identity\Domain\Exceptions\MembershipRefusedException;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
@@ -61,7 +62,7 @@ final class InvitationController
                  * it was meant for.
                  */
                 'is_for_you' => $user instanceof User
-                    && hash_equals($invitation->email, mb_strtolower((string) $user->email)),
+                    && hash_equals(LoginAddress::normalise($invitation->email), LoginAddress::normalise((string) $user->email)),
             ],
         ]);
     }

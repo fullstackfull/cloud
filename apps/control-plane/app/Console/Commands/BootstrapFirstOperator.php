@@ -12,6 +12,7 @@ use Illuminate\Support\Str;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 
@@ -107,7 +108,7 @@ final class BootstrapFirstOperator extends Command
             return self::FAILURE;
         }
 
-        $email = Str::lower(trim((string) $this->argument('email')));
+        $email = LoginAddress::normalise((string) $this->argument('email'));
         $name = trim((string) ($this->option('name') ?? '')) ?: 'Platform Operator';
 
         $validator = Validator::make(
