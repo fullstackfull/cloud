@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
-use Lynomia\Http\Rules\ALoginAddressThatSplitsWhereWritten;
+use Lynomia\Http\Rules\LoginAddressAtIntake;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
@@ -115,7 +115,7 @@ final class BootstrapFirstOperator extends Command
         $validator = Validator::make(
             ['email' => $email, 'name' => $name],
             [
-                'email' => ['required', 'string', 'email', 'max:255', new ALoginAddressThatSplitsWhereWritten],
+                'email' => LoginAddressAtIntake::rules(),
                 'name' => ['required', 'string', 'max:255'],
             ],
         );

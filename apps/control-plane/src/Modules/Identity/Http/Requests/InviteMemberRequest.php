@@ -6,7 +6,7 @@ namespace Lynomia\Modules\Identity\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
-use Lynomia\Http\Rules\ALoginAddressThatSplitsWhereWritten;
+use Lynomia\Http\Rules\LoginAddressAtIntake;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Domain\ValueObjects\LoginAddress;
 
@@ -32,17 +32,32 @@ final class InviteMemberRequest extends FormRequest
     {
         return [
             /*
-             * `rfc` and not `dns`. A DNS check inside the request would put a
-             * live resolver lookup on the path of an endpoint anyone with the
-             * permission can call, which is both a latency problem and a
-             * disclosure one — the address being invited would be handed to
-             * whatever resolver the host uses, for an address that may never
-             * become a customer. An address that does not resolve fails at the
-             * only moment that proves anything, which is delivery.
+             * The rules every route that takes an address in applies, to the
+             * address as it will be stored (LoginAddressAtIntake; see
+             * prepareForValidation()). `rfc` and not `dns`: a DNS check
+             * inside the request would put a live resolver lookup on the
+             * path of an endpoint anyone with the permission can call, which
+             * is both a latency problem and a disclosure one — the address
+             * being invited would be handed to whatever resolver the host
+             * uses, for an address that may never become a customer. An
+             * address that does not resolve fails at the only moment that
+             * proves anything, which is delivery.
              */
-            'email' => ['required', 'string', 'email:rfc', 'max:254', new ALoginAddressThatSplitsWhereWritten],
+            'email' => LoginAddressAtIntake::rules(),
             'role' => ['required', 'string', Rule::in(CustomerRole::assignableValues())],
         ];
+    }
+
+    /**
+     * The address is validated as it will be stored: the normalised
+     * spelling's length is the one the column holds, and a domain's root
+     * label is gone before the email rule reads it.
+     */
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('email')) {
+            $this->merge(['email' => LoginAddressAtIntake::asStored($this->input('email'))]);
+        }
     }
 
     public function email(): string
