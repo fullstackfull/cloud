@@ -3154,7 +3154,10 @@ paths:
       tags:
         - "Operator"
       summary: "Where a machine's controller is"
-      description: "Requires the `infrastructure.view` permission."
+      description: |-
+        `data` is null until a controller has been recorded for the machine.
+
+        Requires the `infrastructure.view` permission.
       parameters:
         - name: "server"
           in: "path"
@@ -3167,11 +3170,18 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "The resource."
+          description: "The resource, or `data: null` when there is none."
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/AdminBmcEndpointResponse"
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    oneOf:
+                      - "$ref": "#/components/schemas/AdminBmcEndpoint"
+                      - type: "null"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -6535,11 +6545,18 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "The resource."
+          description: "The resource, or `data: null` when there is none."
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/DesiredStateResponse"
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    oneOf:
+                      - "$ref": "#/components/schemas/DesiredState"
+                      - type: "null"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -6920,11 +6937,18 @@ paths:
         - personalAccessToken: []
       responses:
         200:
-          description: "The resource."
+          description: "The resource, or `data: null` when there is none."
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/DeploymentPlanResponse"
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    oneOf:
+                      - "$ref": "#/components/schemas/DeploymentPlan"
+                      - type: "null"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -12721,6 +12745,12 @@ paths:
           headers:
             Retry-After:
               "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The name cannot be searched. `validation.failed` when the query does not validate (`name` is required; `also_try` is at most ten entries of at most 63 characters each), with the failing fields in `error.details`; otherwise a `domain.*` code saying what is wrong with the name as typed, such as `domain.name_has_no_tld` or `domain.tld_unknown`."
           content:
             "application/json":
               schema:
@@ -19893,6 +19923,18 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+        409:
+          description: "The production site this copy was made from no longer exists on the platform. `wordpress.production_gone`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The site is not a staging copy, so there is no production to push over. `wordpress.not_a_staging_copy`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/wordpress/sites/{site}/staging":
     post:
       operationId: "api_v1_wordpress_sites_staging"
@@ -20643,7 +20685,7 @@ components:
             - "null"
         rack_unit:
           type:
-            - "string"
+            - "integer"
             - "null"
     AdminDedicatedServerPage:
       type: "object"
@@ -20965,7 +21007,7 @@ components:
             - "null"
         load_average:
           type:
-            - "string"
+            - "number"
             - "null"
         last_synced_at:
           "$ref": "#/components/schemas/Timestamp"
@@ -25274,11 +25316,17 @@ components:
         new_recurring:
           "$ref": "#/components/schemas/Money"
         credit:
-          "$ref": "#/components/schemas/Money"
+          oneOf:
+            - "$ref": "#/components/schemas/Money"
+            - type: "null"
         charge:
-          "$ref": "#/components/schemas/Money"
+          oneOf:
+            - "$ref": "#/components/schemas/Money"
+            - type: "null"
         amount_due_now:
-          "$ref": "#/components/schemas/Money"
+          oneOf:
+            - "$ref": "#/components/schemas/Money"
+            - type: "null"
         effective_at:
           "$ref": "#/components/schemas/Timestamp"
         period_end:
@@ -26743,9 +26791,7 @@ components:
             - "null"
           description: "How long the data behind this subscription's services is kept after it ends. Published so the cancellation screen can say what happens next without hard-coding a number the deployment may have changed."
         service_is_running:
-          type:
-            - "string"
-            - "null"
+          type: "boolean"
         created_at:
           "$ref": "#/components/schemas/Timestamp"
     SubscriptionPage:

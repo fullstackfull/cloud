@@ -74,7 +74,9 @@ final readonly class IssueConsoleSession
             virtualMachineId: (string) $machine->getKey(),
             customerId: (string) $customer->getKey(),
             userId: $userId,
-            id: (string) Str::ulid(),
+            // Lower case, as every other id this API publishes (`Ulid`):
+            // Str::ulid() spells one in upper case.
+            id: strtolower((string) Str::ulid()),
             /*
              * 32 bytes from the CSPRNG, base64url-encoded. Not a ULID, not a
              * uuid4, not Str::random(): the first two are structured and

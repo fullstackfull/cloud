@@ -42,12 +42,12 @@ use Tests\TestCase;
  *
  * ## Why this lives in the backend suite
  *
- * Because the parser it needs is here. Reading 22,000 lines of YAML wants a
- * real YAML parser, `symfony/yaml` is already a dependency of the framework,
- * and the alternative was adding one to the web app in a closure wave to read
- * a file the web app does not ship. The contract has two sides and a test of
- * it has to touch both; this one reads the portal's types as text, which is
- * the simpler of the two grammars.
+ * Because the description is generated here. There is no YAML parser in
+ * either application (`describedSchemas()` says how this reads the file
+ * instead), and the alternative was adding one to the web app in a closure
+ * wave to read a file the web app does not ship. The contract has two sides
+ * and a test of it has to touch both; this one reads the portal's types as
+ * text, which is the simpler of the two grammars.
  *
  * ## What it does not do
  *
@@ -55,7 +55,10 @@ use Tests\TestCase;
  * would pass here. Names are where the defect was, names are what silently
  * produce `undefined`, and a type checker over a generated client is the
  * proper answer to the rest — recorded as a future architecture item rather
- * than attempted in a closure wave.
+ * than attempted in a closure wave. The server's side of types is held by
+ * {@see EveryResponseIsTheShapeItsDescriptionPublishesTest}, which checks
+ * real responses against the published schemas; nothing compares the
+ * portal's types with the description's.
  */
 final class TheClientAndTheDescriptionAgreeTest extends TestCase
 {
