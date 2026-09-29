@@ -49,6 +49,14 @@ else into the machine.
    - The task is still running → leave the row alone; the reconciler has
      stopped polling it, so check again by hand until it finishes.
 
+   While the row is `requested`, `running` or `needs_review` it holds two
+   things: the machine (no other restore of it starts) and the archive it
+   reads from (a customer's deletion is refused with
+   `backup.restore_in_progress`, retention skips it, and a deletion already
+   requested is not carried out at the provider). Settling the row releases
+   both; the next retention pass then treats the archive as it would any
+   other.
+
 4. If the provider is unreachable for every row, this is `pbs-unavailable`
    or `proxmox-unavailable`, not this runbook.
 

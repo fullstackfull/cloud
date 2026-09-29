@@ -33,6 +33,16 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
  *  3. It never loads a subnet into memory. A /16 is 65,536 rows and a /8 is
  *     16.7 million; the address generator is lazy and the inserts are chunked,
  *     so peak memory is one chunk regardless of prefix length.
+ *
+ * An operator may name further addresses to keep out of the allocator — a
+ * router pair's VRRP addresses, a switch's SVI — and they are written the
+ * same way as the gateway: as rows, unavailable. On a re-run they are held
+ * unavailable like the gateway is, when the caller names them again.
+ *
+ * Two callers in `src/`: RegisterSubnet, the operator's route, which seeds a
+ * block in the transaction that registers it (F-02: a subnet registered
+ * without its rows was an address space the allocator refused), and the
+ * reference topology loader for simulation.
  */
 final readonly class SeedSubnetAddresses
 {
@@ -43,10 +53,13 @@ final readonly class SeedSubnetAddresses
     private const int CHUNK_SIZE = 1000;
 
     /**
+     * @param  list<string>  $reservedAddresses  Addresses inside the block the operator keeps out of the
+     *                                           allocator, written unavailable like the gateway.
+     *
      * @throws AddressNotAllocatableException when the subnet is IPv6
-     * @throws InvalidIpAddressException when the gateway is not inside the block
+     * @throws InvalidIpAddressException when the gateway or a reserved address is not inside the block
      */
-    public function execute(Subnet $subnet, int $chunkSize = self::CHUNK_SIZE): SubnetSeedResult
+    public function execute(Subnet $subnet, int $chunkSize = self::CHUNK_SIZE, array $reservedAddresses = []): SubnetSeedResult
     {
         $block = $subnet->block();
 
@@ -70,7 +83,10 @@ final readonly class SeedSubnetAddresses
 
         $this->assertGatewayIsInside($subnet, (string) $block);
 
-        $nonHostAddresses = $subnet->nonHostAddresses();
+        $nonHostAddresses = array_values(array_unique([
+            ...$subnet->nonHostAddresses(),
+            ...$this->reservedInside($subnet, $reservedAddresses),
+        ]));
         // A hash lookup, because this is consulted once per address and a /16
         // would otherwise be 65,536 linear scans of the same three-item list.
         $nonHostIndex = array_flip($nonHostAddresses);
@@ -170,6 +186,32 @@ final readonly class SeedSubnetAddresses
             ->all();
 
         return $held;
+    }
+
+    /**
+     * The operator's reserved addresses, normalised and checked to be in the
+     * block. One outside it would be written as a row that matches nothing
+     * and protects nothing, so it is refused rather than ignored.
+     *
+     * @param  list<string>  $reservedAddresses
+     * @return list<string>
+     */
+    private function reservedInside(Subnet $subnet, array $reservedAddresses): array
+    {
+        $block = $subnet->block();
+        $inside = [];
+
+        foreach ($reservedAddresses as $address) {
+            $parsed = IpAddressValue::fromString($address)->value();
+
+            if (! $block->contains($parsed)) {
+                throw InvalidIpAddressException::outsideSubnet($parsed, (string) $block);
+            }
+
+            $inside[] = $parsed;
+        }
+
+        return $inside;
     }
 
     private function assertGatewayIsInside(Subnet $subnet, string $cidr): void

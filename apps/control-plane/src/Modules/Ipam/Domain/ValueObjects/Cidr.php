@@ -30,6 +30,45 @@ use Stringable;
  */
 final readonly class Cidr implements Stringable
 {
+    /**
+     * Space the address plan designates for reuse: blocks that any number of
+     * independent networks may each hold at once and mean different wires.
+     *
+     * The list is of *designation*, not of routing. Documentation space
+     * (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24) is not routed, and it
+     * is deliberately absent: two buildings each holding 203.0.113.0/24 still
+     * hand out one address string twice, which is the harm. "Would a transit
+     * provider carry this packet" and "may two buildings each hold this block"
+     * are different questions, and only the second is asked here.
+     *
+     * Anything not listed is treated as unique in the world, and that default
+     * is the safe direction: a range wrongly called reusable is an address
+     * handed to two customers, while one wrongly called unique is a refusal an
+     * operator can read.
+     *
+     *  - 10/8, 172.16/12, 192.168/16: RFC 1918 private space.
+     *  - 100.64/10: RFC 6598 shared address space, reused behind every
+     *    carrier-grade NAT.
+     *  - 169.254/16: RFC 3927 link-local; meaningful only on one link.
+     *  - 127/8 and ::1/128: loopback; meaningful only on one host.
+     *  - fd00::/8: RFC 4193 unique local with L=1, the locally assigned half.
+     *    fc00::/8, the other half of fc00::/7, is held for a centrally
+     *    assigned scheme whose prefixes would be unique, so it is not here.
+     *  - fe80::/64: link-local unicast as RFC 4291 section 2.5.6 lays it out.
+     *    fe80::/10 is the type prefix and is wider than that.
+     */
+    private const array LOCALLY_REUSABLE = [
+        '10.0.0.0/8',
+        '172.16.0.0/12',
+        '192.168.0.0/16',
+        '100.64.0.0/10',
+        '169.254.0.0/16',
+        '127.0.0.0/8',
+        'fd00::/8',
+        'fe80::/64',
+        '::1/128',
+    ];
+
     private function __construct(
         private string $networkAddress,
         private int $prefixLength,
@@ -141,6 +180,74 @@ final readonly class Cidr implements Stringable
         }
 
         return self::maskToNetwork($parsed, $this->prefixLength) === $this->networkAddress;
+    }
+
+    /**
+     * Whether the two blocks share at least one address.
+     *
+     * Two CIDR blocks either nest or are disjoint — they cannot partly
+     * overlap — so they share an address exactly when they agree on the bits
+     * the shorter prefix fixes. Blocks of different families never overlap:
+     * ::/0 and 0.0.0.0/0 are two address spaces, not a containment. (The
+     * masked comparison would reach the same answer on its own, because a v4
+     * and a v6 network address never print alike; the check states it rather
+     * than leaving it to how addresses are printed.)
+     */
+    public function overlaps(self $other): bool
+    {
+        if ($this->version !== $other->version) {
+            return false;
+        }
+
+        $shorter = min($this->prefixLength, $other->prefixLength);
+
+        return self::maskToNetwork(IpAddressValue::fromString($this->networkAddress), $shorter)
+            === self::maskToNetwork(IpAddressValue::fromString($other->networkAddress), $shorter);
+    }
+
+    /**
+     * Whether every address of $other is inside this block.
+     *
+     * A block of the other family is never inside this one. (As in
+     * overlaps(), the masked comparison would reach that on its own — the
+     * masked address keeps $other's family and is compared with this block's
+     * network address, and a v4 and a v6 address never print alike; the
+     * check states it rather than leaving it to how addresses are printed.)
+     */
+    public function encloses(self $other): bool
+    {
+        return $this->version === $other->version
+            && $this->prefixLength <= $other->prefixLength
+            && self::maskToNetwork(IpAddressValue::fromString($other->networkAddress), $this->prefixLength)
+                === $this->networkAddress;
+    }
+
+    /**
+     * Whether two buildings may each hold this block and mean different
+     * wires — see LOCALLY_REUSABLE for which space that is and why.
+     *
+     * Whole containment, not overlap: a block is reusable only when it is
+     * entirely inside one designated range. 10.0.0.0/7 is half RFC 1918 and
+     * half the entirely public 11.0.0.0/8, and a block with any unique space
+     * in it is unique.
+     */
+    public function isLocallyReusable(): bool
+    {
+        foreach (self::reusableRanges() as $range) {
+            if ($range->encloses($this)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return list<self>
+     */
+    private static function reusableRanges(): array
+    {
+        return array_map(static fn (string $range): self => self::fromString($range), self::LOCALLY_REUSABLE);
     }
 
     /**

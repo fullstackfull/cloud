@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
 use Lynomia\Modules\Admin\Http\Controllers\AuditController;
+use Lynomia\Modules\Admin\Http\Controllers\BackupReviewController;
 use Lynomia\Modules\Admin\Http\Controllers\BillingController;
 use Lynomia\Modules\Admin\Http\Controllers\CountryCurrencyChangeController;
 use Lynomia\Modules\Admin\Http\Controllers\CustomerController;
@@ -11,14 +12,17 @@ use Lynomia\Modules\Admin\Http\Controllers\DomainsController;
 use Lynomia\Modules\Admin\Http\Controllers\DriftController;
 use Lynomia\Modules\Admin\Http\Controllers\HostingController;
 use Lynomia\Modules\Admin\Http\Controllers\InfrastructureController;
+use Lynomia\Modules\Admin\Http\Controllers\IpamQuarantineController;
 use Lynomia\Modules\Admin\Http\Controllers\OperationsController;
 use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
 use Lynomia\Modules\Admin\Http\Controllers\ServiceController;
 use Lynomia\Modules\Catalog\Http\Controllers\OperatorCatalogueController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\ComputeNodeController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentJobController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentPlanController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DesiredStateController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\InventoryController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\OsInstallProfileController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\OverviewController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\PreflightController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\ServerController;
@@ -47,13 +51,30 @@ use Lynomia\Modules\Support\Http\Controllers\OperatorTicketController;
 | session.
 |
 | The prefix is not the control. `auth:sanctum` here is the same guard the
-| customer API uses, so the group alone would let any verified customer
-| through: what actually separates the two surfaces is that every route below
-| names the permission it requires. That is enforced by a test rather than by
-| convention — tests/Feature/Rbac/AdminRoutesRequireAPermissionTest.php fails
-| the build if a route is added here without one, if it names a permission that
-| does not exist, or if it carries the tenant scope. It is the only way a rule
-| like this survives contact with a deadline.
+| customer API uses, so authentication alone would let any verified customer
+| through. Two things separate the surfaces:
+|
+|  - `staff` (EnsureTheCallerIsStaff): a login that holds no staff role is
+|    refused, whatever permissions it holds. This used not to exist, and the
+|    per-route permission was the only separation — so when a delegate gave
+|    the customer role its own permissions (OB-1, re-audit of round three),
+|    every customer login read the operator list. The customer role's
+|    permissions are no longer editable, and this gate means a customer role
+|    that came to hold an operator permission some other way opens nothing.
+|    The same gate refuses a request authenticated by a personal access
+|    token — the customer-surface tokens POST /api/v1/me/api-tokens mints —
+|    whatever roles its holder has: an operator reaches this surface through
+|    the portal session, and before that check an infrastructure admin's own
+|    customer token, or a customer's token after promotion, opened it (OB5-1).
+|  - every route below names the permission it requires.
+|
+| Both are enforced by tests rather than by convention —
+| tests/Feature/Rbac/AdminRoutesRequireAPermissionTest.php fails the build if
+| a route is added here without a permission, if it names a permission that
+| does not exist, or if it carries the tenant scope, and
+| TheCustomerRoleIsNotAWayIntoTheAdminSurfaceTest fails it if a route lacks
+| the staff gate after `auth:sanctum`. It is the only way a rule like this
+| survives contact with a deadline.
 |
 | Deliberately NOT the acting-customer middleware: an administrator acts on the
 | platform, not on behalf of one account, and giving them a tenant scope would
@@ -64,7 +85,7 @@ use Lynomia\Modules\Support\Http\Controllers\OperatorTicketController;
 |
 */
 
-Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function (): void {
+Route::middleware(['auth:sanctum', 'verified', 'staff', 'throttle:api'])->group(function (): void {
     Route::get('customers', [CustomerController::class, 'index'])
         ->middleware('permission:'.Permission::CustomerViewAny->value)
         ->name('customers.index');
@@ -175,6 +196,24 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->name('operations.reinstall_resolve');
 
     /*
+     * Backups waiting for a person (F-09). A restore or a verification the
+     * platform lost track of leaves a good archive in review, where nothing
+     * the platform does will ever take it back out; this is where a person
+     * does, with the evidence they read. Both behind backup.manage, the
+     * permission that names this estate: reading the queue shows archive and
+     * task identifiers, and settling one changes what the platform believes
+     * happened to a customer's machine or data.
+     */
+    Route::get('backups/needs-review', [BackupReviewController::class, 'index'])
+        ->middleware('permission:'.Permission::BackupManage->value)
+        ->name('backups.needs_review');
+
+    Route::post('backups/{backup}/resolve', [BackupReviewController::class, 'resolve'])
+        ->whereUlid('backup')
+        ->middleware('permission:'.Permission::BackupManage->value)
+        ->name('backups.resolve');
+
+    /*
      * The domain queues. Read-only, and under `service.view_any` because a
      * name is a service somebody bought: an operator who may list a customer's
      * machines may list their domains.
@@ -195,6 +234,16 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::get('infrastructure/nodes', [InfrastructureController::class, 'nodes'])
         ->middleware('permission:'.Permission::InfrastructureView->value)
         ->name('infrastructure.nodes');
+
+    /*
+     * A discovered node is recorded in maintenance; this is the person saying
+     * it may take customers. `node.maintenance`, which NOC and
+     * infrastructure-admin hold.
+     */
+    Route::put('infrastructure/nodes/{node}/status', [ComputeNodeController::class, 'status'])
+        ->whereUlid('node')
+        ->middleware('permission:'.Permission::NodeMaintenance->value)
+        ->name('infrastructure.nodes.status');
 
     Route::get('infrastructure/ip-pools', [InfrastructureController::class, 'ipPools'])
         ->middleware('permission:'.Permission::IpamView->value)
@@ -469,6 +518,23 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->name('infrastructure.templates.withdraw');
 
     /*
+     * The answer files a Dedicated build installs from. Writing one is
+     * `dedicated.manage`, the permission for statements about physical
+     * machines: an answer file decides how a machine's disks are partitioned.
+     */
+    Route::get('infrastructure/os-install-profiles', [OsInstallProfileController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.os_install_profiles.index');
+
+    Route::post('infrastructure/os-install-profiles', [OsInstallProfileController::class, 'store'])
+        ->middleware('permission:'.Permission::DedicatedManage->value)
+        ->name('infrastructure.os_install_profiles.store');
+
+    Route::delete('infrastructure/os-install-profiles/{profile}', [OsInstallProfileController::class, 'destroy'])
+        ->middleware('permission:'.Permission::DedicatedManage->value)
+        ->name('infrastructure.os_install_profiles.withdraw');
+
+    /*
     |--------------------------------------------------------------------------
     | The rest of the estate
     |--------------------------------------------------------------------------
@@ -553,6 +619,28 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->whereUlid('pool')
         ->middleware('permission:'.Permission::IpamManage->value)
         ->name('infrastructure.subnets.store');
+
+    /*
+     * Addresses a timed-out build left in quarantine (F-34). No clock ends
+     * one, so an operator does: they look at the provider, then adopt the
+     * address onto the machine that exists or release it because none does.
+     * Finding them is ipam.view like the rest of the address estate; either
+     * act is ipam.manage, because both change what the platform believes an
+     * address is doing on the strength of a person's word.
+     */
+    Route::get('infrastructure/ip-addresses/awaiting-clearance', [IpamQuarantineController::class, 'index'])
+        ->middleware('permission:'.Permission::IpamView->value)
+        ->name('infrastructure.ip_addresses.awaiting_clearance');
+
+    Route::post('infrastructure/ip-addresses/{address}/adopt', [IpamQuarantineController::class, 'adopt'])
+        ->whereUlid('address')
+        ->middleware('permission:'.Permission::IpamManage->value)
+        ->name('infrastructure.ip_addresses.adopt');
+
+    Route::post('infrastructure/ip-addresses/{address}/release', [IpamQuarantineController::class, 'release'])
+        ->whereUlid('address')
+        ->middleware('permission:'.Permission::IpamManage->value)
+        ->name('infrastructure.ip_addresses.release');
 
     Route::post('infrastructure/hosting-nodes', [InventoryController::class, 'storeHostingNode'])
         ->middleware('permission:'.Permission::HostingNodeManage->value)
@@ -956,7 +1044,7 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
 | Every route sits in the same authenticated group as the rest of this file
 | and names its permission, which the route test enforces.
 */
-Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function (): void {
+Route::middleware(['auth:sanctum', 'verified', 'staff', 'throttle:api'])->group(function (): void {
     Route::get('support/tickets', [OperatorTicketController::class, 'index'])
         ->middleware('permission:'.Permission::TicketViewAny->value)
         ->name('support.tickets');

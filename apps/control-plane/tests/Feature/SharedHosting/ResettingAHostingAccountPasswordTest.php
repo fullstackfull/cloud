@@ -27,6 +27,7 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use Lynomia\Modules\SharedHosting\Infrastructure\Providers\FakeHostingProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Support\PanelThatLosesItsAnswer;
+use Tests\Support\StaffHoldingExactly;
 use Tests\TestCase;
 
 /**
@@ -48,6 +49,7 @@ use Tests\TestCase;
 final class ResettingAHostingAccountPasswordTest extends TestCase
 {
     use RefreshDatabase;
+    use StaffHoldingExactly;
 
     private HostingNode $node;
 
@@ -167,8 +169,7 @@ final class ResettingAHostingAccountPasswordTest extends TestCase
          */
         $account = $this->anAccountWhoseAnswerWasLost();
 
-        $manager = User::factory()->create();
-        $manager->givePermissionTo(Permission::HostingAccountManage->value);
+        $manager = $this->staffHoldingExactly([Permission::HostingAccountManage]);
 
         $this->actingAs($manager)
             ->postJson($this->url($account), ['reason' => 'trying with manage alone'])

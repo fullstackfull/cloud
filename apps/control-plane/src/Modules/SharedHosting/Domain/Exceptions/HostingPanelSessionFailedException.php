@@ -19,24 +19,29 @@ use Throwable;
  * that context is what an operator reads in the log when a node starts
  * refusing, and CpanelHostingProvider deliberately records the config key its
  * root API token is read from so a missing credential can be found without
- * guessing. And the shared renderer in bootstrap/app.php publishes a
- * DomainException's context verbatim as `error.details`, which is also right —
- * a domain exception's context is normally the caller's own order id or invoice
- * number.
+ * guessing. And the shared renderer in bootstrap/app.php used to publish a
+ * DomainException's context verbatim as `error.details`.
  *
  * Together, on the one endpoint of this module that talks to a node while a
- * customer waits, they hand that customer the name of the machine their
+ * customer waits, they handed that customer the name of the machine their
  * neighbours' sites run on, the shape of the platform's WHM integration and the
  * config key naming its root credential. Every resource in this module goes out
  * of its way to withhold exactly that; a 502 must not be the door it walks back
  * out of.
  *
+ * The renderer now publishes only the keys a class declares with
+ * `publishing()`, and HostingProviderException declares none, so that door is
+ * shut twice. This class is the first time: it decides what the customer is
+ * told, and separates the platform's own misconfiguration from a panel that
+ * did not answer.
+ *
  * So the provider's exception is caught at the edge of the module and
  * re-thrown as this one, with the original chained as `previous` so that
  * nothing is lost from the log, the failure report or the redaction the log
  * stack already applies to an exception chain. What changes is only what the
- * customer is told: that the panel could not be reached, and which of their own
- * accounts it was about.
+ * customer is told: that the panel could not be reached. Which of their own
+ * accounts it was about is in the context for the log, and in the URL they
+ * called.
  *
  * The error code for a panel failure is deliberately unchanged from
  * HostingProviderException's. A client branching on

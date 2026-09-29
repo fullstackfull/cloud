@@ -32,7 +32,7 @@ final class EmailAddressNotVerifiedException extends DomainException
             // are authenticated, and it is already on their /me payload.
             'email' => $email,
             'resend_endpoint' => 'POST /api/v1/email/verify/resend',
-        ]);
+        ])->publishing('email', 'resend_endpoint');
     }
 
     public function errorCode(): string

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -58,6 +59,30 @@ use Lynomia\Modules\Rbac\Domain\Enums\Role;
  * database at the moment of the attempt. A stored "bootstrap completed" flag
  * would be a second source of truth that can disagree with the first, and the
  * disagreement is a way to mint a second super admin from the console.
+ *
+ * "At the moment of the attempt" means under a lock, in the transaction that
+ * creates the account. The question used to be asked before any transaction:
+ * two runs at once each counted no super admin and each created one — two in
+ * four of six rounds, measured by the re-audit of round three (OB-2). Now
+ * both questions (a super admin exists; the address is taken) are asked again
+ * after a transaction-scoped advisory lock on BOOTSTRAP_LOCK, and the account,
+ * its role and its audit entry commit in that same transaction. A second run
+ * waits for the first to commit, then counts one and refuses. The checks
+ * before the transaction stay only to answer early without taking the lock;
+ * they decide nothing. TwoBootstrapsAtOnceEstablishOneOperatorTest races
+ * separate processes against it.
+ *
+ * ---------------------------------------------------------------------------
+ * A new account, never somebody else's
+ * ---------------------------------------------------------------------------
+ *
+ * The address must not already belong to a login, soft-deleted ones included.
+ * This used firstOrNew, so on a deployment with no super admin it would have
+ * taken an existing customer login with that address, made it super admin and
+ * replaced its password: the top authority handed to whoever reads that
+ * customer's mailbox, and the customer locked out. The first operator is
+ * created under an address of its own; once it exists, an existing login is
+ * promoted deliberately, through the Control Center's invitation.
  */
 final class BootstrapFirstOperator extends Command
 {
@@ -68,16 +93,16 @@ final class BootstrapFirstOperator extends Command
 
     protected $description = 'Establish the first privileged operator on a fresh deployment.';
 
+    /** The key every run serialises on; see "Single use, by state". */
+    private const string BOOTSTRAP_LOCK = 'operator:bootstrap';
+
     public function handle(RecordActAtomically $record): int
     {
-        $existing = User::query()->role(Role::SuperAdmin->value)->count();
+        // Early answer only; asked again under the lock below.
+        $refusal = $this->alreadyEstablished();
 
-        if ($existing > 0) {
-            $this->error(sprintf(
-                'This deployment already has %d privileged operator(s). Create further operators through '
-                .'the Control Center, not from the console.',
-                $existing,
-            ));
+        if ($refusal !== null) {
+            $this->error($refusal);
 
             return self::FAILURE;
         }
@@ -101,10 +126,30 @@ final class BootstrapFirstOperator extends Command
             return self::FAILURE;
         }
 
+        // Early answer only; asked again under the lock below.
+        $refusal = $this->addressTaken($email);
+
+        if ($refusal !== null) {
+            $this->error($refusal);
+
+            return self::FAILURE;
+        }
+
         $operator = $record->execute(
-            act: function () use ($email, $name): User {
-                /** @var User $user */
-                $user = User::query()->firstOrNew(['email' => $email]);
+            act: function () use ($email, $name, &$refusal): ?User {
+                // Before either question is asked, inside the transaction the
+                // account commits in: a concurrent run waits here until this
+                // one has committed or rolled back.
+                DB::statement('select pg_advisory_xact_lock(hashtext(?))', [self::BOOTSTRAP_LOCK]);
+
+                $refusal = $this->alreadyEstablished() ?? $this->addressTaken($email);
+
+                if ($refusal !== null) {
+                    return null;
+                }
+
+                $user = new User;
+                $user->forceFill(['email' => $email]);
 
                 $user->forceFill([
                     'name' => $name,
@@ -121,7 +166,7 @@ final class BootstrapFirstOperator extends Command
                      * are behind `verified`, and a first operator who cannot
                      * reach them is another dead end.
                      */
-                    'email_verified_at' => $user->email_verified_at ?? now(),
+                    'email_verified_at' => now(),
                     'password_changed_at' => null,
                 ])->save();
 
@@ -129,7 +174,7 @@ final class BootstrapFirstOperator extends Command
 
                 return $user;
             },
-            describe: static fn (User $user): AuditedAct => new AuditedAct(
+            describe: static fn (?User $user): ?AuditedAct => $user === null ? null : new AuditedAct(
                 action: AuditAction::OperatorBootstrapped,
                 subject: $user,
                 // The act, and nothing that could be used: no token, no link,
@@ -138,12 +183,50 @@ final class BootstrapFirstOperator extends Command
             ),
         );
 
+        if ($operator === null) {
+            $this->error((string) $refusal);
+
+            return self::FAILURE;
+        }
+
         $this->deliverTheOneTimeLink($operator);
 
         $this->info(sprintf('%s is now the first operator of this deployment.', $operator->email));
         $this->line('Every operator after this one is created in the Control Center. This command will now refuse.');
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Why the deployment already has its first operator, or null.
+     */
+    private function alreadyEstablished(): ?string
+    {
+        $existing = User::query()->role(Role::SuperAdmin->value)->count();
+
+        if ($existing === 0) {
+            return null;
+        }
+
+        return sprintf(
+            'This deployment already has %d privileged operator(s). Create further operators through '
+            .'the Control Center, not from the console.',
+            $existing,
+        );
+    }
+
+    /**
+     * Why this address cannot be the first operator's, or null.
+     */
+    private function addressTaken(string $email): ?string
+    {
+        if (! User::query()->withTrashed()->where('email', $email)->exists()) {
+            return null;
+        }
+
+        return 'That address already belongs to an account on this deployment. The first operator is created '
+            .'as a new account: use an address of its own. An existing account can be given a role through '
+            .'the Control Center once the first operator exists.';
     }
 
     /**

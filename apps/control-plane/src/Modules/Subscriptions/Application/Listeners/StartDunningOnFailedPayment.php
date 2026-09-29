@@ -31,10 +31,13 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * ran.
  *
  * Keyed on the failed transaction, so a redelivery counts nothing: this runs on
- * the payments queue with five tries, and a delivery is not a failure. Before
- * F-08 fixed the retry clocks the queue itself could hand this listener to a
- * second worker while the first was still inside it; the key is read under the
- * subscription's row lock, so even two overlapping deliveries count once.
+ * the payments queue with five tries, and a delivery is not a failure. Every
+ * failure counted is remembered, not only the latest, so a failure delivered
+ * again after newer ones — or after the customer has paid — is still
+ * recognised. Before F-08 fixed the retry clocks the queue itself could hand
+ * this listener to a second worker while the first was still inside it; the
+ * key is checked and written under the subscription's row lock, so even two
+ * overlapping deliveries count once.
  *
  * Note what this does NOT do: it does not suspend anything. Failing a payment
  * opens a grace period, and the sweep is what eventually closes it. A listener

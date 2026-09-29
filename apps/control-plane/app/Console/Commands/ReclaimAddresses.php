@@ -28,6 +28,13 @@ use Lynomia\Modules\Ipam\Application\Actions\ReleaseQuarantinedAddresses;
  *    exist, so it only comes back after the quarantine period has elapsed —
  *    which is the platform's way of saying "long enough that anything using it
  *    would have been noticed".
+ *
+ * Except a timeout's. An address quarantined because a provisioning call
+ * timed out never comes back through this command: no period tells anybody
+ * whether the timed-out build made a machine with it configured, so
+ * ReleaseQuarantinedAddresses skips it for good. An operator who has looked
+ * at the provider clears it instead, through the admin surface's adopt and
+ * release (`/api/admin/infrastructure/ip-addresses/…`, F-34).
  */
 final class ReclaimAddresses extends Command
 {

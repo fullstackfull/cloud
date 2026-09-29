@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Orders\Application\Actions;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Application\Actions\CompensateUncollectableCapture;
 use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
@@ -61,6 +62,29 @@ use Lynomia\Modules\Shared\Domain\Exceptions\IllegalStateTransitionException;
  * problem and is not solved here — it is solved by
  * {@see CompensateUncollectableCapture},
  * because by then the money exists and refusing it would not un-take it.
+ *
+ * ---------------------------------------------------------------------------
+ * "Paid" is the invoice's word before it is the order's (F-05)
+ * ---------------------------------------------------------------------------
+ *
+ * The refusals below used to read the order alone, and the order is the last
+ * to hear about money. SettleInvoice marks the invoice paid and announces it;
+ * the order leaves PENDING_PAYMENT, and paid_at is stamped, only when the
+ * queued FulfilOrderOnSettlement runs on the payments worker. Between the two
+ * the order still looked cancellable, a wallet payment (which settles at once)
+ * followed by a cancel request inside that window was accepted, and fulfilment
+ * then found a cancelled order it could not move to PAID: money taken, nothing
+ * delivered, the job in failed_jobs.
+ *
+ * So the invoice is asked too, and asked under its own row lock inside the
+ * cancel transaction. That lock is the one SettleInvoice takes before it
+ * applies a payment, so the two serialise: whichever commits first, the other
+ * sees it. A cancel that wins voids a document no money has reached, and a
+ * capture that lands afterwards is compensated as above. A settlement that
+ * wins leaves money on the invoice, and this refuses with
+ * `order.already_paid`, which is the truth. Any money applied counts, not
+ * only a fully paid document: VoidInvoice refuses to void an invoice a payment
+ * was applied to, and a partial payment is still the customer's money.
  */
 final readonly class CancelOrder
 {
@@ -85,14 +109,24 @@ final readonly class CancelOrder
      * always the one the customer sees.
      *
      * An already-cancelled order reports false: execute() converges on it, but
-     * there is nothing left to offer.
+     * there is nothing left to offer. So does an order whose invoice has
+     * taken money that fulfilment has not yet recorded on the order — the
+     * button would lead only to `order.already_paid`. Read without a lock: an
+     * answer for a screen, which execute() re-asks under one. The order's
+     * `invoices` relation is used when the caller loaded it (the order list
+     * does), so a page of orders is not one invoice query per row.
      */
     public static function isCancellable(Order $order): bool
     {
         return $order->status !== OrderStatus::Cancelled
             && ! $order->status->isPaid()
             && $order->paid_at === null
-            && in_array($order->status, self::CANCELLABLE, true);
+            && in_array($order->status, self::CANCELLABLE, true)
+            && ! self::hasTakenMoney(
+                $order->relationLoaded('invoices')
+                    ? $order->invoices->all()
+                    : Invoice::query()->where('order_id', $order->getKey())->get()->all()
+            );
     }
 
     /**
@@ -142,6 +176,25 @@ final readonly class CancelOrder
         $why = $reason ?? 'cancelled by the customer';
 
         return DB::transaction(function () use ($order, $actor, $why): Order {
+            /*
+             * The invoice first, under the lock SettleInvoice takes: see the
+             * class docblock. Locked before the order (TransitionOrder locks
+             * that), which is the order SettleInvoice's own chain reaches the
+             * two rows in — it never takes the order's lock at all.
+             */
+            $invoices = Invoice::query()
+                ->where('order_id', $order->getKey())
+                ->lockForUpdate()
+                ->get()
+                ->all();
+
+            if (self::hasTakenMoney($invoices)) {
+                throw OrderCannotBeCancelledException::becauseItIsPaid(
+                    (string) $order->getKey(),
+                    $order->status,
+                );
+            }
+
             $cancelled = $this->transition->execute(
                 $order,
                 OrderStatus::Cancelled,
@@ -150,10 +203,30 @@ final readonly class CancelOrder
                 reason: $why,
             );
 
-            $this->withdrawTheInvoice($cancelled, $why);
+            $this->withdrawTheInvoice($cancelled, $invoices, $why);
 
             return $cancelled;
         });
+    }
+
+    /**
+     * Whether any of these invoices has had money applied to it.
+     *
+     * A paid document, or an open one carrying a partial payment. Either way
+     * the customer has handed money over for this order, and cancelling it is
+     * a refund.
+     *
+     * @param  list<Invoice>  $invoices
+     */
+    private static function hasTakenMoney(array $invoices): bool
+    {
+        foreach ($invoices as $invoice) {
+            if ($invoice->status === InvoiceStatus::Paid || $invoice->amount_paid_minor > 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -163,19 +236,16 @@ final readonly class CancelOrder
      * money cannot be voided — VoidInvoice refuses it, and rightly, because
      * voiding a document a payment was applied to would say that payment never
      * happened — but an order in that position never reaches here either: the
-     * paid_at and status refusals above have already turned it away.
+     * refusal on the locked invoices in execute() has already turned it away.
      *
      * The reason is written onto the invoice as well as onto the order's
      * transition, so an operator reading the document alone can see why a
      * number in their series was withdrawn without joining back to the order.
+     *
+     * @param  list<Invoice>  $invoices  the order's invoices, already locked by execute()
      */
-    private function withdrawTheInvoice(Order $order, string $reason): void
+    private function withdrawTheInvoice(Order $order, array $invoices, string $reason): void
     {
-        $invoices = Invoice::query()
-            ->where('order_id', $order->getKey())
-            ->lockForUpdate()
-            ->get();
-
         foreach ($invoices as $invoice) {
             if (! $invoice->status->isCollectible()) {
                 continue;

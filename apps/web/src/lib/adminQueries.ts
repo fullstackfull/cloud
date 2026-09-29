@@ -81,9 +81,10 @@ export interface AdminProvisioningJob {
   failure_class: string | null
   last_error: string | null
   /*
-   * Published by the needs-review list only (F-15): the last attempt's
-   * finding, and the provider identity a VPS create reserved before it called
-   * — where to look for what it built, and what the runbook keys its rows on.
+   * Published by the needs-review list only (F-15): the job's current
+   * finding — its last attempt's, about the identity it holds now, or none —
+   * and the provider identity a VPS create reserved before it called: where to
+   * look for what it built, and what the runbook keys its rows on.
    */
   error_code?: string | null
   error_reason?: string | null

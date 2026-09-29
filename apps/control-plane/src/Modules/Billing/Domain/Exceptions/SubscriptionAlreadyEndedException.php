@@ -32,10 +32,13 @@ final class SubscriptionAlreadyEndedException extends DomainException
             $status->value,
         ));
 
+        // The status is the customer's own subscription's, and it is the
+        // answer to "why not?". The id is the one in their URL; it stays in
+        // the log.
         return $exception->withContext([
             'subscription_id' => $subscriptionId,
             'status' => $status->value,
-        ]);
+        ])->publishing('status');
     }
 
     public function errorCode(): string

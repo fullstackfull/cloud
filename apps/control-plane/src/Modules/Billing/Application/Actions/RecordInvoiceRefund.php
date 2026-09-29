@@ -6,12 +6,15 @@ namespace Lynomia\Modules\Billing\Application\Actions;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
+use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Events\InvoiceRefunded;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceRefundExceedsPaymentException;
 use Lynomia\Modules\Billing\Domain\Exceptions\UnsettleablePaymentException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
 use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Shared\Domain\Exceptions\CurrencyMismatchException;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
@@ -56,10 +59,10 @@ final readonly class RecordInvoiceRefund
 
         return DB::transaction(function () use ($invoice, $amount, $refund): Invoice {
             /*
-             * The refund row is taken before the invoice, the same ordering
-             * SettleInvoice uses for a capture: the payments flow reaches both
-             * actions holding the payment-side row, and one path locking them
-             * in the opposite order is how two correct actions deadlock.
+             * The refund row is taken before the invoice: the money-path lock
+             * order (WhatAnInvoiceStillHolds), the one SettleInvoice and
+             * IssueRefund follow for a capture. One path locking them in the
+             * opposite order is how two correct actions deadlock.
              */
             if ($refund !== null) {
                 $this->assertRecordsTheWholeRefund($refund, $amount);
@@ -81,6 +84,31 @@ final readonly class RecordInvoiceRefund
             }
 
             $refundable = $locked->refundableAmount();
+
+            /*
+             * Less anything already handed back to the wallet against this
+             * invoice beyond what the document itself stopped counting — a
+             * cancelled order's credit, a compensated capture. The document's
+             * own figure (paid − refunded) does not see those, and booking a
+             * refund past them would record the same money going back twice.
+             * Only asked when such a credit exists: an invoice nobody has
+             * credited is refundable to exactly what it says. Measured against
+             * the refunds this document has already booked, which is what the
+             * row being recorded now is not yet among — the same captures and
+             * wallet credits WhatAnInvoiceStillHolds reads.
+             */
+            $creditedMinor = WhatAnInvoiceStillHolds::creditedToTheWalletMinor($locked);
+
+            if ($creditedMinor > 0) {
+                $stillHeld = Money::ofMinor(
+                    max(0, WhatAnInvoiceStillHolds::capturedMinor($locked) - $creditedMinor - $locked->amount_refunded_minor),
+                    $locked->currency,
+                );
+
+                if ($stillHeld->isLessThan($refundable)) {
+                    $refundable = $stillHeld;
+                }
+            }
 
             if ($amount->isGreaterThan($refundable)) {
                 throw InvoiceRefundExceedsPaymentException::forInvoice(
@@ -158,11 +186,28 @@ final readonly class RecordInvoiceRefund
      * the row, so reading it as "already recorded" made the first and only
      * booking of a real refund return early and left amount_refunded_minor at
      * zero.
+     *
+     * Only a refund that stands as succeeded is booked. A refund the provider
+     * reversed (reported failed or cancelled after it had reported it
+     * succeeded - SettleRefundFromProvider, OA-4) before its queued booking
+     * was heard would otherwise be booked afterwards, and the invoice would
+     * say returned money the provider put back. Read under the refund's lock,
+     * which the reversal takes too.
      */
     private function attach(Refund $refund, Invoice $invoice): bool
     {
         /** @var Refund $locked */
         $locked = Refund::query()->lockForUpdate()->findOrFail($refund->getKey());
+
+        if ($locked->status !== RefundStatus::Succeeded) {
+            Log::warning('A refund no longer standing as succeeded was not booked on its invoice.', [
+                'refund_id' => (string) $locked->getKey(),
+                'invoice_id' => (string) $invoice->getKey(),
+                'status' => $locked->status->value,
+            ]);
+
+            return false;
+        }
 
         if ($locked->recorded_on_invoice_at !== null) {
             if ((string) $locked->invoice_id !== (string) $invoice->getKey()) {

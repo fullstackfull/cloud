@@ -2,8 +2,14 @@
 
 ## What you are seeing
 
-`HostingNodeDiskHigh`, or hosting operations failing against cPanel/WHM or
-DirectAdmin.
+One of the alerts that send you here, or hosting operations failing against
+cPanel/WHM or DirectAdmin:
+
+- **`HostingNodeUnavailable`** (critical) — the node itself stopped answering
+  scrapes. That is not the panel-only case below: every site on it may be
+  offline.
+- **`HostingNodeDiskRatioHigh`** or **`HostingNodeDiskAlmostFull`** — disk. They
+  measure different things; see *Disk* below.
 
 ## What it means
 
@@ -21,9 +27,20 @@ php artisan hosting:reconcile                    # accounts vs what the panel se
 
 ## Disk
 
-`HostingNodeDiskHigh` at 90% is close to the point where the panel starts
-failing writes in ways that look like unrelated bugs. Find the consumer before
-deleting anything:
+Two alerts watch this, and they do not read the same number:
+
+- `HostingNodeDiskRatioHigh` fires when the control plane's own record of the
+  node, `lynomia_hosting_node_disk_ratio` as last synced, has been above 80% for
+  30 minutes. Placement stops sending the node new accounts earlier, at
+  `HOSTING_MAX_DISK_PERCENT` — 75% unless it has been configured otherwise — so
+  with that default a node this alert names is already taking no new accounts.
+- `HostingNodeDiskAlmostFull` fires when node_exporter on the node has seen less
+  than 20% free on one of its filesystems for 10 minutes.
+
+If node_exporter disagrees with the control plane's figure, the node's sync
+into the control plane has stalled and placement is deciding on stale data. A
+disk this full is close to the point where the panel starts failing writes in
+ways that look like unrelated bugs. Find the consumer before deleting anything:
 
 ```bash
 ssh <node> 'du -sh /home/* | sort -h | tail -20'

@@ -55,10 +55,14 @@ final readonly class ProductRequirements
                 /*
                  * `inventory_sync` because placement reads the storage pools
                  * the inventory sync recorded, and nothing else in production
-                 * records one: a cluster whose token cannot audit a datastore
-                 * answers every other question and places nothing. Named here
-                 * and not on GPU compute, which depends on VPS and inherits
-                 * its readiness.
+                 * records one: a cluster that shows the platform no pool
+                 * places nothing, whatever else it can do. On Proxmox the
+                 * privilege that shows a pool, Datastore.Audit, also settles
+                 * `templates`, so today a token without it fails both; they
+                 * are asked separately because they are different questions,
+                 * and this is the one placement depends on. Named here and
+                 * not on GPU compute, which depends on VPS and inherits its
+                 * readiness.
                  */
                 new Requirement(ProviderCategory::Compute, ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling', 'inventory_sync']),
                 new Requirement(ProviderCategory::ReverseDns, ['set_ptr', 'clear_ptr']),

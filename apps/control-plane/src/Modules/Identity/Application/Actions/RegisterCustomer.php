@@ -84,9 +84,9 @@ final readonly class RegisterCustomer
         if (! $this->legal->registrationPermitted()) {
             /*
              * Which documents are missing goes here and not into the
-             * exception: a domain exception's context is rendered to the
-             * client as `error.details`, and this endpoint is public. An
-             * operator reading the log is the audience for this.
+             * exception: an operator reading the log is the audience for
+             * this, and this endpoint is public — a context is one
+             * `publishing()` away from `error.details`.
              */
             Log::warning('A registration was refused because the legal documents are not published.', [
                 'unpublished_documents' => $this->legal->unpublished(),

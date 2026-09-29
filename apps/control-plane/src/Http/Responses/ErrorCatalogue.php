@@ -17,17 +17,32 @@ use Illuminate\Support\Facades\Lang;
  * between the two: a code with a catalogue entry is answered with the
  * catalogue's sentence, and the exception's prose never reaches the response.
  *
- * A code without an entry falls back to the sentence it was given. That
- * fallback exists for the operator API, whose modules are not in the
- * catalogue and whose readers are staff; on the customer surface the parity
- * test in tests/Feature/Api/CustomerErrorCatalogueTest.php makes the fallback
- * unreachable by requiring an entry for every code the customer modules can
- * raise.
+ * A code without an entry falls back to the sentence it was given, or to the
+ * generic `errors.request_failed` when it was given none. The first exists
+ * for the operator API, whose modules are not in the catalogue and whose
+ * readers are staff. On the customer API the renderer (bootstrap/app.php)
+ * gives none, so an uncatalogued code there is answered with the generic
+ * sentence in the request's language and never with the engineer's. Two
+ * tests keep that case rare rather than merely safe:
+ * tests/Feature/Api/CustomerErrorCatalogueTest.php requires an entry for every
+ * code the customer modules can raise, and
+ * tests/Architecture/NoCustomerRouteReachesAnUncataloguedCodeTest.php refuses
+ * a customer route that its over-approximate walk finds can reach a class
+ * declaring an uncatalogued code in one of the five literal spellings it
+ * reads (its docblock lists them; a code built any other way is unseen),
+ * unless that class is reached only through a queued job that catches it and
+ * is named there as an excuse the gate re-checks.
  *
  * Context values are offered to the sentence as `:placeholders`. Only what the
  * sentence names is used, so a context that carries an internal identifier
  * for the log's benefit does not surface unless the catalogue author asked
  * for it.
+ *
+ * The same holds beside the sentence. `error.details` is not the context: it
+ * is `DomainException::publishedContext()`, the keys the exception's class
+ * declared the caller already knows, and empty unless it declared any. The
+ * two halves used to disagree — this sentence kept the log's identifiers out
+ * while `details` published the whole context next to it.
  */
 final class ErrorCatalogue
 {

@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Backups\Application\Actions;
 
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
+use Lynomia\Modules\Backups\Domain\Enums\FileRestoreState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
+use Lynomia\Modules\Backups\Domain\Exceptions\IllegalBackupTransitionException;
 use Lynomia\Modules\Backups\Domain\Exceptions\RestoreRefusedException;
 use Lynomia\Modules\Backups\Domain\ValueObjects\BackupNotificationKey;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
+use Lynomia\Modules\Backups\Infrastructure\Models\BackupFileRestore;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
@@ -47,7 +51,11 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  *    customers' servers and this is the last place to catch it.
  *
  *  - **Nothing else may be restoring.** Two concurrent restores over the same
- *    disks is the one outcome that cannot be reasoned about afterwards.
+ *    disks is the one outcome that cannot be reasoned about afterwards. A
+ *    restore that went to review still counts until a person settles it: the
+ *    platform stopped watching it, the provider did not necessarily stop
+ *    writing. So does a file restore still in flight or in review, which
+ *    writes the same disks (F-09).
  *
  * ---------------------------------------------------------------------------
  * A timeout is not a failure
@@ -83,6 +91,9 @@ final readonly class RestoreServiceBackup
             throw RestoreRefusedException::confirmationMismatch();
         }
 
+        // Once here, so the refusals come in the order a customer can act on
+        // them, and once more under the lock below, which is the one that
+        // counts.
         $this->assertRestorable($backup, $machine);
 
         $cluster = $machine->cluster()->first();
@@ -111,16 +122,68 @@ final readonly class RestoreServiceBackup
 
         $provider = $this->providers->for($cluster);
 
-        // Moved before the call, exactly as the backup path writes its row
-        // first: if this process dies mid-request, the platform still knows a
-        // restore was started and an operator can find it.
-        $backup->transitionTo(BackupState::Restoring, [
-            'restore_started_at' => now(),
-            'restored_by_user_id' => $restoredByUserId,
-            // Cleared: a previous attempt's reason has nothing to say about
-            // this one, and leaving it makes a running restore look broken.
-            'failure_reason' => null,
-        ]);
+        /*
+         * The guard and the write, as one step per machine.
+         *
+         * The checks above ran on the copy the caller read, and between them
+         * and a write somebody else could start a restore of another archive
+         * of this machine, or the verification sweep could start reading this
+         * one. Checking again and writing, under a lock on the machine's row,
+         * is what makes "nothing else is restoring" true at the moment it is
+         * acted on: two requests for two archives of one machine used to both
+         * pass the guard and both start. Nothing slow happens inside — the
+         * provider call is after — and the row itself moves by
+         * compare-and-set, so a verification written in between is a refusal
+         * rather than something to write over.
+         *
+         * Moved before the call, exactly as the backup path writes its row
+         * first: if this process dies mid-request, the platform still knows a
+         * restore was started and an operator can find it.
+         */
+        $backup = DB::transaction(function () use ($backup, $machine, $restoredByUserId): Backup {
+            VirtualMachine::query()->whereKey($machine->getKey())->lockForUpdate()->firstOrFail();
+
+            /** @var Backup $locked */
+            $locked = Backup::query()->whereKey($backup->getKey())->lockForUpdate()->firstOrFail();
+
+            $this->assertRestorable($locked, $machine);
+
+            $locked->transitionTo(BackupState::Restoring, [
+                // The clock this restore is measured on. ReconcileBackup gives
+                // up on it `backups.max_poll_hours` after THIS, not after the
+                // archive was taken — which for a backup days old is on the
+                // first poll.
+                'restore_started_at' => now(),
+                'restored_by_user_id' => $restoredByUserId,
+                // Cleared: a previous attempt's reason has nothing to say
+                // about this one, and leaving it makes a running restore look
+                // broken.
+                'failure_reason' => null,
+                // A new operation to watch, asked about ahead of rows already
+                // polled; the backup's own poll history says nothing about it.
+                'last_polled_at' => null,
+                'poll_count' => 0,
+                // Cleared in the same compare-and-set that moves the row, so
+                // the table never holds `restoring` beside a previous
+                // attempt's handle. An archive can be restored more than
+                // once, and the previous restore's task finished long ago: a
+                // sweep that polled it between this write and the handle's —
+                // or after a crash between the two — read "OK", wrote
+                // `Restored` and released the machine while this restore was
+                // writing it (F-09). Without a handle the row is left for the
+                // handle to arrive, or for its own clock to hand it to a
+                // person. A sweep that loaded the row during the previous
+                // attempt still holds that handle in memory; clearing it here
+                // does not reach that copy, and what stops it settling this
+                // attempt is the compare-and-set on the attempt
+                // ({@see Backup::transitionTo()}).
+                'restore_task_id' => null,
+                // This attempt has restored nothing yet.
+                'restored_at' => null,
+            ]);
+
+            return $locked;
+        });
 
         try {
             $operation = $provider->startRestore(
@@ -130,14 +193,30 @@ final readonly class RestoreServiceBackup
                 archiveId: $archive,
             );
         } catch (BackupProviderException $e) {
-            $backup->transitionTo(
-                // Indeterminate stops rather than fails: a restore that may be
-                // running must never be retried automatically.
-                $e->isIndeterminate() ? BackupState::NeedsReview : BackupState::Succeeded,
-                [
-                    'failure_reason' => $this->redactor->redactString($e->getMessage()),
-                ],
-            );
+            try {
+                $backup->transitionTo(
+                    // Indeterminate stops rather than fails: a restore that may
+                    // be running must never be retried automatically.
+                    $e->isIndeterminate() ? BackupState::NeedsReview : BackupState::Succeeded,
+                    [
+                        'failure_reason' => $this->redactor->redactString($e->getMessage()),
+                    ],
+                );
+            } catch (IllegalBackupTransitionException $raced) {
+                /*
+                 * A compare-and-set refusal. Nothing in this module moves a
+                 * `restoring` row that has no restore task yet — the poller
+                 * leaves it for `max_poll_hours` after `restore_started_at`,
+                 * and the transition above cleared any previous attempt's
+                 * handle so there is none to poll by mistake — so this would
+                 * be something new; the row as it now stands is the answer.
+                 */
+                if (! $raced->wasRaced()) {
+                    throw $raced;
+                }
+
+                return $backup->refresh();
+            }
 
             return $this->announce($backup->refresh());
         }
@@ -146,7 +225,9 @@ final readonly class RestoreServiceBackup
          * An update, not a transition: the row is already Restoring, and
          * Restoring is not a legal destination from itself — deliberately, so
          * that a re-entrant call cannot restart the clock on a restore that is
-         * already running.
+         * already running. That clock is `restore_started_at`, written by the
+         * transition above, and it is the one ReconcileBackup measures this
+         * restore's poll window from.
          *
          * The identifier goes in its own column. Overwriting provider_task_id
          * would erase the identifier of the backup itself — the one thing that
@@ -164,9 +245,10 @@ final readonly class RestoreServiceBackup
      *
      * The poller cannot do this one. A row that stops here is either back at
      * `Succeeded` — the provider refused outright, nothing was started, and
-     * the customer can simply try again — or at `NeedsReview`, which nothing
-     * transitions out of and which no sweep will ever pick up, because
-     * `isAwaitingProvider()` is false without a task.
+     * the customer can simply try again — or at `NeedsReview`, which only a
+     * person settles and which no sweep will ever pick up, because
+     * `isAwaitingProvider()` is false without a task. Until that person does,
+     * the row holds the machine against another restore.
      *
      * That second case is the most dangerous outcome this module produces and
      * was its quietest: the call did not answer, so the restore may be writing
@@ -193,6 +275,7 @@ final readonly class RestoreServiceBackup
                 (string) $backup->getKey(),
                 $backup->restore_task_id,
                 'needs_review',
+                $backup->restore_started_at?->toIso8601String(),
             ),
             subject: $backup,
             data: [
@@ -223,7 +306,14 @@ final readonly class RestoreServiceBackup
             throw RestoreRefusedException::alreadyRestoring((string) $backup->getKey());
         }
 
-        if (! in_array($backup->state, [BackupState::Succeeded, BackupState::Verified], true)) {
+        /*
+         * The same states the portal offers, read from the one place that
+         * says which they are. A restored archive is still a good archive —
+         * the transition table has always allowed `Restored → Restoring` —
+         * and this list used to leave it out, so the portal showed a Restore
+         * button the server refused.
+         */
+        if (! $backup->state->isRestorable()) {
             throw RestoreRefusedException::notRestorable(
                 (string) $backup->getKey(),
                 sprintf('its state is %s, and only a completed backup can be restored', $backup->state->value),
@@ -250,10 +340,18 @@ final readonly class RestoreServiceBackup
             );
         }
 
-        $inFlight = Backup::query()
-            ->where('virtual_machine_id', $machine->getKey())
-            ->where('state', BackupState::Restoring->value)
-            ->exists();
+        /*
+         * Any restore of this machine nobody has seen end, whatever its row
+         * now says. Reading `restoring` alone let a restore that went to
+         * review — which an archive older than the poll window did on its
+         * first poll — release the machine to a second restore over disks the
+         * first was still writing (F-09).
+         */
+        $inFlight = Backup::query()->restoreUnsettledOn((string) $machine->getKey())->exists()
+            || BackupFileRestore::query()
+                ->where('virtual_machine_id', $machine->getKey())
+                ->whereIn('state', FileRestoreState::holdingTheMachine())
+                ->exists();
 
         if ($inFlight) {
             throw RestoreRefusedException::alreadyRestoring((string) $backup->getKey());

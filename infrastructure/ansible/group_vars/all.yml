@@ -41,14 +41,17 @@ lynomia_base_dir: /opt/lynomia
 # Whether an agent ships the control plane's structured log to Loki. Nothing in
 # this repository installs Grafana Alloy on an application host: the monitoring
 # playbook builds the compose stack on the monitoring host, and the
-# control-plane playbook builds PHP-FPM, Nginx and Horizon. Agents are installed
-# out-of-band in this tree by convention — node_exporter is not installed by it
-# either — so the gap is declared here rather than papered over.
+# control-plane playbook builds PHP-FPM, Nginx and Horizon. On a control-plane
+# host this tree installs no agent at all: the control_plane role opens port
+# 9100 for node_exporter and installs none. (The proxmox role does install
+# node_exporter on hypervisors; there is no tree-wide convention to lean on.)
+# So the gap is declared here rather than papered over.
 #
 # Read, not by any play, but by the control plane's test suite
-# (TheLogShipperDeclarationIsTrueTest): every file carrying a SHIPPER-STATUS
-# marker must agree with this value, and while it is false nothing under
-# infrastructure/ansible may install or run a shipper. When an agent is
+# (TheLogShipperDeclarationIsTrueTest): each file that test lists (MARKED)
+# carries a SHIPPER-STATUS marker that must agree with this value, and while
+# it is false no line under infrastructure/ansible may match one of the four
+# install-or-run shapes that test reads. When an agent is
 # deployed — by a role here or out-of-band — set it to true and change every
 # marker in the same commit.
 lynomia_log_shipper_deployed: false

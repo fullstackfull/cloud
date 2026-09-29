@@ -24,6 +24,7 @@ use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Application\Actions\ProvisionOrderedService;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Support\LeavesNothingCommitted;
@@ -223,6 +224,21 @@ final class ConfigurationVanishingMidPaymentTest extends TestCase
 
         $package = HostingPackage::factory()->make(['plan_id' => $plan->id]);
         $package->setConnection(self::PAYER)->save();
+
+        /*
+         * And a node that could host it: checkout asks the hosting scheduler
+         * for one as well as for the package (F-07). Created with the payer's
+         * connection as the default, so the node's region and datacenter are
+         * committed on it too.
+         */
+        $previousDefault = DB::getDefaultConnection();
+
+        try {
+            DB::setDefaultConnection(self::PAYER);
+            HostingNode::factory()->create();
+        } finally {
+            DB::setDefaultConnection($previousDefault);
+        }
 
         return [$customer, $plan->fresh(['prices', 'product'])];
     }

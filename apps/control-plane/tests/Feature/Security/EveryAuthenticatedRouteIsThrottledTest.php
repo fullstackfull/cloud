@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Security;
 
 use Database\Seeders\RolePermissionSeeder;
+use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Routing\Router;
@@ -14,6 +15,7 @@ use Illuminate\Support\Facades\Route;
 use Lynomia\Http\Middleware\ThrottleAfterAccountResolution;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\ReadsTheMiddlewareARouteRuns;
 use Tests\TestCase;
 
 /**
@@ -23,9 +25,20 @@ use Tests\TestCase;
  * the account password, that gave anyone holding a stolen session cookie or a
  * leaked token an unlimited, lockout-free password oracle on the endpoint that
  * turns the second factor off.
+ *
+ * The route-table tests here read the middleware the router runs for a route
+ * (ReadsTheMiddlewareARouteRuns — Router::gatherRouteMiddleware(): aliases
+ * resolved to classes with their parameters, `withoutMiddleware()` exclusions
+ * removed, sorted into the kernel's priority), not what the route declares:
+ * Route::gatherMiddleware() kept `throttle:api` on a route that
+ * `->withoutMiddleware('throttle:api')` had taken it off (the OB5-2 class,
+ * re-audit of round four). Authentication is an entry `Authenticate:sanctum`;
+ * a throttle is an entry whose class is ThrottleRequests (or a subclass) or
+ * ThrottleAfterAccountResolution.
  */
 final class EveryAuthenticatedRouteIsThrottledTest extends TestCase
 {
+    use ReadsTheMiddlewareARouteRuns;
     use RefreshDatabase;
 
     private const string PASSWORD = 'correct-horse-9';
@@ -46,18 +59,10 @@ final class EveryAuthenticatedRouteIsThrottledTest extends TestCase
                 continue;
             }
 
-            $middleware = $route->gatherMiddleware();
+            $isAuthenticated = in_array(Authenticate::class.':sanctum', $this->middlewareTheRouteRuns($route), true);
 
-            $isAuthenticated = (bool) array_filter(
-                $middleware,
-                static fn ($m): bool => is_string($m) && str_contains($m, 'auth:sanctum'),
-            );
-
-            $hasThrottle = (bool) array_filter(
-                $middleware,
-                static fn ($m): bool => is_string($m)
-                    && (str_starts_with($m, 'throttle') || str_starts_with($m, ThrottleRequests::class)),
-            );
+            $hasThrottle = $this->parametersOf($route, ThrottleRequests::class) !== []
+                || $this->parametersOf($route, ThrottleAfterAccountResolution::class) !== [];
 
             if ($isAuthenticated && ! $hasThrottle) {
                 $unthrottled[] = $route->uri();
@@ -130,23 +135,17 @@ final class EveryAuthenticatedRouteIsThrottledTest extends TestCase
         $route = Route::getRoutes()->getByName('api.v1.me');
         $this->assertNotNull($route);
 
-        $middleware = array_values(array_filter(
-            $route->gatherMiddleware(),
-            static fn ($m): bool => is_string($m)
-                && (str_contains($m, 'auth:sanctum') || str_starts_with($m, 'throttle')),
-        ));
-
-        $sorted = app(Router::class)->resolveMiddleware($middleware);
-
+        // What runs, in the order it runs: the router's own sort into the
+        // kernel's middleware priority, with exclusions removed.
         $authIndex = null;
         $throttleIndex = null;
 
-        foreach ($sorted as $index => $entry) {
-            if (str_contains($entry, 'Authenticate:sanctum')) {
+        foreach ($this->middlewareTheRouteRuns($route) as $index => $entry) {
+            if ($entry === Authenticate::class.':sanctum') {
                 $authIndex = $index;
             }
 
-            if (str_starts_with($entry, ThrottleRequests::class)) {
+            if (is_a(explode(':', $entry, 2)[0], ThrottleRequests::class, true)) {
                 $throttleIndex = $index;
             }
         }

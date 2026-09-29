@@ -326,10 +326,10 @@ final class BackupLifecycleTest extends TestCase
             // same disks the machine runs on.
             $this->assertSame('backups.not_configured', $e->errorCode());
 
-            // The configuration key is deliberately NOT in the context. The
-            // API renderer publishes a DomainException's context verbatim as
-            // `error.details`, and the key names the platform's own cluster.
-            // It goes to the log; the customer gets a sentence.
+            // The configuration key is deliberately NOT in the context. It
+            // names the platform's own cluster, and a context is one
+            // publishing() away from `error.details`. It goes to the log; the
+            // customer gets a sentence.
             $this->assertSame([], $e->context());
         }
 

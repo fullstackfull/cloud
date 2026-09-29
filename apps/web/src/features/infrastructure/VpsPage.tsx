@@ -15,6 +15,7 @@ import type { VirtualMachine } from '@/lib/types'
 import { safeLabel } from '@/lib/safeLabel'
 import { useUrlPage } from '@/lib/urlState'
 
+import { rebuildStateLabel, stoppedAfterErasing } from './rebuildStateLabel'
 import { VpsPowerActions } from './vps/VpsPowerActions'
 
 export function VpsPage() {
@@ -104,18 +105,25 @@ export function VpsPage() {
     {
       key: 'rebuild',
       header: t('vps.rebuild'),
+      /*
+       * Named from the state and `data_destroyed` together, as the machine's
+       * page names it: a rebuild settled `failed` after it erased the disk
+       * reads "The rebuild stopped after erasing the disk", in the danger
+       * colour, rather than "The rebuild did not run" in grey (F-20). This
+       * cell is the only thing the list says about a rebuild.
+       */
       cell: (vm) =>
         vm.reinstall === null ? (
           <span className="text-xs text-[var(--text-muted)]">—</span>
         ) : (
           <span
             className={
-              vm.reinstall.needs_attention
+              vm.reinstall.needs_attention || stoppedAfterErasing(vm.reinstall)
                 ? 'text-xs text-[var(--danger-text)]'
                 : 'text-xs text-[var(--text-muted)]'
             }
           >
-            {safeLabel('vps.reinstallState', vm.reinstall.state)}
+            {rebuildStateLabel('vps', vm.reinstall)}
           </span>
         ),
     },

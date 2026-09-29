@@ -11,6 +11,7 @@ use Lynomia\Http\Concerns\AuthorisesWithinAccount;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
 use Lynomia\Modules\Notifications\Application\Actions\RenderNotification;
+use Lynomia\Modules\Notifications\Application\Queries\NotificationsVisibleTo;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Provisioning\Infrastructure\Queries\ServiceIdentities;
@@ -22,7 +23,8 @@ use Lynomia\Modules\Provisioning\Infrastructure\Queries\ServiceIdentities;
  * sends: a notification id belonging to another account is not fetched and
  * rejected, it is simply not found. That is the same rule every other customer
  * surface here follows, and it is what makes 404 rather than 403 the honest
- * answer.
+ * answer. The same holds inside one account for a security notice that names
+ * another person on it: not in the list, not in the count, and not found by id.
  *
  * Rendered per request in the caller's language, which is why the rows hold
  * facts rather than prose — a customer who switches to Arabic sees their whole
@@ -38,6 +40,7 @@ final class NotificationController
         private readonly ActingCustomer $acting,
         private readonly RenderNotification $renderer,
         private readonly ServiceIdentities $identities,
+        private readonly NotificationsVisibleTo $visible,
     ) {}
 
     protected function acting(): ActingCustomer
@@ -51,7 +54,7 @@ final class NotificationController
 
         $perPage = min(max($request->integer('per_page', 20), 1), self::MAX_PER_PAGE);
 
-        $notifications = $this->scoped()
+        $notifications = $this->scoped($request)
             ->when(
                 $request->boolean('unread'),
                 static fn ($query) => $query->whereNull('read_at'),
@@ -77,7 +80,7 @@ final class NotificationController
                 'last_page' => $notifications->lastPage(),
                 // The badge, in the same response as the list, so the portal
                 // does not need a second request on every page load.
-                'unread' => $this->scoped()->whereNull('read_at')->count(),
+                'unread' => $this->scoped($request)->whereNull('read_at')->count(),
             ],
         ]);
     }
@@ -100,7 +103,7 @@ final class NotificationController
 
         return response()->json([
             'data' => [
-                'unread' => $this->scoped()->whereNull('read_at')->count(),
+                'unread' => $this->scoped($request)->whereNull('read_at')->count(),
             ],
         ]);
     }
@@ -110,7 +113,7 @@ final class NotificationController
         $this->authoriseWithinAccount($request, 'service.view');
 
         /** @var Notification $found */
-        $found = $this->scoped()->whereKey($notification)->firstOrFail();
+        $found = $this->scoped($request)->whereKey($notification)->firstOrFail();
 
         // Idempotent, and it does not restamp: a second click must not move
         // the time somebody actually read it.
@@ -129,7 +132,7 @@ final class NotificationController
     {
         $this->authoriseWithinAccount($request, 'service.view');
 
-        $marked = $this->scoped()->whereNull('read_at')->update(['read_at' => now()]);
+        $marked = $this->scoped($request)->whereNull('read_at')->update(['read_at' => now()]);
 
         return response()->json(['data' => ['marked_read' => $marked, 'unread' => 0]]);
     }
@@ -137,9 +140,13 @@ final class NotificationController
     /**
      * @return Builder<Notification>
      */
-    private function scoped()
+    private function scoped(Request $request)
     {
-        return Notification::query()->where('customer_id', $this->acting->get()->getKey());
+        // The account's inbox as this person may read it: another person's
+        // security notices are not in it (see NotificationsVisibleTo).
+        $viewer = $request->user()?->getAuthIdentifier();
+
+        return $this->visible->query($this->acting->id(), is_string($viewer) ? $viewer : null);
     }
 
     private function locale(Request $request): string

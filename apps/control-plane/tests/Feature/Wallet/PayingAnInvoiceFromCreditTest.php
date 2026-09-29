@@ -11,6 +11,7 @@ use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Payments\Domain\Enums\TransactionKind;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use PHPUnit\Framework\Attributes\Test;
@@ -126,6 +127,137 @@ final class PayingAnInvoiceFromCreditTest extends WalletApiTestCase
         $this->assertSame(3_000, (int) $invoice->fresh()?->amount_paid_minor);
         $this->assertSame(7_000, (int) $invoice->fresh()?->amount_due_minor);
         $this->assertSame(0, (int) $this->walletFor($customer)->fresh()?->balance_minor);
+    }
+
+    #[Test]
+    public function an_invoice_paid_from_credit_twice_is_shown_with_both_entries(): void
+    {
+        /*
+         * Each wallet entry's amount is in its wallet's currency
+         * (WalletTransaction::amount()), and the document loaded the entries
+         * without their wallet: with two, the show route answered 500 outside
+         * production (the lazy-loading guard) and N+1 in it.
+         */
+        [$customer, $owner] = $this->accountWithOwner();
+        $invoice = Invoice::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'currency' => 'KWD',
+            'subtotal_minor' => 10_000,
+            'total_minor' => 10_000,
+        ]);
+
+        foreach (['wallet-pay-part-1', 'wallet-pay-part-2'] as $key) {
+            $this->credit($this->walletFor($customer), 2_000);
+            $this->actingAs($owner)
+                ->withHeaders($this->key($key))
+                ->postJson("/api/v1/invoices/{$invoice->getKey()}/wallet-credit")
+                ->assertOk();
+        }
+
+        $this->actingAs($owner)
+            ->getJson("/api/v1/invoices/{$invoice->getKey()}")
+            ->assertOk()
+            ->assertJsonCount(2, 'data.wallet_credits');
+    }
+
+    #[Test]
+    public function a_payment_made_under_the_raw_key_before_it_was_namespaced_still_replays(): void
+    {
+        /*
+         * Customer keys are posted to the ledger namespaced
+         * (wallet-pay:<customer>:<key>, OX-1). A retry of a payment made
+         * before that, whose entry carries the raw key, is still answered as
+         * the replay it is - for the same invoice only - rather than refused
+         * as unpayable.
+         */
+        [$customer, $owner] = $this->accountWithOwner();
+        $this->credit($this->walletFor($customer), 9_000);
+
+        $invoice = Invoice::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'currency' => 'KWD',
+            'subtotal_minor' => 9_000,
+            'total_minor' => 9_000,
+        ]);
+
+        $this->actingAs($owner)
+            ->withHeaders($this->key('legacy-pay-0001'))
+            ->postJson("/api/v1/invoices/{$invoice->getKey()}/wallet-credit")
+            ->assertOk();
+
+        // The entry as it was written before the namespace.
+        $entry = WalletTransaction::query()->where('invoice_id', $invoice->getKey())->where('kind', WalletTransactionKind::Payment->value)->sole();
+        $metadata = (array) $entry->metadata;
+        $metadata[WalletTransaction::IDEMPOTENCY_METADATA_KEY] = 'legacy-pay-0001';
+        // Rewritten beneath the model, which refuses any update of a ledger entry.
+        DB::table('wallet_transactions')->where('id', $entry->getKey())->update(['metadata' => json_encode($metadata)]);
+
+        $this->actingAs($owner)
+            ->withHeaders($this->key('legacy-pay-0001'))
+            ->postJson("/api/v1/invoices/{$invoice->getKey()}/wallet-credit")
+            ->assertOk()
+            ->assertJsonPath('data.status', InvoiceStatus::Paid->value);
+
+        $this->assertSame(1, WalletTransaction::query()->where('invoice_id', $invoice->getKey())->where('kind', WalletTransactionKind::Payment->value)->count());
+    }
+
+    #[Test]
+    public function a_raw_key_match_on_an_entry_that_is_not_a_payment_is_not_replayed(): void
+    {
+        /*
+         * The raw-key fallback answers a replay only for a wallet Payment of
+         * the same invoice. A platform credit recorded against the invoice -
+         * a top-up (captured money diverted to the wallet) or an adjustment -
+         * whose key the customer's happens to equal is not this request's,
+         * and the payment goes through.
+         */
+        [$customer, $owner] = $this->accountWithOwner();
+
+        foreach ([WalletTransactionKind::Topup, WalletTransactionKind::Adjustment] as $kind) {
+            $invoice = Invoice::factory()->create([
+                'customer_id' => $customer->getKey(),
+                'currency' => 'KWD',
+                'subtotal_minor' => 4_000,
+                'total_minor' => 4_000,
+            ]);
+
+            $key = 'raw-'.$kind->value.'-0001';
+
+            if ($kind === WalletTransactionKind::Topup) {
+                // A top-up against an open invoice is captured money the
+                // settlement diverted: the capture is on the invoice too.
+                Transaction::factory()->amount(Money::ofMinor(1_000, 'KWD'))->create([
+                    'customer_id' => $customer->getKey(),
+                    'invoice_id' => $invoice->getKey(),
+                ]);
+            }
+
+            $this->ledger()->credit(
+                wallet: $this->walletFor($customer),
+                amount: Money::ofMinor($kind === WalletTransactionKind::Topup ? 1_000 : 4_000, 'KWD'),
+                kind: $kind,
+                description: 'a platform credit against the invoice',
+                actor: $owner,
+                idempotencyKey: $key,
+                invoiceId: (string) $invoice->getKey(),
+            );
+
+            if ($kind === WalletTransactionKind::Topup) {
+                $this->credit($this->walletFor($customer), 3_000);
+            }
+
+            $this->actingAs($owner)
+                ->withHeaders($this->key($key))
+                ->postJson("/api/v1/invoices/{$invoice->getKey()}/wallet-credit")
+                ->assertOk()
+                ->assertJsonPath('data.status', InvoiceStatus::Paid->value);
+
+            $this->assertSame(
+                1,
+                WalletTransaction::query()->where('invoice_id', $invoice->getKey())->where('kind', WalletTransactionKind::Payment->value)->count(),
+                'A '.$kind->value.' under the same raw key was answered as the replay of a payment.',
+            );
+        }
     }
 
     #[Test]

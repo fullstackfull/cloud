@@ -244,10 +244,12 @@ final class HostingPanelSessionEndpointTest extends HostingApiTestCase
      * into a customer-facing response. Every adapter puts the node's hostname,
      * the WHM function it called and the panel's own words into the exception
      * context, because that context is what an operator reads in the log — and
-     * the shared renderer publishes a DomainException's context verbatim as
-     * `error.details`. Left alone, a failed SSO tells the customer which
+     * the shared renderer used to publish a DomainException's context verbatim
+     * as `error.details`. Left alone, a failed SSO told the customer which
      * machine their neighbours are on, in a response the whole rest of this
-     * module is built to avoid.
+     * module is built to avoid. The renderer now publishes only declared keys;
+     * these rows still read the body, because they are about what the
+     * customer is shown, however it comes to be shown.
      */
 
     #[Test]

@@ -18,14 +18,18 @@ use Illuminate\Support\Facades\Schema;
  * and built a second machine beside the first.
  *
  * `reserved_provider_id` is the id every attempt of this job asks for, fixed
- * by the first one to reach the provider call and never replaced by a later
- * one. `reserved_provider_nodes` is every node a create under that id was sent
- * to, append-only, because placement is recomputed per attempt and a retry may
- * land somewhere else — the place to look for what an earlier attempt built is
- * every node it was sent to, not only the one this attempt chose.
+ * by the first attempt to be placed and never replaced by a later attempt;
+ * only an operator's repoint moves the job to another id, and starts that
+ * id's nodes afresh. `reserved_provider_nodes` is every node an attempt under
+ * that id was placed on — which includes every node a create under it was
+ * sent to, and may include nodes none was, since an attempt can be placed
+ * and end before it sends — append-only, because placement is recomputed per
+ * attempt and a retry may land somewhere else: the place to look for what an
+ * earlier attempt built is every node one was placed on, not only the one
+ * this attempt chose.
  *
- * Both nullable: a job that never reached a provider call has reserved
- * nothing, and every job kind other than a create reserves nothing at all.
+ * Both nullable: a job that was never placed has reserved nothing, and every
+ * job kind other than a create reserves nothing at all.
  */
 return new class extends Migration
 {

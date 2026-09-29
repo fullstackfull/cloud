@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
 
 /*
@@ -137,6 +138,22 @@ Schedule::command('provisioning:detect-stale')
 Schedule::command('dedicated:sync-inventory')
     ->hourly()
     ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
+ * Abandoned power claims, every five minutes.
+ *
+ * A power request claims its idempotency key before it calls the controller;
+ * a worker that dies in between leaves a claim nothing else would ever settle,
+ * and every repeat of that key was refused as "still in flight" for ever. This
+ * settles claims past their lease as indeterminate — the truth about a crashed
+ * request — and sends nothing to any chassis. Cheap: one query for the claims
+ * past their lease, one conditional write each.
+ */
+Schedule::command('dedicated:expire-abandoned-power-claims')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10)
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/schedule.log'));
 
@@ -347,12 +364,25 @@ Schedule::command('wordpress:verify')
  *
  * Every call it makes is a read. It settles rows and records disagreements; it
  * never buys anything.
+ *
+ * It carries a failure path because it once failed on every production run —
+ * the orphan scan walked a driver list that always holds the fake, which
+ * refuses to exist in production — and the stack trace went to schedule.log,
+ * under a settle summary that had already printed and looked like success. A
+ * failed run now also writes an error to the application log naming the
+ * command, beside every other error a person reads there.
  */
 Schedule::command('domains:reconcile')
     ->cron('35 */3 * * *')
     ->withoutOverlapping(30)
     ->onOneServer()
-    ->appendOutputTo(storage_path('logs/schedule.log'));
+    ->appendOutputTo(storage_path('logs/schedule.log'))
+    ->onFailure(static function (): void {
+        Log::error('The scheduled domains:reconcile run failed; its output is in schedule.log.', [
+            'command' => 'domains:reconcile',
+            'output' => storage_path('logs/schedule.log'),
+        ]);
+    });
 
 /*
  * Address reclamation, every ten minutes.

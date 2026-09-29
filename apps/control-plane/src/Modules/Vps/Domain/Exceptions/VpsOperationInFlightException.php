@@ -23,10 +23,16 @@ final class VpsOperationInFlightException extends DomainException
 {
     public static function forKind(ProvisioningJobKind $kind): self
     {
+        /*
+         * Published because it is the caller's own operation, and because the
+         * dedicated surface answers the same question with the same key: a
+         * client asking "what am I waiting for?" gets one answer for both
+         * kinds of machine.
+         */
         return (new self(sprintf(
             'Another operation (%s) is still running for this service. Wait for it to finish before requesting another.',
             $kind->value,
-        )))->withContext(['in_flight_kind' => $kind->value]);
+        )))->withContext(['in_flight_kind' => $kind->value])->publishing('in_flight_kind');
     }
 
     public function errorCode(): string

@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Event;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
+use Lynomia\Modules\Payments\Application\Actions\ReturnToTheWalletWhatAFailedRefundLeft;
 use Lynomia\Modules\Payments\Domain\Contracts\PaymentProvider;
 use Lynomia\Modules\Payments\Domain\DTOs\PaymentIntentRequest;
 use Lynomia\Modules\Payments\Domain\DTOs\PaymentIntentResult;
@@ -49,7 +50,7 @@ final class IssueRefundTest extends TestCase
         parent::setUp();
 
         $this->registry = new PaymentProviderRegistry($this->app);
-        $this->issue = new IssueRefund($this->registry, app(WalletLedger::class));
+        $this->issue = new IssueRefund($this->registry, app(WalletLedger::class), app(ReturnToTheWalletWhatAFailedRefundLeft::class));
     }
 
     #[Test]

@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Payments\Domain\DTOs;
 
 use Carbon\CarbonImmutable;
 use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
+use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 
 /**
@@ -28,6 +29,12 @@ final readonly class ProviderEvent
      * @param  string|null  $providerReference  The payment or refund this event concerns.
      * @param  array<string, mixed>  $payload  The verified raw payload.
      * @param  array<string, string>  $metadata  The metadata we attached when the payment was created.
+     * @param  string|null  $refundReference  For an event about one refund: the provider's own id for that refund,
+     *                                        the one IssueRefund stored as the refund row's provider_reference.
+     * @param  RefundStatus|null  $refundStatus  For an event about one refund: where that refund now stands. The
+     *                                           kind is RefundSucceeded for every refund event an adapter
+     *                                           recognises; this, not the kind, says whether the refund went
+     *                                           through, failed or is still pending at the provider.
      */
     public function __construct(
         public string $providerEventId,
@@ -41,6 +48,8 @@ final readonly class ProviderEvent
         public ?string $failureCode = null,
         public ?string $failureMessage = null,
         public ?CarbonImmutable $occurredAt = null,
+        public ?string $refundReference = null,
+        public ?RefundStatus $refundStatus = null,
     ) {}
 
     /**

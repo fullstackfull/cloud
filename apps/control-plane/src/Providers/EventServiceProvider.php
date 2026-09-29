@@ -11,6 +11,7 @@ use Lynomia\Modules\Billing\Application\Listeners\RecordRefundAgainstTheInvoice;
 use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
 use Lynomia\Modules\Billing\Domain\Events\InvoiceRefunded;
+use Lynomia\Modules\Billing\Domain\Events\InvoiceVoided;
 use Lynomia\Modules\Billing\Domain\Events\OrderFinanciallySettled;
 use Lynomia\Modules\Domains\Application\Listeners\RegisterDomainOnPayment;
 use Lynomia\Modules\Monitoring\Application\Listeners\RecordScheduledRun;
@@ -35,8 +36,10 @@ use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobStarted;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobSucceeded;
 use Lynomia\Modules\Provisioning\Domain\Events\ServiceStatusChanged;
 use Lynomia\Modules\SharedHosting\Application\Listeners\InstallWordPressOnceTheAccountExists;
+use Lynomia\Modules\Subscriptions\Application\Listeners\EndTheSubscriptionWithItsService;
 use Lynomia\Modules\Subscriptions\Application\Listeners\EnforceServiceStateForSubscription;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
+use Lynomia\Modules\Subscriptions\Application\Listeners\RestorePlanOnVoidedUpgrade;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ReviveSubscriptionOnRenewalPayment;
 use Lynomia\Modules\Subscriptions\Application\Listeners\StartDunningOnFailedPayment;
 use Lynomia\Modules\Subscriptions\Domain\Events\SubscriptionStatusChanged;
@@ -54,13 +57,17 @@ use Lynomia\Modules\Subscriptions\Domain\Events\SubscriptionStatusChanged;
  *                               the subscription, create the service and ask
  *                               for it to be built
  *     RefundIssued            → record the refund against the invoice it came off
+ *     InvoiceVoided           → put a subscription whose plan-change invoice
+ *                               was voided back on the plan it was paid at
  *     InvoiceRefunded         → record on the order that its money went back,
  *                               and nothing else (F-19)
  *     PaymentFailed           → start dunning on a renewal; record the decline
  *                               on a first purchase's order (F-19)
  *     ServiceStatusChanged,   → keep the order in step with what it bought:
  *     ProvisioningJobStarted,   queued, being built, active, suspended, under
- *     …NeedsReview, …Failed     review, refused, ended (F-19)
+ *     …NeedsReview, …Failed     review, refused, ended (F-19); and a service
+ *                               that has ended ends the subscription that
+ *                               paid for it (I-1)
  *
  * The settlement event in the middle is what lets a zero-total order reach
  * fulfilment: it owes nothing, so it produces no invoice, and a chain that
@@ -128,6 +135,15 @@ final class EventServiceProvider extends BaseEventServiceProvider
         RefundIssued::class => [
             RecordRefundAgainstTheInvoice::class,
         ],
+        InvoiceVoided::class => [
+            /*
+             * A voided plan-change invoice is an upgrade that will never be
+             * paid for: the subscription goes back to the plan and amount it
+             * was paid at, instead of renewing as the plan it never bought.
+             * Synchronous, inside the void's transaction - see InvoiceVoided.
+             */
+            RestorePlanOnVoidedUpgrade::class,
+        ],
         InvoiceRefunded::class => [
             // The money only. The service is kept, and what the order holds
             // comes back when that service ends.
@@ -144,6 +160,11 @@ final class EventServiceProvider extends BaseEventServiceProvider
          */
         ServiceStatusChanged::class => [
             MoveTheOrderWithWhatItBought::class,
+
+            // A service that has ended — by any door, or by the destroy
+            // worker — is not billed for again (I-1). Synchronous and
+            // never throwing, for the same reason as the order's.
+            EndTheSubscriptionWithItsService::class,
         ],
         ProvisioningJobStarted::class => [
             MoveTheOrderWithWhatItBought::class,

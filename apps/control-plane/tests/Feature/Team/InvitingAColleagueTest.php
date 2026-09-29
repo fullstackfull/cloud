@@ -233,9 +233,12 @@ final class InvitingAColleagueTest extends TeamApiTestCase
         [$customer, $owner] = $this->accountWithOwner();
         $original = str_repeat('2', 64);
 
+        // Mailed an hour ago: a resend inside the cooldown is refused before it
+        // mints anything, and that refusal is pinned where the cooldown is.
         $invitation = CustomerInvitation::factory()->withToken($original)->create([
             'customer_id' => $customer->getKey(),
             'email' => 'resend@example.test',
+            'last_sent_at' => now()->subHour(),
         ]);
 
         $this->actingAs($owner)->withHeaders($this->actingFor($customer))

@@ -63,9 +63,12 @@ use Throwable;
  *    every hook has run, an in-repo hook would be *seen*, not missed — unless
  *    it were registered only outside the test environment. The rule's test
  *    therefore fails the build the day any file under the production autoload
- *    roots, `bootstrap/`, `config/` or `routes/` names `createPayloadUsing` in
- *    code (comments are dropped before looking, so this sentence is not a
- *    registration). `tests/` is not scanned.
+ *    roots, `bootstrap/` other than its generated `bootstrap/cache/`, `config/`
+ *    or `routes/` names `createPayloadUsing` in code (comments are dropped
+ *    before looking, so this sentence is not a registration). `tests/` is not
+ *    scanned, and neither is `bootstrap/cache/`: it is framework-generated and
+ *    ignored by Git, so scanning it would make the answer depend on a
+ *    developer's local caches.
  */
 final class ThePayloadTheWorkerWillRead
 {

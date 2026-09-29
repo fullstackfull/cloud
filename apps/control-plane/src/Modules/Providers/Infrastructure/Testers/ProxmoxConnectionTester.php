@@ -59,26 +59,30 @@ use SensitiveParameter;
 class ProxmoxConnectionTester extends HttpIdentityTester
 {
     /**
-     * Capability → every Proxmox privilege the adapter's requests for it need.
+     * Capability → the Proxmox privileges this tester asks for it.
      *
      * Read as: this capability is offered if and only if the token holds ALL
-     * of these privileges somewhere, and is Unsupported if it provably lacks
-     * any one of them. Each list is what the Proxmox compute adapter
-     * actually sends for that capability, not what the capability's name
-     * suggests: `create` writes cores, memory, disks, a NIC, options, the SCSI
-     * controller type and cloud-init keys in one POST, so a token that holds
-     * `VM.Allocate` alone is refused by the cluster on the first order.
+     * of the privileges listed for it somewhere, and is Unsupported if it
+     * provably lacks any one of them. Each list is this tester's reading of
+     * what the requests the Proxmox compute adapter sends for that capability
+     * need — what the adapter sends, not what the capability's name suggests:
+     * `create` writes cores, memory, disks, a NIC, options, the SCSI
+     * controller type and cloud-init keys in one POST, so on this reading a
+     * token holding `VM.Allocate` alone cannot complete it. Which privilege
+     * each request needs is not verified against a cluster anywhere in this
+     * repository, and the lists are not complete even on this reading: see
+     * "Known to be short" and "Not established here" below.
      *
      * Every capability VPS requires of compute is settled here, apart from
      * `task_polling`, which is read below. An earlier version left `reinstall`
      * and `templates` out, on the ground that a privilege cannot establish
      * that an image boots — which is true, and is equally true of `create`.
      * Whether a build succeeds is verification's question; what a connection
-     * test can establish, without doing anything, is whether the token may
-     * issue every request the operation consists of. Leaving the two out did
-     * not make the answer more careful: it made it Unknown on every real
-     * cluster for ever, and VPS requires both with no optional list, so only
-     * the simulator could satisfy VPS (F-13).
+     * test can establish, without doing anything, is whether the token holds
+     * the privileges the operation's requests need, as far as this tester
+     * reads them. Leaving the two out did not make the answer more careful:
+     * it made it Unknown on every real cluster for ever, and VPS requires both
+     * with no optional list, so only the simulator could satisfy VPS (F-13).
      *
      *  - `reinstall` stops the guest and reads its status (`VM.PowerMgmt`,
      *    `VM.Audit`), detaches and destroys the disk and imports a new one
@@ -91,19 +95,48 @@ class ProxmoxConnectionTester extends HttpIdentityTester
      *    `Sys.Audit`, and a node's storage list shows only the pools the token
      *    may audit, so without `Datastore.Audit` the sync records no pool and
      *    the scheduler — which places only on recorded pools — places nothing.
-     *    Such a token used to be declared ready.
+     *    `templates` is mapped to the same privilege, so such a token is
+     *    refused either way; this entry is the one that names why placement
+     *    fails.
      *
-     * `create` and `reinstall` ask for `VM.Config.Cloudinit` because every call
-     * that builds or rebuilds a machine hands the adapter a cloud-init config;
-     * the F-13 test reads both handlers' argument lists to hold that premise.
+     * The privileges the storage list and `import-from=` check are, like the
+     * rest, this tester's reading of the Proxmox API. If the API also admits
+     * `Datastore.AllocateSpace` where this map asks for `Datastore.Audit`,
+     * the map is stricter than it need be, which fails closed; the
+     * provisioning role grants both, so a token holding it is judged the same
+     * either way.
      *
-     * Known to be short: `suspend` and `unsuspend` write `onboot` and `lock`,
-     * which is `VM.Config.Options`, and ask here only for `VM.PowerMgmt`. No
-     * product verdict moves on it, because both compute products require
-     * `create`, which requires `VM.Config.Options`.
+     * `create` and `reinstall` ask for `VM.Config.Cloudinit` because the calls
+     * in this repository that build or rebuild a machine on a real hypervisor
+     * hand the adapter a cloud-init config: the two VPS handlers each hand
+     * over a request constructed with one, and the one other file the F-13
+     * test finds building a machine, a browser-suite seeder, does so on the
+     * fake hypervisor. The F-13 test holds that premise for the forms it
+     * reads — each build call written whole in the handlers, and a build
+     * method named whole in the other `.php` files it reads — and states
+     * there what it does not read and how many sites of that the tree holds.
      *
-     * Every privilege named here is granted by the provisioning role in
-     * `infrastructure/ansible/group_vars/proxmox.yml`, and the F-13 test
+     * Known to be short, on this tester's own reading:
+     *  - `suspend` and `unsuspend` write `onboot` and `lock`, which is
+     *    `VM.Config.Options`, and ask here only for `VM.PowerMgmt`.
+     *  - `create`, when it imports a template (the VPS handler refuses to
+     *    build without one), and `reinstall` send `import-from=`, which the
+     *    `templates` entry above reads as needing `Datastore.Audit`; neither
+     *    list asks for it.
+     * No product verdict moves on either: both compute products require
+     * `create`, which requires `VM.Config.Options`, and `templates`, which
+     * requires `Datastore.Audit`.
+     *
+     * Not established here: whether `start=1` on a create needs
+     * `VM.PowerMgmt`, whether the cloud-init drive it adds
+     * (`ide2=<storage>:cloudinit`) needs `VM.Config.CDROM`, and whether a NIC
+     * on a bridge needs `SDN.Use`. The lists do not ask for them. The
+     * provisioning role grants the first two and not the third; if the
+     * cluster requires one a token lacks, this tester reads `create`
+     * Supported and the first order is refused.
+     *
+     * Every privilege the lists ask for is granted by the provisioning role
+     * in `infrastructure/ansible/group_vars/proxmox.yml`, and the F-13 test
      * parses that file to keep it so.
      *
      * @var array<string, list<string>>

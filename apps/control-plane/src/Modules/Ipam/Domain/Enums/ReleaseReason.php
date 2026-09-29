@@ -17,6 +17,14 @@ namespace Lynomia\Modules\Ipam\Domain\Enums;
  */
 enum ReleaseReason: string
 {
+    /**
+     * The reason an address released by hand is released for.
+     *
+     * One name for it, so that the trail an operator's release leaves and
+     * the sentence in requiresOperatorClearance() cannot drift apart.
+     */
+    public const self CLEARED_BY_HAND = self::OperatorAction;
+
     /** The provisioning job that held the reservation failed terminally. */
     case JobFailed = 'job_failed';
 
@@ -41,7 +49,17 @@ enum ReleaseReason: string
     /** The customer detached the address, or swapped it for another. */
     case CustomerRequest = 'customer_request';
 
-    /** The address was reclaimed by an operator. */
+    /**
+     * The address was reclaimed by an operator.
+     *
+     * Today that means one act: a timeout quarantine released by hand, once
+     * the operator has seen that the machine does not exist
+     * (IpAllocator::releaseQuarantinedAddress()). It is written to no column.
+     * The reservation keeps the reason its quarantine began with, which is
+     * still true, and the address's quarantine_reason is cleared on the way
+     * out as the sweep clears it; the audit trail is where this reason is
+     * recorded, through CLEARED_BY_HAND.
+     */
     case OperatorAction = 'operator_action';
 
     /** The service was taken down for abuse; the address is tainted. */
@@ -103,7 +121,9 @@ enum ReleaseReason: string
      * Clearing it is an operator's act: they look at the provider, and then
      * either the resource is adopted (the address stays with the machine) or
      * it demonstrably does not exist (the address is released by hand, as
-     * OperatorAction).
+     * OperatorAction). The two outcomes are IpAllocator's
+     * adoptQuarantinedAddress() and releaseQuarantinedAddress(), and both
+     * refuse every quarantine this method does not return true for.
      */
     public function requiresOperatorClearance(): bool
     {

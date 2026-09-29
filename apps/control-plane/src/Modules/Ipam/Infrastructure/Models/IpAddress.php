@@ -136,8 +136,11 @@ class IpAddress extends Model
 
     /**
      * Whether the quarantine window has elapsed. A quarantined address with no
-     * quarantined_until is a bug elsewhere; it is treated as still serving,
-     * because releasing it early is the outcome quarantine exists to prevent.
+     * quarantined_until has no window yet: it is held, waiting for somebody to
+     * declare empty the machine that still carries it (see
+     * IpAllocator::holdAssignment()), or, with no machine behind it, it is a
+     * defect. Either way it is treated as still serving, because releasing it
+     * early is the outcome quarantine exists to prevent.
      */
     public function quarantineHasElapsed(): bool
     {

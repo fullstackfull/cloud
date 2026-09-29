@@ -396,7 +396,11 @@ naming the catalogue plan it serves by **plan slug** rather than by reference id
 Quotas come from the plan, because they are a product decision the catalogue
 already owns. A package whose plan is absent is skipped, so the estate loads with
 or without the catalogue: loading it alone writes 39 rows, loading it after the
-catalogue writes 42.
+catalogue writes 42. The three packages load **withdrawn** (`is_active: false`):
+the catalogue seeder already puts a package on sale behind each of those plans,
+and the platform refuses to choose between two packages on sale for one plan
+(F-32), so on-sale reference packages would leave the development catalogue
+unable to sell hosting at all.
 
 The definition states which node offers which package. `hosting_packages` has no
 node column — packages are global — so the loader writes the package and drops

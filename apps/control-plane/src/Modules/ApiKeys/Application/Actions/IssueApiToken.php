@@ -87,6 +87,9 @@ final class IssueApiToken
                  * the API advertises and does not apply — a customer would
                  * believe a token was read-only while it placed orders. When
                  * the endpoints check abilities, this becomes a request field.
+                 * "Full" means the customer API: /api/admin refuses every
+                 * token of this kind, whatever roles its holder has
+                 * (EnsureTheCallerIsStaff).
                  */
                 'abilities' => ['*'],
                 'expires_at' => $expiresAt,

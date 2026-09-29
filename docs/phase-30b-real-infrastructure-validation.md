@@ -744,13 +744,24 @@ outcome after checking the provider.
 
 > **Can operators see every indeterminate or needs-review operation?**
 
-**Yes in the software; unproven in a real deployment.** The operator surface
-lists indeterminate operations, `lynomia_provider_task_total{state="indeterminate"}`
-is exported, and the `ProviderTasksIndeterminate` alert fires on any that persist
-for 30 minutes, pointing at `docs/runbooks/provider-indeterminate.md`. The
-alert's metric is confirmed to exist by `validate-monitoring.py`.
-*Blocker: no Prometheus has scraped a real control plane, so the alert has never
-fired. `BLOCKED_HARDWARE`.*
+**By looking, yes in the software; by being paged, only for some kinds — and
+unproven in a real deployment either way.** The operator surface lists
+indeterminate operations. Some kinds also raise an alert: provisioning jobs
+awaiting review, orders in manual review, file restores, WordPress pushes to
+production and domain redemptions each have one. Provider tasks do not.
+
+This answer used to say *yes*, on the strength of a `ProviderTasksIndeterminate`
+alert firing on `lynomia_provider_task_total{state="indeterminate"}`. No rule
+file defines that alert, and the series has no `indeterminate` state:
+`lynomia_provider_task_total` is exported by `unconfirmed` and the task states
+`running`, `succeeded`, `failed` and `unknown`, and no rule reads any of them.
+Nor does any rule read `lynomia_domain_operations_total`, so a registration,
+renewal or transfer of unknown outcome pages nobody. `validate-monitoring.py`
+could not have caught this — it checks the metrics that rules read, not the
+alerts that documents name — and `validate-runbook-alerts.py` reads only
+`docs/runbooks/`.
+*Blocker: no Prometheus has scraped a real control plane, so none of these
+alerts has ever fired. `BLOCKED_HARDWARE`.*
 
 > **Can the platform itself be restored from backup?**
 

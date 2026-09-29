@@ -29,8 +29,29 @@ return [
     | plane answers on could point it wherever they liked, and every customer
     | on the platform would follow them there.
     |
-    | A name here also protects everything beneath it: claiming a parent of a
-    | reserved zone is the same attack one step out.
+    | A name here is refused, and so is every parent of it and everything
+    | beneath it: claiming a parent is the same attack one step out, and a
+    | child is a piece of the platform's name space held by somebody else.
+    |
+    | This list is not the whole reservation. The hosts of APP_URL and
+    | FRONTEND_URL are added to it when they are domain names — a Unicode host
+    | in the xn-- form DNS carries — so an estate that has put the platform on
+    | its real name is covered without repeating it here. List what those two
+    | do not name — the registrable domain above them, above all, which covers
+    | every sibling as well. On the shipped localhost they name nothing.
+    |
+    | Entries are ASCII: an internationalised name goes in its xn-- form. An
+    | entry that is not a domain name, or not a string at all, refuses every
+    | claim until it is corrected — answered as `dns.zone.unavailable`, 503,
+    | and logged at error level. The estate preflight reports it as
+    | `dns.reserved_zones`. It blocks a production preflight while nothing is
+    | reserved, or while a platform host of three or more labels has nothing
+    | reserved above it and is not itself listed — and in production, while
+    | either holds, every claim is refused as `dns.zone.unavailable`, 503, and
+    | logged at error level; in a rehearsal those are warnings. A host listed here exactly, with nothing above it, is a
+    | warning in every run: the names beside it stay claimable unless it is a
+    | registrable domain, which the preflight cannot tell without a
+    | public-suffix list.
     |
     */
 

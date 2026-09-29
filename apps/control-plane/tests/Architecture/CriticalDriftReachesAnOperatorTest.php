@@ -31,18 +31,27 @@ use Tests\TestCase;
  * WHO HOLDS WHICH HOP
  * ===========================================================================
  *
- * Every assertion about a YAML file's *structure* — that the drift rules
- * exist, what they read, that the page reaches `pagerduty-critical` by the
- * route tree Alertmanager actually walks, and that a Loki ruler is not wired
- * without rule files — lives in `infrastructure/scripts/validate-monitoring.py`,
- * which parses those files with PyYAML and runs in CI's infrastructure job
- * with its own self-test. It is deliberately not here: a hand-written YAML
- * reader in PHP is a second, weaker model of the same files, and a model of a
- * file can be wrong in ways the file never is.
+ * The assertions this finding makes about the Prometheus, Alertmanager and
+ * Loki files live in `infrastructure/scripts/validate-monitoring.py`, which
+ * parses those files with PyYAML and runs in CI's infrastructure job with its
+ * own self-test. (Other tests read these files for other reasons.) Those
+ * assertions are: that the drift rules exist; exactly what they evaluate; that
+ * the script's walk of Alertmanager's route tree, over the labels the rule
+ * sets, selects `pagerduty-critical` for the page; and that a Loki ruler wired
+ * in loki-config.yml, or by the loki service's -ruler.alertmanager-url flag,
+ * has rule files mounted where Loki's local store reads them. They are
+ * deliberately not here: a hand-written YAML reader in PHP is a second, weaker
+ * model of the same files, and a model of a file can be wrong in ways the file
+ * never is. The route walk there is itself a model, of Alertmanager and of how
+ * Prometheus labels an alert. Its docstring says exactly what it reads, which
+ * disagreements attack has found, and how often each occurs in the tree. It
+ * does not claim that list is complete.
  *
- * What stays here is what only the application can answer: where Laravel
+ * What stays here is what only the application can answer — where Laravel
  * actually writes the structured log, measured from a booted config rather
- * than read from source, and whether the listener can be queued.
+ * than read from source, and whether the listener can be queued — plus the
+ * two Ansible values the log path is derived from, read with a line regex
+ * each (`control_plane_release_dir`, `lynomia_base_dir`).
  */
 final class CriticalDriftReachesAnOperatorTest extends TestCase
 {
@@ -59,8 +68,10 @@ final class CriticalDriftReachesAnOperatorTest extends TestCase
          * Derived on both sides, so a change to either alone is red: the
          * application side is the booted channel's path taken relative to the
          * application root; the host side is the release directory the
-         * control-plane role deploys into, resolved from the Ansible defaults
-         * rather than typed here. Neither literal appears in this test.
+         * control_plane role declares and runs Horizon and cron from
+         * (the CI/CD pipeline, not the role, puts the release there),
+         * resolved from the Ansible defaults rather than typed here. Neither
+         * literal appears in this test.
          */
         $written = (string) config('logging.channels.structured.path');
         $root = rtrim(base_path(), '/').'/';
@@ -78,7 +89,7 @@ final class CriticalDriftReachesAnOperatorTest extends TestCase
             $this->alloyControlPlanePath(),
             'Alloy tails a different file from the one the structured channel writes on a control-plane host. '
             .'Every line the application logs — including the critical-drift line — lands in a file nothing ships. '
-            .'Point `__path__` in alloy/config.alloy at the release directory the control_plane role deploys, or move the channel; change both or neither.',
+            .'Point `__path__` in alloy/config.alloy at the release directory the control_plane role declares, or move the channel; change both or neither.',
         );
     }
 
@@ -88,14 +99,19 @@ final class CriticalDriftReachesAnOperatorTest extends TestCase
         /*
          * Agreement is not writability: both sides could be moved together to
          * a path the application cannot create, and the test above would stay
-         * green. `storage/` is the one directory a Laravel deploy makes
-         * writable by the PHP-FPM user; `/var/log/lynomia` is exactly the kind
-         * of path it cannot `mkdir`.
+         * green. `storage/` is where Laravel expects to write, and it is under
+         * the release directory, inside `lynomia_base_dir`, which the
+         * control_plane role gives to `lynomia_owner_user` — the user PHP-FPM
+         * runs as by default (`php_fpm_user`). A root-owned
+         * path such as `/var/log/lynomia` is one that user cannot `mkdir`,
+         * and nothing in this repository creates it. (Which directories a
+         * release makes writable is the pipeline's business, not this
+         * repository's; this holds the path to the conventional one.)
          */
         $this->assertStringStartsWith(
             rtrim(storage_path(), '/').'/',
             (string) config('logging.channels.structured.path'),
-            'The structured channel writes outside storage/, which is the only directory a deploy makes writable by the application user.',
+            'The structured channel writes outside storage/, the directory Laravel expects to write to. A root-owned path such as /var/log/lynomia is one the application user cannot create.',
         );
     }
 

@@ -19,10 +19,12 @@ final class TwoFactorRequiredException extends DomainException
     {
         $exception = new self('A two-factor code is required to complete sign-in.');
 
+        // The token is issued to this caller and is the whole of what the
+        // portal needs to ask for the code.
         return $exception->withContext([
             'challenge_token' => $token,
             'expires_in' => $expiresInSeconds,
-        ]);
+        ])->publishing('challenge_token');
     }
 
     public function errorCode(): string

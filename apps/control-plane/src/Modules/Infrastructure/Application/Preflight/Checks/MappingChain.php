@@ -15,6 +15,7 @@ use Lynomia\Modules\Infrastructure\Domain\Preflight\CheckCategory;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\EvidenceClass;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightFinding;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
+use Lynomia\Modules\Ipam\Domain\Services\IpAllocator;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
 use Lynomia\Modules\Shared\Domain\Enums\BlockerReason;
@@ -53,6 +54,10 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
  */
 final readonly class MappingChain
 {
+    public function __construct(
+        private IpAllocator $addresses,
+    ) {}
+
     /**
      * @return list<PreflightFinding>
      */
@@ -81,8 +86,14 @@ final readonly class MappingChain
 
     /**
      * Compute: a cluster that takes placement, a node that can hold something,
-     * storage that can hold a disk, a template that can be installed, and
-     * addresses to give out.
+     * storage that can hold a disk, a template that can be installed, and an
+     * address a customer machine can be given — which is less than an address
+     * for a particular order, and {@see self::addressFinding()} says by how
+     * much.
+     *
+     * The chain stops after the cluster check when no cluster takes
+     * placement, and that finding fails. On every other path it emits all six
+     * checks.
      *
      * @return list<PreflightFinding>
      */
@@ -165,23 +176,42 @@ final readonly class MappingChain
         $findings[] = $this->capacityFinding($nodes, $storages, $target);
 
         // ---- template -------------------------------------------------------
+        $findings[] = $this->templateFinding($target);
+
+        // ---- addresses ------------------------------------------------------
         /*
-         * Installable, and separately: active but with no name the cluster
-         * knows it by.
-         *
-         * `scopeInstallable` already requires a provider reference, which is
-         * the platform refusing to consider such a template buildable — so
-         * counting both tells the operator which of two different things to
-         * do. "No template is mapped" means map one. "Three are mapped and
-         * none carries a provider reference" means go and read the identifier
-         * off the cluster, because nothing in this platform invents one, and a
-         * template the hypervisor has no name for fails at build time, per
-         * order, which is the worst possible moment.
+         * Asked whatever the template check found. It used to sit below that
+         * check's early return, so it was asked only when no template was
+         * installable — and an estate with an installable template and no
+         * address pool at all reported five passes and no sixth line. An
+         * absent check in a band that does not block reads exactly like a
+         * passing one, which is the one thing a preflight must never let it
+         * do. `APreflightNeverDropsACheckSilentlyTest` holds the rule.
          */
+        $findings[] = $this->addressFinding($target);
+
+        return $findings;
+    }
+
+    /**
+     * Installable, and separately: active but with no name the cluster knows
+     * it by.
+     *
+     * `scopeInstallable` already requires a provider reference, which is the
+     * platform refusing to consider such a template buildable — so counting
+     * both tells the operator which of two different things to do. "No
+     * template is mapped" means map one. "Three are mapped and none carries a
+     * provider reference" means go and read the identifier off the cluster,
+     * because nothing in this platform invents one, and a template the
+     * hypervisor has no name for fails at build time, per order, which is the
+     * worst possible moment.
+     */
+    private function templateFinding(string $target): PreflightFinding
+    {
         $templates = VmTemplate::query()->installable()->get();
 
         if ($templates->isNotEmpty()) {
-            $findings[] = PreflightFinding::pass(
+            return PreflightFinding::pass(
                 'mapping.template',
                 CheckCategory::Mapping,
                 $target,
@@ -190,8 +220,6 @@ final readonly class MappingChain
                     implode(', ', $templates->take(5)->map(fn (VmTemplate $t): string => $t->os_family->value.' '.$t->os_version)->values()->all())),
                 EvidenceClass::Configuration,
             );
-
-            return $findings;
         }
 
         $unreferenced = VmTemplate::query()
@@ -199,7 +227,7 @@ final readonly class MappingChain
             ->whereNull('provider_reference')
             ->count();
 
-        $findings[] = $unreferenced > 0
+        return $unreferenced > 0
             ? PreflightFinding::fail(
                 'mapping.template',
                 CheckCategory::Mapping,
@@ -217,27 +245,170 @@ final readonly class MappingChain
                 'No installable template is mapped, so nothing can be built.',
                 'Map a template and record the provider reference it is known by on the cluster.',
             );
+    }
 
-        // ---- addresses ------------------------------------------------------
-        $pools = IpPool::query()->count();
+    /**
+     * Whether a customer machine could be given an address.
+     *
+     * ===========================================================================
+     * ALLOCATABLE ADDRESSES, NOT ACTIVE POOLS
+     * ===========================================================================
+     *
+     * This used to pass when any pool was active, and said so: "1 of 1
+     * registered address pool(s) are active". That was green on an estate
+     * whose only pool held no address row at all — the operator's subnet route
+     * wrote none (F-02) — while IpAllocator::reserve() refused the same estate
+     * as exhausted and every VPS order waited on capacity (F-35 x F-02). A
+     * pass that meant less than its name was the defect.
+     *
+     * So the check now asks the allocator, through
+     * {@see IpAllocator::customerAllocatableCount()}, how many addresses it
+     * could hand a customer out of each active pool, and passes only when the
+     * total is at least one. That method is the allocator's own rules rather
+     * than a copy: it refuses a pool whose scope may not serve a customer, as
+     * reserve() does when handed a customer (every build is), reads the same
+     * subnet list reserve() locks from — the pool's active IPv4 subnets — and
+     * counts the rows there that are `available`.
+     *
+     * ===========================================================================
+     * AND ON A SEGMENT A MACHINE CAN BE PLUGGED INTO
+     * ===========================================================================
+     *
+     * A pass also used to count an address in a subnet naming no network, or
+     * one no customer machine may be attached to, or one with no bridge: "5
+     * address(es) a customer machine can be given" on an estate whose every
+     * VPS build failed `vps.network_not_attachable`, permanently, because
+     * CreateVpsHandler will not guess where to plug a machine in. So the pass
+     * counts {@see IpAllocator::customerAttachableCount()} — the same rows,
+     * restricted to subnets whose network passes
+     * Network::canCarryACustomerMachine(), the rule the build itself refuses
+     * by — and names how many it left out. And the allocator takes a VPS
+     * build's address from exactly those subnets (reserve() with
+     * `attachableOnly`, filtered by the same helper as the count), so what
+     * this counts is what a build can be given. The operator's subnet route
+     * refuses a customer block with no customer network (RegisterSubnet), but
+     * it does not require the bridge (a dedicated server is not attached by
+     * one), so a network may have none from the start (the network route
+     * refuses clearing a bridge, or switching `is_active` off, while an active
+     * subnet uses it — round five); and rows written before either route
+     * refused are still there. This count is what reads them. Checkout asks
+     * the allocator the same question (IpAllocator::holdsACustomerAttachableHost(),
+     * from LocalPlacementFeasibility) and refuses to sell a VPS onto a pool
+     * with no host on such a segment.
+     *
+     * And in a block that names a gateway (Subnet::hasGateway()). The subnet
+     * route accepts a customer block with none — a dedicated server's install
+     * profile can carry a default route of its own — but a VPS is given its
+     * default route from the block's gateway and nothing else, so a pass
+     * used to count addresses a build then configured with `gw=` empty. The
+     * allocator passes those blocks over for a VPS build by the same helper,
+     * and a build that meets one anyway refuses it
+     * (`vps.subnet_has_no_gateway`).
+     *
+     * ===========================================================================
+     * WHAT A PASS HERE STILL DOES NOT SAY
+     * ===========================================================================
+     *
+     * Walked from reserve()'s first line, the terms a pass does not settle:
+     *
+     *   (a) That the pool an order resolves to is one of the pools counted.
+     *       Placement picks a pool (LocalPlacementFeasibility); this counts
+     *       every active pool, so an estate with addresses in pool A and an
+     *       order placed on an empty pool B passes here and is refused.
+     *
+     *   (b) That there are enough. An order asks for a count (`ipv4_count`),
+     *       which a preflight does not have; one available row passes here
+     *       and an order for two is refused.
+     *
+     *   (c) Handed a subnet rather than a pool, the allocator reads that
+     *       subnet alone. Nothing in the build path does that today.
+     *
+     *   (d) Not a term any more: a VPS build's reservation reads the network
+     *       and takes addresses only from the subnets counted here. It used
+     *       not to, and — the subnet list being ordered by the block's text —
+     *       one bridgeless block in a pool was picked by every build and
+     *       failed it, while this passed on the pool's other blocks. What is
+     *       left is the race every term here shares: a network changed
+     *       between the reservation and the build's own read of it, which
+     *       the build refuses (`vps.network_not_attachable`).
+     *
+     * And one term that is not about the estate: the allocator's read is
+     * `FOR UPDATE SKIP LOCKED`, so a row another transaction holds and has
+     * not committed is not a candidate, and this count, which does not lock,
+     * cannot see that. An order can be refused while the count is positive.
+     * The summary says what was counted and no more.
+     */
+    private function addressFinding(string $target): PreflightFinding
+    {
+        $registered = IpPool::query()->count();
+        $active = IpPool::query()->active()->get();
 
-        $findings[] = $pools === 0
-            ? PreflightFinding::fail(
+        if ($active->isEmpty()) {
+            return $registered === 0
+                ? PreflightFinding::fail(
+                    'mapping.network',
+                    CheckCategory::Mapping,
+                    $target,
+                    'No address pool is registered, so a machine cannot be given an address.',
+                    'Register an address pool and its subnets.',
+                )
+                : PreflightFinding::fail(
+                    'mapping.network',
+                    CheckCategory::Mapping,
+                    $target,
+                    sprintf('%d address pool(s) are registered and none of them is active, so a machine cannot be given an address.', $registered),
+                    'Return an address pool to active, or register one that is.',
+                );
+        }
+
+        $allocatable = (int) $active->sum(fn (IpPool $pool): int => $this->addresses->customerAllocatableCount($pool));
+
+        if ($allocatable < 1) {
+            return PreflightFinding::fail(
                 'mapping.network',
                 CheckCategory::Mapping,
                 $target,
-                'No address pool is registered, so a machine cannot be given an address.',
-                'Register an address pool and its subnets.',
-            )
-            : PreflightFinding::pass(
-                'mapping.network',
-                CheckCategory::Mapping,
-                $target,
-                sprintf('%d address pool(s) are registered.', $pools),
-                EvidenceClass::Configuration,
+                sprintf(
+                    '%d of %d registered address pool(s) are active and they hold no address a customer machine can be given.',
+                    $active->count(),
+                    $registered,
+                ),
+                'Register a subnet for allocation in an active public or private pool, or free addresses in one.',
             );
+        }
 
-        return $findings;
+        $attachable = (int) $active->sum(fn (IpPool $pool): int => $this->addresses->customerAttachableCount($pool));
+
+        if ($attachable < 1) {
+            return PreflightFinding::fail(
+                'mapping.network',
+                CheckCategory::Mapping,
+                $target,
+                sprintf(
+                    '%d address(es) a customer machine can be given, across %d active address pool(s), and none of them is on a network a customer machine can be attached to (active, customer-facing, with a bridge) in a block with a gateway to route it by, so every build would be refused.',
+                    $allocatable,
+                    $active->count(),
+                ),
+                'Record a bridge on the customer-facing network the block is on, or register a block for allocation, with its gateway, on a customer-facing network that has one; a registered block\'s network and gateway cannot be changed.',
+            );
+        }
+
+        $unattachable = $allocatable - $attachable;
+
+        return PreflightFinding::pass(
+            'mapping.network',
+            CheckCategory::Mapping,
+            $target,
+            sprintf(
+                '%d address(es) a customer machine can be given and attached, across %d active address pool(s).%s',
+                $attachable,
+                $active->count(),
+                $unattachable > 0
+                    ? sprintf(' %d more are in subnets on no network a customer machine can be attached to, or with no gateway, and are not counted.', $unattachable)
+                    : '',
+            ),
+            EvidenceClass::Configuration,
+        );
     }
 
     /**

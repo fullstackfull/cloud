@@ -9,6 +9,7 @@ use Database\Seeders\DevelopmentSeeder;
 use Database\Seeders\InfrastructureSeeder;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
@@ -18,6 +19,7 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\BmcEndpoint;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Shared\Domain\Services\ReferenceValues;
@@ -98,6 +100,50 @@ final class DevelopmentFixturesTest extends TestCase
             IpAddress::query()->where('status', IpAddressStatus::Available)->count(),
             'The seeded subnet was never expanded, so nothing can be allocated.',
         );
+    }
+
+    #[Test]
+    public function every_seeded_hosting_plan_can_be_quoted_and_bought(): void
+    {
+        /*
+         * Asked over HTTP, as the seeded customer, because that is how the
+         * seeded catalogue is used and nothing else in the suite buys from it.
+         *
+         * The catalogue and the reference estate both map a package onto the
+         * same three hosting plans. While the reference packages were loaded
+         * on sale, every plan had two packages on sale and a purchase took
+         * whichever row the heap returned first — sometimes a package from an
+         * estate whose own seeder announces that nothing in it exists. The
+         * platform now refuses to pick between two (F-32), so the reference
+         * packages load withdrawn, and this is what says the demo catalogue is
+         * still for sale.
+         */
+        $this->seedDevelopmentFixtures();
+
+        $customer = User::query()->where('email', 'customer@lynomia.local')->sole();
+
+        $plans = Plan::query()
+            ->whereRelation('product', 'kind', ProductKind::SharedHosting->value)
+            ->orderBy('slug')
+            ->get();
+
+        $this->assertCount(3, $plans, 'The seeded catalogue no longer has its three hosting plans.');
+
+        foreach ($plans as $plan) {
+            $basket = [
+                'items' => [['plan_id' => (string) $plan->getKey(), 'quantity' => 1, 'domain' => $plan->slug.'.example.test']],
+                'billing_period' => BillingPeriod::Monthly->value,
+            ];
+
+            $this->actingAs($customer)
+                ->postJson('/api/v1/orders/quote', $basket)
+                ->assertOk();
+
+            $this->actingAs($customer)
+                ->withHeader('Idempotency-Key', 'seeded-'.$plan->slug)
+                ->postJson('/api/v1/orders', $basket)
+                ->assertCreated();
+        }
     }
 
     #[Test]

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\SharedHosting\Application\Handlers;
 
+use Illuminate\Support\Str;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ProvisioningHandler;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
@@ -51,9 +52,52 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\WordPressSite;
  *
  * That is why the handler asks the panel first, before installing at all: the
  * cheapest way to avoid installing twice is to look.
+ *
+ * ===========================================================================
+ * THE ADMINISTRATOR PASSWORD IS MINTED HERE, AND NEVER READ FROM THE JOB (F-45)
+ * ===========================================================================
+ *
+ * It used to arrive in the payload. The listener that queues this job minted
+ * it and put it there, and the payload column is cast through
+ * RedactedJsonCast, whose redactor matches `password` inside `admin_password`
+ * — so what was stored, and what this handler read back and handed to the
+ * installer, was the ten characters `[redacted]`. Every site this path built
+ * would have had the same publicly known administrator password, and the
+ * install succeeded.
+ *
+ * Two changes, and each covers what the other cannot:
+ *
+ *  - the password is minted here, at the moment of the install, handed to the
+ *    installer and dropped. See ADMIN_PASSWORD_LENGTH.
+ *
+ *  - a job whose payload carries `admin_password` at all is refused, Permanent,
+ *    before anything else is read. The cast stops a credential being kept,
+ *    and says the loud failure is the handler's to supply; this is it. The
+ *    test is the key and not the value on purpose. A value test — refuse the
+ *    placeholder, refuse a blank — has an arm that can never fire (the
+ *    redactor turns a blank into the placeholder too) and a hole: were
+ *    `password` ever edited out of the redaction list, a live credential
+ *    would sit in the column in the clear and pass straight through. The
+ *    invariant is that a credential is never persisted in order to be sent to
+ *    a provider, and the key is what states it.
  */
 final readonly class InstallWordPressHandler implements ProvisioningHandler
 {
+    /**
+     * The length of the administrator password minted for every install.
+     *
+     * From the CSPRNG, and never derived from anything the customer told us,
+     * which is how a "generated" password ends up being the domain name with
+     * a number after it.
+     *
+     * Carried over unchanged from the listener that used to mint it, symbols
+     * and all. The panel password leaves symbols out for a reason
+     * CreateHostingAccountHandler gives about how two panels encode a form
+     * body. What a real WordPress toolkit accepts has never been established
+     * in this repository, so the choice is not re-made here on a guess.
+     */
+    public const int ADMIN_PASSWORD_LENGTH = 24;
+
     public function __construct(
         private HostingProviderFactory $providers,
         private SecretRedactor $redactor,
@@ -68,6 +112,25 @@ final readonly class InstallWordPressHandler implements ProvisioningHandler
     {
         /** @var array<string, mixed> $payload */
         $payload = $job->payload;
+
+        if (array_key_exists('admin_password', $payload)) {
+            /*
+             * Whatever it holds: the redactor's placeholder, which is what the
+             * cast leaves, or a live credential, which is what it leaves if
+             * the redaction list ever stops matching. Neither is installed
+             * with, and the value is not repeated in the failure. Permanent,
+             * because the same payload will carry the same key next time; the
+             * fix is in whatever wrote it.
+             */
+            return ProvisioningResult::failed(
+                FailureClass::Permanent,
+                'wordpress.credential_in_payload',
+                'This install job carries an administrator password in its payload. '
+                    .'The password is minted when the install runs and must never be persisted; '
+                    .'whatever queued this job put one there.',
+                metadata: ['wordpress_site_id' => (string) ($payload['wordpress_site_id'] ?? '')],
+            );
+        }
 
         $site = WordPressSite::query()->find((string) ($payload['wordpress_site_id'] ?? ''));
 
@@ -168,7 +231,7 @@ final readonly class InstallWordPressHandler implements ProvisioningHandler
                 username: $account->username,
                 domain: $site->domain,
                 adminUsername: (string) ($payload['admin_username'] ?? 'admin'),
-                adminPassword: (string) ($payload['admin_password'] ?? ''),
+                adminPassword: Str::password(self::ADMIN_PASSWORD_LENGTH),
                 adminEmail: (string) ($payload['admin_email'] ?? ''),
                 siteTitle: (string) ($payload['site_title'] ?? $site->domain),
                 locale: (string) ($payload['locale'] ?? 'en_US'),

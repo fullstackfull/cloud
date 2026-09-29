@@ -28,11 +28,18 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  *
  * A provisioning payload is redacted too, and that is deliberate rather than
  * defensive. A credential must never be persisted in order to be sent to a
- * provider: passwords are generated at execution time and delivered out of
- * band. If one is put in the payload anyway, this is where it stops — the
- * handler receives "[redacted]", which fails loudly, instead of the platform
- * quietly keeping a customer's root password in a table half the support team
- * can read.
+ * provider: passwords are generated at execution time, by the code that sends
+ * them. If one is put in the payload anyway, this is where it stops, instead
+ * of the platform quietly keeping a customer's root password in a table half
+ * the support team can read.
+ *
+ * Stopping it is not the same as failing loudly, and this paragraph used to
+ * say it was. What a handler reads back is "[redacted]" — ten ordinary
+ * characters — and a handler that sends on whatever it reads will send those:
+ * a WordPress install was handed them as its administrator password and
+ * reported success (F-45). A cast cannot see who reads the column, so the loud
+ * failure belongs to the handler; the WordPress install refuses a payload that
+ * carries the key at all.
  *
  * The redaction is destructive by design. Provider payloads are kept to
  * explain to an operator what happened, and what happened can be explained

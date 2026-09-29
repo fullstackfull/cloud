@@ -49,7 +49,7 @@ final class DecommissionRefusedException extends DomainException
 
     /**
      * Raised by both doors out of maintenance — returning a machine to stock
-     * and retiring it — so the sentence names neither. It reaches no API body
+     * and retiring it — so the sentence names both. It reaches no API body
      * and no locale file (a caller is answered from `dedicated.still_assigned`
      * in the error catalogue), but it does land verbatim in the structured
      * `ERROR` log on every refusal from either door, which is what an

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Payments\Application\Actions;
 
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
 use Lynomia\Modules\Payments\Domain\Enums\TransactionKind;
@@ -31,6 +33,18 @@ use Throwable;
  * took. The lock is taken on the transaction rather than on the refund rows
  * because an aggregate cannot be locked: serialising on the parent is what
  * makes the sum that follows it authoritative.
+ *
+ * Two rows are locked, in this order: the capture, then the invoice it paid —
+ * the money-path lock order {@see WhatAnInvoiceStillHolds} writes down, and
+ * the order SettleInvoice takes the same two rows in. The invoice's lock is
+ * what lets the refund be held to what the invoice still holds (money already
+ * credited to the wallet against it is not refundable again). This used to
+ * take the invoice first, and a refund of a capture RecordPaymentCapture had
+ * already attached to its invoice deadlocked against that capture's
+ * settlement (N-2, measured across two processes: 40P01, with the settlement
+ * killed - its queued retries converged, so no money was lost, but a money
+ * path failed for no reason but lock order). The refund's own lock is taken
+ * before the provider is asked, so a refund killed here has asked nothing.
  *
  * The provider call happens *after* the lock is released, with the refund row
  * already written as pending. That ordering is the reason the balance holds: a
@@ -69,6 +83,7 @@ final readonly class IssueRefund
     public function __construct(
         private PaymentProviderRegistry $registry,
         private WalletLedger $wallet,
+        private ReturnToTheWalletWhatAFailedRefundLeft $failedRefundLeft,
     ) {}
 
     /**
@@ -124,6 +139,8 @@ final readonly class IssueRefund
                 'provider_metadata' => ['error' => $e->getMessage()],
             ])->save();
 
+            $this->failedRefundLeft->returnWhatAVoidInvoiceHolds($refund, $transaction);
+
             throw $e;
         }
 
@@ -133,6 +150,16 @@ final readonly class IssueRefund
             'provider_metadata' => $result->metadata,
             'processed_at' => $result->status === RefundStatus::Succeeded ? now() : null,
         ])->save();
+
+        /*
+         * A refund answered pending is announced when the provider's own
+         * refund event settles it (SettleRefundFromProvider), which books it
+         * on the invoice the same way; one that fails there releases what it
+         * reserved.
+         */
+        if (in_array($result->status, [RefundStatus::Failed, RefundStatus::Cancelled], true)) {
+            $this->failedRefundLeft->returnWhatAVoidInvoiceHolds($refund, $transaction);
+        }
 
         if ($result->status === RefundStatus::Succeeded) {
             event(new RefundIssued(
@@ -218,8 +245,18 @@ final readonly class IssueRefund
         ?User $issuedBy,
         ?string $invoiceId,
     ): Refund {
+        /*
+         * Lock order: the capture, then the invoice it paid (see
+         * WhatAnInvoiceStillHolds). The invoice is read from the locked
+         * capture: SettleInvoice attaches a capture under the capture's own
+         * lock, so what is read here cannot change until this commits.
+         */
         /** @var Transaction $locked */
         $locked = Transaction::query()->lockForUpdate()->findOrFail($transaction->getKey());
+
+        $invoice = $locked->invoice_id !== null
+            ? Invoice::query()->lockForUpdate()->find($locked->invoice_id)
+            : null;
 
         $captured = $locked->amount();
         // Safe to aggregate without locking the refund rows: every writer of
@@ -236,6 +273,8 @@ final readonly class IssueRefund
             );
         }
 
+        $this->assertNotAlreadyInTheWallet($locked, $invoice, $amount);
+
         return Refund::create([
             'transaction_id' => $locked->id,
             'invoice_id' => $invoiceId,
@@ -245,6 +284,43 @@ final readonly class IssueRefund
             'status' => RefundStatus::Pending,
             'reason' => mb_substr($reason, 0, 255),
         ]);
+    }
+
+    /**
+     * Refuses to refund money that has already gone back to the wallet.
+     *
+     * The capture's own balance (captured − refunded) does not know that some
+     * of it was credited to the customer's wallet against the invoice it paid:
+     * an overpayment surplus SettleInvoice diverted, a capture compensated
+     * after its invoice was withdrawn, a cancelled order's credit
+     * (CreditWhatACancelledOrderPaid). Refunding it in full afterwards would
+     * return the same money twice, once as stored value and once to the card.
+     * So the refund is also held to what the invoice still holds
+     * (WhatAnInvoiceStillHolds), read under the invoice's row lock, which
+     * reserve() takes after the capture's.
+     *
+     * Nothing is clawed back. A wallet credit the customer has already spent
+     * stays spent; this refuses only the card refund of money that went to the
+     * wallet, which is returned through the wallet or not at all.
+     *
+     * @throws RefundExceedsCaptureException
+     */
+    private function assertNotAlreadyInTheWallet(Transaction $locked, ?Invoice $invoice, Money $amount): void
+    {
+        if ($invoice === null || WhatAnInvoiceStillHolds::creditedToTheWalletMinor($invoice) === 0) {
+            return;
+        }
+
+        $held = Money::ofMinor(max(0, WhatAnInvoiceStillHolds::minor($invoice)), $invoice->currency);
+
+        if ($amount->isGreaterThan($held)) {
+            throw RefundExceedsCaptureException::becauseItWentToTheWallet(
+                (string) $locked->id,
+                (string) $invoice->getKey(),
+                $amount,
+                $held,
+            );
+        }
     }
 
     private function assertRefundable(Transaction $transaction, Money $amount): void

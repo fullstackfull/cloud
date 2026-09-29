@@ -87,13 +87,21 @@ final class TheWholeLifeOfAWordPressSiteTest extends TestCase
 
     private function install(WordPressSite $site): void
     {
+        /*
+         * No administrator password, as the listener writes none. This
+         * fixture used to carry `'admin_password' => 'generated-and-never-stored'`,
+         * and that string never once reached the handler: the factory writes
+         * through the same redacting cast as production, so the handler read
+         * `[redacted]` and the fixture described a payload the platform could
+         * not produce. The handler now mints the password and refuses a
+         * payload that carries one (F-45).
+         */
         $job = ProvisioningJob::factory()->create([
             'customer_id' => $this->customer->getKey(),
             'kind' => ProvisioningJobKind::InstallWordPress,
             'payload' => [
                 'wordpress_site_id' => (string) $site->getKey(),
                 'admin_username' => 'sitemanager',
-                'admin_password' => 'generated-and-never-stored',
                 'admin_email' => 'owner@'.$site->domain,
                 'site_title' => 'A Site',
             ],

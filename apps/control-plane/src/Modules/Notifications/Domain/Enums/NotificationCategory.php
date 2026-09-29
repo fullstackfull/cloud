@@ -16,8 +16,9 @@ namespace Lynomia\Modules\Notifications\Domain\Enums;
 enum NotificationCategory: string
 {
     /**
-     * Sign-ins, password changes, two-factor, new devices. Never optional: a
-     * customer cannot opt out of being told their account was accessed.
+     * Sign-ins from somewhere new, password changes, two-factor. Never
+     * optional: a customer cannot opt out of being told their account was
+     * accessed.
      */
     case Security = 'security';
 
@@ -36,11 +37,19 @@ enum NotificationCategory: string
      */
     case Service = 'service';
 
-    /**
-     * Planned maintenance and incidents affecting this customer. Optional by
-     * email, always in-app, for the same reason.
+    /*
+     * There was a fourth, "operational" — planned maintenance and incidents —
+     * and it held two types that nothing raised, because the platform records
+     * no incident and schedules no maintenance (F-46). With them gone it held
+     * nothing, and the preferences screen was offering every customer a
+     * switch for messages that did not exist. The choices people had stored
+     * about it are forgotten by the migration
+     * `forget_email_choices_about_a_category_nothing_sends`, because a stored
+     * row naming a case that no longer exists cannot be read back at all.
+     *
+     * A category every type has left is a switch for nothing, and
+     * `EveryNotificationTypeHasAProducerTest` fails on one.
      */
-    case Operational = 'operational';
 
     /**
      * Whether a customer may switch this category off entirely on a channel.
@@ -49,7 +58,7 @@ enum NotificationCategory: string
     {
         return match ($this) {
             self::Security, self::Billing => false,
-            self::Service, self::Operational => true,
+            self::Service => true,
         };
     }
 

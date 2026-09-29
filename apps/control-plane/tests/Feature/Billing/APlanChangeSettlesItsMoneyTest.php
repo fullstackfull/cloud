@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Queue;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
@@ -198,6 +199,13 @@ final class APlanChangeSettlesItsMoneyTest extends BillingApiTestCase
         [$customer, $user] = $this->accountWithOwner();
         $subscription = $this->subscriptionOn($customer, $this->wide);
         $this->serviceWithMachine($customer, $subscription);
+        /*
+         * The period was paid for. This test credited a subscription whose
+         * period had no money behind it at all, which is the mint round three
+         * closed: a downgrade credit is now held under what the period
+         * collected (F-01), so a fixture that paid nothing is credited nothing.
+         */
+        $this->periodPaidFor($customer, $subscription);
 
         $ledger = app(WalletLedger::class);
         $before = $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits();
@@ -449,6 +457,29 @@ final class APlanChangeSettlesItsMoneyTest extends BillingApiTestCase
             ]);
     }
 
+    private function periodPaidFor(Customer $customer, Subscription $subscription): void
+    {
+        $invoice = self::captured(Invoice::factory()->paid()->create([
+            'customer_id' => $customer->getKey(),
+            'subscription_id' => $subscription->getKey(),
+            'subtotal_minor' => $subscription->recurring_amount_minor,
+            'total_minor' => $subscription->recurring_amount_minor,
+            'amount_paid_minor' => $subscription->recurring_amount_minor,
+        ]));
+
+        InvoiceItem::query()->create([
+            'invoice_id' => $invoice->getKey(),
+            'kind' => InvoiceItemKind::Plan,
+            'description' => 'Renewal',
+            'quantity' => 1,
+            'unit_amount_minor' => $subscription->recurring_amount_minor,
+            'total_minor' => $subscription->recurring_amount_minor,
+            'period_start' => $subscription->current_period_start,
+            'period_end' => $subscription->current_period_end,
+            'subscription_id' => $subscription->getKey(),
+        ]);
+    }
+
     private function serviceWithMachine(Customer $customer, Subscription $subscription): Service
     {
         /*
@@ -482,5 +513,26 @@ final class APlanChangeSettlesItsMoneyTest extends BillingApiTestCase
             ]);
 
         return $service;
+    }
+
+    /**
+     * A paid invoice is paid by a capture: every payment applied to an invoice
+     * is a transactions row (SettleInvoice's invariant), and what a downgrade
+     * credit may draw on is read from those rows (WhatAnInvoiceStillHolds,
+     * O-2). A fixture that only states amount_paid_minor describes money that
+     * never arrived.
+     */
+    private static function captured(Invoice $invoice): Invoice
+    {
+        if ($invoice->amount_paid_minor > 0) {
+            Transaction::factory()->create([
+                'customer_id' => $invoice->customer_id,
+                'invoice_id' => $invoice->getKey(),
+                'amount_minor' => $invoice->amount_paid_minor,
+                'currency' => $invoice->currency,
+            ]);
+        }
+
+        return $invoice;
     }
 }

@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Orders\Application\Services;
 
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
@@ -59,6 +60,11 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
  * an unredeemed coupon hold, and PlaceOrder asks stillHolding() for it rather
  * than keeping a second copy of the list.
  *
+ * A plan change moves a held unit rather than taking a new one: the unit is
+ * counted against the plan its subscription is on now (see claimed()), and
+ * ApplyPlanChange asks shortfall() of the plan it moves onto, after lock(),
+ * inside the transaction that moves it - the same claim an order makes.
+ *
  * Nothing here is a counter. The number is derived from durable order rows
  * every time it is asked for, which is what makes a cancellation release
  * capacity with no write at all, and what makes this safe to re-ask under a
@@ -73,6 +79,12 @@ final readonly class PlanCapacity
      *
      * @var list<string>
      */
+    /** shortfall(): every unit the plan has is held. */
+    public const string OUT_OF_STOCK = 'out_of_stock';
+
+    /** shortfall(): the customer already holds as many as they may. */
+    public const string PER_CUSTOMER_LIMIT = 'per_customer_limit';
+
     private const array RELEASED = [
         OrderStatus::Cancelled->value,
         OrderStatus::Terminated->value,
@@ -106,15 +118,87 @@ final readonly class PlanCapacity
      * refusal. It is a courtesy rather than a guarantee: it tells a customer
      * the plan is gone before they fill in a card form, and it is not what
      * stops an oversell.
+     *
+     * A unit is counted against the plan its subscription is on NOW, which is
+     * the order line's plan until a plan change moves it. Counting only the
+     * order line's plan had a plan change take a unit it never counted and
+     * give back none: the plan moved onto kept selling a unit a subscription
+     * already held, and the plan left behind stayed full (F-01 x F-06). The
+     * line reaches its subscription through the service it was built into
+     * (`services.order_item_id`); a line with no service yet - an order
+     * awaiting payment - counts against the plan it was ordered on.
+     *
+     * While the upgrade that moved it is unpaid, the unit also keeps counting
+     * against the plan it left. The move is provisional: a void or a lapse
+     * puts the subscription back, and the plan it goes back to must still
+     * have its unit. Released only once the upgrade's invoice is paid; an
+     * open plan-change invoice is always the subscription's latest change,
+     * because no other change can be made while one is open.
      */
     public function claimed(string $planId, ?Customer $customer = null): int
     {
         $query = DB::table('order_items')
             ->join('orders', 'orders.id', '=', 'order_items.order_id')
-            ->where('order_items.plan_id', $planId)
+            ->leftJoin('services as held_by', 'held_by.order_item_id', '=', 'order_items.id')
+            ->leftJoin('subscriptions as held_on', 'held_on.id', '=', 'held_by.subscription_id')
+            ->where(static fn (Builder $counted): Builder => $counted
+                ->whereRaw('coalesce(held_on.plan_id, order_items.plan_id) = ?', [$planId])
+                ->orWhereExists(static fn (Builder $pending): Builder => $pending
+                    ->selectRaw('1')
+                    ->from('subscription_plan_changes as pending')
+                    ->join('invoices as pending_invoice', 'pending_invoice.id', '=', 'pending.proration_invoice_id')
+                    ->whereColumn('pending.subscription_id', 'held_on.id')
+                    ->whereColumn('pending.to_plan_id', 'held_on.plan_id')
+                    ->where('pending.from_plan_id', $planId)
+                    ->where('pending_invoice.status', InvoiceStatus::Open->value)))
             ->when($customer !== null, fn ($query) => $query->where('orders.customer_id', $customer->getKey()));
 
         return (int) self::stillHolding($query)->sum('order_items.quantity');
+    }
+
+    /**
+     * Which limit taking `$quantity` more units of the plan would break, if
+     * any: self::OUT_OF_STOCK, self::PER_CUSTOMER_LIMIT, or null.
+     *
+     * Read-only on its own. It is a claim only when asked after lock(), inside
+     * the transaction that writes whatever consumes the unit - as claim() does
+     * for an order, and ApplyPlanChange does for a plan change.
+     */
+    public function shortfall(Plan $plan, int $quantity, Customer $customer): ?string
+    {
+        $planId = (string) $plan->getKey();
+
+        if ($plan->stock_limit !== null
+            && $this->claimed($planId) + $quantity > $plan->stock_limit) {
+            return self::OUT_OF_STOCK;
+        }
+
+        if ($plan->per_customer_limit !== null
+            && $this->claimed($planId, $customer) + $quantity > $plan->per_customer_limit) {
+            return self::PER_CUSTOMER_LIMIT;
+        }
+
+        return null;
+    }
+
+    /**
+     * Take `SELECT ... FOR UPDATE` on each plan row, one statement each, in
+     * sorted id order.
+     *
+     * Every writer that consumes a plan unit locks through here, so a checkout
+     * and a plan change onto the same plan queue behind each other, and two
+     * writers naming the same plans in opposite orders cannot deadlock.
+     *
+     * @param  list<string>  $planIds
+     */
+    public function lock(array $planIds): void
+    {
+        $planIds = array_values(array_unique($planIds));
+        sort($planIds);
+
+        foreach ($planIds as $planId) {
+            DB::table('plans')->where('id', $planId)->lockForUpdate()->first();
+        }
     }
 
     /**
@@ -140,12 +224,10 @@ final readonly class PlanCapacity
      */
     public function claim(Customer $customer, array $wanted): void
     {
-        $planIds = array_keys($wanted);
+        $planIds = array_map(strval(...), array_keys($wanted));
         sort($planIds);
 
-        foreach ($planIds as $planId) {
-            DB::table('plans')->where('id', $planId)->lockForUpdate()->first();
-        }
+        $this->lock($planIds);
 
         foreach ($planIds as $planId) {
             /** @var Plan|null $plan */
@@ -155,18 +237,16 @@ final readonly class PlanCapacity
                 continue;
             }
 
-            $quantity = $wanted[$planId];
+            $refused = $this->shortfall($plan, $wanted[$planId], $customer);
 
-            if ($plan->stock_limit !== null
-                && $this->claimed($planId) + $quantity > $plan->stock_limit) {
+            if ($refused === self::OUT_OF_STOCK) {
                 throw CheckoutRejectedException::becausePlanIsOutOfStock($planId);
             }
 
-            if ($plan->per_customer_limit !== null
-                && $this->claimed($planId, $customer) + $quantity > $plan->per_customer_limit) {
+            if ($refused === self::PER_CUSTOMER_LIMIT) {
                 throw CheckoutRejectedException::becausePerCustomerLimitReached(
                     $planId,
-                    $plan->per_customer_limit,
+                    (int) $plan->per_customer_limit,
                 );
             }
         }

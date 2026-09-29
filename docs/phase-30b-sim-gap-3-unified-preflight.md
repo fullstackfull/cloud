@@ -297,7 +297,10 @@ are eligible would answer differently from the scheduler that actually places th
 and the discrepancy would only show up on the order that failed.
 
 - **Compute:** cluster accepting placement, eligible node, active storage, capacity,
-  installable template, address pool.
+  installable template, an active address pool. The address check is asked whatever the
+  template check found, and it counts active pools rather than pool rows. A pass there
+  is less than an address the allocator can hand out; `MappingChain::addressFinding()`
+  lists what `IpAllocator::reserve()` asks that the check does not.
 - **Dedicated:** a registered machine cleared for reimaging, and a controller bound to it.
   No simulated hardware satisfies this in either mode.
 - **Hosting:** an active node and a mapped package.

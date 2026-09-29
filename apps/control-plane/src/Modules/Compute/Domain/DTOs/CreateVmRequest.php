@@ -14,9 +14,10 @@ use Lynomia\Modules\Compute\Domain\Enums\OsFamily;
  * customer already has and what the fleet is being drained for, and it picks
  * the id because the id is written down before the call is made — on the
  * provisioning job, as its reserved provider identity — and every attempt of
- * that job asks for the same one. A machine the provider named after the fact
- * is a machine we cannot find again if the response is lost, and an id drawn
- * afresh per attempt is how a retry built a second machine beside it (F-15).
+ * that job asks for the one it holds, which changes only when an operator
+ * repoints the job. A machine the provider named after the fact is a machine
+ * we cannot find again if the response is lost, and an id drawn afresh per
+ * attempt is how a retry built a second machine beside it (F-15).
  *
  * @immutable
  */

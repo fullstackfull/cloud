@@ -450,8 +450,26 @@ def build_dedicated():
                         "A spike of failures across several machines at once is a PXE, DHCP or install-image problem, not a hardware one.",
                         [("sum by (status) (delta(lynomia_provisioning_jobs_total{kind=\"provision_dedicated\"}[6h]))", "{{status}}")],
                         {"h": 8, "w": 12, "x": 12, "y": 15}, stack=True))
+
+    # The power path: the one thing on this dashboard that physically cycles a
+    # customer's machine, and the last thing to get a series.
+    p.append(row("Power", {"h": 1, "w": 24, "x": 0, "y": 23}))
+    p.append(stat("Indeterminate power requests (24h)",
+                  "Power requests that ended without a confirmed outcome: the controller stopped answering, or the worker died before it answered. Each is a machine that may be mid-reset, off or untouched, and nothing will try again. Find it at its controller.",
+                  [("sum(delta(lynomia_dedicated_power_operation_total{outcome=\"indeterminate\"}[24h]))", "requests")],
+                  {"h": 8, "w": 6, "x": 0, "y": 24}, decimals=0,
+                  steps=[{"color": "green", "value": None}, {"color": "red", "value": 1}]))
+    p.append(stat("Abandoned power claims",
+                  "Claims past their lease that nothing has settled yet. The sweep settles them as indeterminate every five minutes, so above zero for long is one of two things this panel cannot tell apart: the same old claims staying means the sweep is not running; different, recent ones each time mean workers are dying mid-call while the sweep keeps up. The runbook tells them apart.",
+                  [("sum(lynomia_dedicated_power_claims_abandoned)", "claims")],
+                  {"h": 8, "w": 6, "x": 6, "y": 24},
+                  steps=[{"color": "green", "value": None}, {"color": "yellow", "value": 1}]))
+    p.append(timeseries("Power requests by outcome",
+                        "Requests sent to management controllers, by what came back. Claimed is a request still waiting on a controller.",
+                        [("sum by (outcome) (delta(lynomia_dedicated_power_operation_total[1h]))", "{{outcome}}")],
+                        {"h": 8, "w": 12, "x": 12, "y": 24}, stack=True))
     return dashboard("lynomia-dedicated", "Dedicated servers",
-                     "Dedicated fleet: reachability, hardware health where the BMC exposes it, and provisioning state.",
+                     "Dedicated fleet: reachability, hardware health where the BMC exposes it, provisioning state, and power requests the platform cannot vouch for.",
                      p, ["lynomia", "dedicated"], time_from="now-24h")
 
 

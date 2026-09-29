@@ -79,11 +79,13 @@ enum ProviderCategory: string
         return match ($this) {
             /*
              * `inventory_sync` is the scheduled read of nodes and storage
-             * pools. It is a question of its own because a cluster can answer
-             * everything else and still show the platform no pool — and the
-             * scheduler places only on pools the sync recorded, so such a
-             * cluster places nothing. VPS requires it; GPU compute inherits it
-             * through its dependency on VPS.
+             * pools. It is a question of its own because showing the platform
+             * a pool is not any of the other questions — even where, as on
+             * Proxmox, one privilege happens to settle it and `templates`
+             * together — and the scheduler places only on pools the sync
+             * recorded, so a cluster that shows none places nothing. VPS
+             * requires it; GPU compute inherits it through its dependency on
+             * VPS.
              */
             self::Compute => ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling', 'inventory_sync', 'gpu_passthrough'],
             /*

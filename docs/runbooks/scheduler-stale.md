@@ -2,7 +2,13 @@
 
 ## What you are seeing
 
-`ScheduledCommandStale` or `ScheduledCommandFailingRepeatedly`.
+A scheduled command that has stopped running, or keeps failing: renewals not
+happening, sweeps not advancing.
+
+No alert fires for this, so nothing will page you.
+`lynomia_scheduled_command_last_success_timestamp_seconds` and
+`lynomia_scheduled_command_consecutive_failures` are exported per command, and
+no rule reads either. You get here by noticing.
 
 ## What it means
 
@@ -26,8 +32,8 @@ curl -sS -H "Authorization: Bearer $(cat /etc/prometheus/secrets/metrics-token)"
      https://<control plane>/metrics | grep lynomia_scheduled_command
 ```
 
-The alert names the specific command. Start there rather than restarting
-everything.
+Both series carry the command's name in their `command` label. Start with that
+command rather than restarting everything.
 
 ## What to do
 
@@ -62,5 +68,6 @@ php artisan ipam:reclaim
 
 ## What not to do
 
-Do not disable a failing scheduled command to silence the alert. The alert is
-the only thing telling you that renewals stopped.
+Do not disable a failing scheduled command to make the failures stop. Its
+failures are the only record that renewals stopped, and no alert is watching
+them.

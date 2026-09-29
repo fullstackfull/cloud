@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Backups\Application\Actions;
 use Lynomia\Modules\Backups\Application\Services\BackupAnnouncements;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
+use Lynomia\Modules\Backups\Domain\Exceptions\IllegalBackupTransitionException;
 use Lynomia\Modules\Backups\Domain\ValueObjects\BackupNotificationKey;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
@@ -32,6 +33,17 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * front of a person, and is the only outcome that resolves the question of
  * whether the archive is there.
  *
+ * The window is measured from when the operation the row is waiting on
+ * started, and from nothing else: `started_at` for the backup itself,
+ * `restore_started_at` for a restore, `verification_started_at` for a
+ * verification. It used to be measured from the archive's `started_at` for
+ * all three. Restoring a backup taken three days ago is the normal case, so a
+ * restore that had been running for seconds was read as seventy-two hours
+ * overdue on its first poll and handed to a person with a reason that said it
+ * had run for twelve; the scheduled verification sweep did the same to every
+ * archive older than the window (F-09). The reason written now names the
+ * operation and the hours it actually ran.
+ *
  * A poll that itself times out changes nothing at all. The row is left where
  * it is and asked again later: not knowing what a task is doing is the normal
  * condition of a poller, and turning one unanswered read into a state change
@@ -46,17 +58,16 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * over a machine — and they are three different provider tasks. This used to
  * poll `provider_task_id` for all of them.
  *
- * For a verification that is right, because {@see VerifyStoredArchives}
- * deliberately writes the verification's handle into both `provider_task_id`
- * and `verification_task_id`: the first is "whatever this row is waiting on
- * now", the second is the durable record.
- *
- * A restore cannot do that, and {@see RestoreServiceBackup} says why: writing
- * over `provider_task_id` would erase the identifier of the backup itself —
- * the one thing that finds the archive when a restore goes wrong, which is
- * exactly when it is needed — and `(provider, provider_task_id)` is unique, so
- * the write could be rejected outright. The restore's handle therefore lives
- * in `restore_task_id`, and nothing ever read it.
+ * Neither a verification nor a restore may write its handle over
+ * `provider_task_id`, and {@see RestoreServiceBackup} says why: that would
+ * erase the identifier of the backup itself — the one thing that finds the
+ * archive when a restore goes wrong, which is exactly when it is needed — and
+ * `(provider, provider_task_id)` is unique, so the write could be rejected
+ * outright. The restore's handle therefore lives in `restore_task_id`, and
+ * nothing ever read it. A verification's lives in `verification_task_id`; it
+ * used to be written over `provider_task_id` as well, so that this poller
+ * could read one column, which cost every verified archive its backup's
+ * handle. Each operation is now polled on its own column.
  *
  * The consequence was not a subtle one. A row in `Restoring` was polled with
  * the identifier of its own creation task, which had finished successfully
@@ -88,9 +99,12 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * saying nothing at all, which is what both did until recently, leaves a
  * customer relying on an archive that may not exist.
  *
- * A failed verification is the one ending that still borrows nothing and adds
- * nothing: its verdict is `BackupVerificationFailed`, which is about the data
- * rather than about the operation.
+ * A failed verification borrows nothing either: its verdict is
+ * `BackupVerificationFailed`, which is about the data rather than about the
+ * operation. A verification the platform lost track of is not a verdict, and
+ * is not announced as one — but it has just made the archive unrestorable in
+ * the portal until a person looks, so the customer is told that much, in the
+ * backup's own needs-review words.
  */
 final readonly class ReconcileBackup
 {
@@ -100,7 +114,34 @@ final readonly class ReconcileBackup
         private BackupAnnouncements $announcements,
     ) {}
 
+    /**
+     * Settle one row, or leave it to whoever moved it first.
+     *
+     * Every transition here is a compare-and-set ({@see Backup::transitionTo()})
+     * on the state and on the attempt this copy read. A row an operator
+     * settled, or that another worker already settled — including one that
+     * was settled and then started again, which reads `restoring` exactly as
+     * before — while this one was asking the provider is not written over:
+     * the race is a refusal, and the row as it now stands is returned. A
+     * sweep that loaded the row during an earlier restore has polled that
+     * restore's task, and that is no answer about a later one (F-09). The
+     * record that it asked ({@see Backup::recordPoll()}) is held to the same
+     * condition, so it does not land on the later restore either.
+     */
     public function execute(Backup $backup): Backup
+    {
+        try {
+            return $this->settle($backup);
+        } catch (IllegalBackupTransitionException $e) {
+            if (! $e->wasRaced()) {
+                throw $e;
+            }
+
+            return $backup->refresh();
+        }
+    }
+
+    private function settle(Backup $backup): Backup
     {
         if (! $backup->isAwaitingProvider()) {
             return $backup;
@@ -117,10 +158,17 @@ final readonly class ReconcileBackup
 
         if ($taskId === null) {
             /*
-             * A restore that was recorded and whose handle never arrived: the
-             * process died between the `Restoring` transition and the write of
+             * A restore that was recorded and whose handle has not arrived:
+             * the request is still inside its provider call, or its process
+             * died between the `Restoring` transition and the write of
              * `restore_task_id`, which are deliberately two saves so that a
              * crash still leaves evidence a restore was started.
+             *
+             * That transition clears any previous attempt's handle in the same
+             * compare-and-set ({@see RestoreServiceBackup}), so an archive
+             * restored before has no finished task left on it to be polled in
+             * this one's place — which is what used to write `Restored` over a
+             * second restore still writing the machine's disks.
              *
              * Left alone rather than quarantined on sight, because a sweep
              * running at that exact moment would otherwise race a request that
@@ -150,8 +198,9 @@ final readonly class ReconcileBackup
         } catch (BackupProviderException $e) {
             if ($e->isIndeterminate()) {
                 // Not knowing is the normal condition of a poller. Record that
-                // we asked, and ask again later.
-                $backup->forceFill(['last_polled_at' => now(), 'poll_count' => $backup->poll_count + 1])->save();
+                // we asked, and ask again later — on the attempt this copy
+                // read, or not at all.
+                $backup->recordPoll();
 
                 return $this->giveUpIfOverdue($backup, $operation);
             }
@@ -162,7 +211,9 @@ final readonly class ReconcileBackup
             return $this->quarantine($backup, $operation, $this->redactor->redactString($e->getMessage()));
         }
 
-        $backup->forceFill(['last_polled_at' => now(), 'poll_count' => $backup->poll_count + 1])->save();
+        // Only on the attempt this copy read: a sweep holding an earlier
+        // restore's copy has asked about that restore, not a later one.
+        $backup->recordPoll();
 
         if ($state->isRunning()) {
             return $this->giveUpIfOverdue($backup, $operation);
@@ -194,10 +245,14 @@ final readonly class ReconcileBackup
     /**
      * The handle of the task this row is actually waiting on.
      *
-     * Null only for a restore whose provider call never returned one, which is
-     * handled by the caller rather than here: there is no identifier to ask
-     * about and guessing at another one is how this went wrong in the first
-     * place.
+     * Null only for a restore whose provider call has not returned one — yet,
+     * or ever — which is handled by the caller rather than here: there is no
+     * identifier to ask about and guessing at another one is how this went
+     * wrong in the first place. In the table `restore_task_id` is only ever
+     * the current attempt's: the move to `Restoring` clears the previous
+     * restore's handle. A copy loaded earlier may still hold an earlier
+     * attempt's handle; what it learns from that task can only be written if
+     * the row is still on that attempt ({@see Backup::transitionTo()}).
      */
     private function taskFor(Backup $backup): ?string
     {
@@ -207,11 +262,12 @@ final readonly class ReconcileBackup
             return $restoreTask === '' ? null : $restoreTask;
         }
 
-        /*
-         * Everything else reads `provider_task_id`, including a verification:
-         * VerifyStoredArchives writes the verification's handle there as well
-         * as into its own column, precisely so that this line keeps working.
-         */
+        if ($backup->state === BackupState::Verifying) {
+            // Never null here: isAwaitingProvider() requires it for this state.
+            return (string) $backup->verification_task_id;
+        }
+
+        // The backup itself, the only operation whose handle is this column.
         return (string) $backup->provider_task_id;
     }
 
@@ -245,10 +301,13 @@ final readonly class ReconcileBackup
      * failed one, an indeterminate one, or on a verification of the source
      * archive.
      *
-     * It does not need protecting against being rewritten by a later sweep:
+     * A later sweep that reads the row as `Restored` does not rewrite it:
      * `Restored` is not in flight, so `isAwaitingProvider()` is false and this
-     * action returns before it asks anything. The timestamp means "when this
-     * restore finished", once.
+     * action returns before it asks anything. A sweep that read it as
+     * `restoring` before it settled — and finds it `restoring` again, on a
+     * later restore — does not write it either: the compare-and-set compares
+     * the attempt it polled, not only the state. The timestamp means "when
+     * this restore finished", once per attempt.
      *
      * @return array<string, mixed>
      */
@@ -265,11 +324,11 @@ final readonly class ReconcileBackup
      * index, and a key containing a timestamp would make every replay unique
      * and defeat it.
      *
-     * A restore's key carries the restore task as well, because one backup row
-     * can be restored more than once and the second attempt is a different
-     * event the customer is owed a word about. A backup row has exactly one
+     * A restore's key carries the attempt as well — its task and when it
+     * started — because one backup row can be restored more than once and the
+     * second attempt is a different event the customer is owed a word about. A backup row has exactly one
      * creation task, so its outcome needs no such qualifier — and must not
-     * borrow `provider_task_id`, which a later verification overwrites.
+     * borrow `provider_task_id`, which is the backup's own creation task.
      */
     private function announce(Backup $backup, BackupState $operation): Backup
     {
@@ -288,7 +347,11 @@ final readonly class ReconcileBackup
          * Readable gets none at all — a customer does not need telling that a
          * check they never asked for passed. And a verification that could not
          * be run reaches NeedsReview with `verified` still null, which is not
-         * a verdict and must not be announced as one.
+         * a verdict and must not be announced as one. It is announced as what
+         * it is — the platform could not confirm the state of this backup —
+         * because until a person settles it the archive is no longer offered
+         * for restore, and a customer who is not told finds that out on the
+         * day they need it.
          *
          * A backup has three endings of its own, and the third one used to be
          * silence for want of a word. `NeedsReview` is not a failure: nothing
@@ -308,11 +371,15 @@ final readonly class ReconcileBackup
                     BackupState::Restored => 'restored',
                     BackupState::NeedsReview => 'needs_review',
                     default => 'failed',
-                }),
+                }, $backup->restore_started_at?->toIso8601String()),
             ],
             $operation === BackupState::Verifying && $backup->verified === false => [
                 NotificationType::BackupVerificationFailed,
                 BackupNotificationKey::verificationFailed($id),
+            ],
+            $operation === BackupState::Verifying && $landed === BackupState::NeedsReview => [
+                NotificationType::BackupNeedsReview,
+                BackupNotificationKey::verificationNeedsReview($id, $backup->verification_task_id),
             ],
             in_array($operation, [BackupState::Requested, BackupState::Running], true) => [
                 match ($landed) {
@@ -403,22 +470,51 @@ final readonly class ReconcileBackup
     }
 
     /**
-     * The row has been in flight longer than the platform is willing to track.
+     * The operation this row is waiting on has run longer than the platform is
+     * willing to track.
+     *
+     * Measured from when THAT operation started. See the class docblock for
+     * what measuring every operation from the archive's own clock did.
      */
     private function giveUpIfOverdue(Backup $backup, BackupState $operation): Backup
     {
         $limit = max(1, (int) config('backups.max_poll_hours', 12));
 
-        $startedAt = $backup->started_at ?? $backup->created_at;
+        [$what, $stamp] = match ($operation) {
+            BackupState::Restoring => ['restore', $backup->restore_started_at],
+            BackupState::Verifying => ['verification', $backup->verification_started_at],
+            // A backup still `Requested` has no provider start yet; the row
+            // was written when it was asked for, which is its start.
+            default => ['backup', $backup->started_at ?? $backup->created_at],
+        };
+
+        /*
+         * A row with no start stamp for its operation is one nothing in this
+         * module writes any more (the migration that added the verification
+         * stamp backfilled the rows already in flight). The row's own creation
+         * is the only clock left, and the reason says that is what was read.
+         */
+        $startedAt = $stamp ?? $backup->created_at;
 
         if ($startedAt->addHours($limit)->isFuture()) {
             return $backup;
         }
 
-        return $this->quarantine($backup, $operation, sprintf(
-            'the provider task was still unfinished after %d hours; the platform has stopped tracking it',
-            $limit,
-        ));
+        $ran = (int) floor(abs($startedAt->diffInHours(now())));
+
+        return $this->quarantine($backup, $operation, $stamp !== null
+            ? sprintf(
+                'the provider task for this %s was still unfinished %d hours after the %s started; the platform has stopped tracking it',
+                $what,
+                $ran,
+                $what,
+            )
+            : sprintf(
+                'the provider task for this %s was still unfinished %d hours after this backup row was created, and when the %s started was never recorded; the platform has stopped tracking it',
+                $what,
+                $ran,
+                $what,
+            ));
     }
 
     /**

@@ -610,7 +610,7 @@ return [
     'api.admin.provisioning.needs_review' => [
         'tag' => 'Operator',
         'summary' => 'Jobs waiting for a person',
-        'description' => 'Where an indeterminate provider call goes. Nothing here is retried automatically, which is the point of the state. Each row carries the last attempt\'s finding (`error_code`, `error_reason`) and, for a VPS create, the provider identity it reserved and every node and name a create under it was sent with.',
+        'description' => 'Where an indeterminate provider call goes. Nothing here is retried automatically, which is the point of the state. Each row carries the job\'s current finding (`error_code`, `error_reason`) — its last attempt\'s, about the identity it holds now, or none — and, for a VPS create, the provider identity it reserved, every node an attempt under it was placed on, and every name a create under it was sent with.',
         'permission' => 'provisioning.view',
         'response' => $many('AdminProvisioningJob'),
     ],
@@ -827,7 +827,7 @@ return [
     'api.v1.dns.zones.store' => [
         'tag' => 'DNS',
         'summary' => 'Claim a domain',
-        'description' => "Creates the zone and answers with the nameservers to delegate to. **This is not verification.** Nothing here checks that the account owns the domain, and no field on the response should be read as saying so — the zone serves nothing until the registrar points the domain at those nameservers, which only whoever controls the registration can do. Refused for a domain another account already holds here, for the platform's own names and their parents, and for reverse zones, which follow the address block rather than the domain.",
+        'description' => "Creates the zone and answers with the nameservers to delegate to. **This is not verification.** Nothing here checks that the account owns the domain, and no field on the response should be read as saying so — the zone serves nothing until the registrar points the domain at those nameservers, which only whoever controls the registration can do. Refused for a domain another account already holds here; with 403 `dns.zone.reserved` for the platform's own names, every parent of one and everything beneath one; and for reverse zones, which follow the address block rather than the domain. While the platform cannot read its own list of reserved names, every claim is refused with 503 `dns.zone.unavailable`, whatever it names: that is the platform's condition, not the request's.",
         'body' => ['name', 'service_id'],
         'response' => $one('DnsZone', 201),
     ],
@@ -1156,12 +1156,18 @@ return [
         'description' => 'The response is identical whether or not the address already has a Lynomia login: the difference is exactly what an attacker would be fishing for. The token goes only to the address, never into this response.',
         'body' => ['email', 'role'],
         'response' => $one('TeamInvitation', 201),
+        'errors' => [
+            409 => 'Not sent. `membership.already_a_member`, `membership.account_is_full`, `membership.invitation_already_open` while an offer to the address is still live, or `membership.invitation_sent_too_recently` when this account mailed the address inside `teams.invitation_cooldown_minutes` - withdrawing an offer does not reset that clock. The last carries `retry_at` in `error.details`.',
+        ],
     ],
     'api.v1.team.invitations.resend' => [
         'tag' => 'Team',
         'summary' => 'Send an invitation again',
         'description' => 'Mints a new token and pushes the expiry out; the previous link stops working. The platform stores a hash rather than the token, so it cannot repeat a link it never kept.',
         'response' => $one('TeamInvitation'),
+        'errors' => [
+            409 => 'Not sent, and nothing about the offer changed. `membership.invitation_not_open`, or `membership.invitation_sent_too_recently` inside `teams.invitation_cooldown_minutes` of the last mail to the address, with `retry_at` in `error.details`.',
+        ],
     ],
     'api.v1.team.invitations.revoke' => [
         'tag' => 'Team',
@@ -1198,8 +1204,8 @@ return [
     'api.v1.subscriptions.plan' => [
         'tag' => 'Billing',
         'summary' => 'Change a subscription\'s plan',
-        'description' => 'Mid-cycle. The unused remainder of the old plan is credited and the same remainder charged at the new one, through one proration call - so an upgrade and an immediate downgrade net to zero. The billing anniversary does not move: a plan change is not a renewal.',
-        'body' => ['plan_id', 'price_id', 'units'],
+        'description' => 'Mid-cycle. The unused remainder of the old plan is credited and the same remainder charged at the new one, through one proration call, at the unit count the subscription already holds - the count the plan-options quote priced; `units` is refused. An upgrade leaves an invoice and the machine is resized to what that invoice bought once it is paid; a downgrade credits the wallet with no more than the period collected. Refused (409 `subscription.plan_change_refused`) while an invoice for the subscription is open, and onto a plan that is sold out or at the account\'s limit. The move and its invoice or credit commit together. The billing anniversary does not move: a plan change is not a renewal.',
+        'body' => ['plan_id', 'price_id'],
         'response' => $one('PlanChange'),
     ],
     'api.admin.invoices.void' => [
@@ -1245,7 +1251,7 @@ return [
     'api.admin.provisioning.hosting_domain' => [
         'tag' => 'Operator',
         'summary' => 'Correct the domain a stopped hosting build will serve',
-        'description' => 'The repair a retry cannot be. A hosting build refused because it names no domain (`hosting.domain_missing`) or one another live account serves (`hosting.domain_in_use`) is refused the same way on every retry; this records the name on the job, in a field of its own, and writes nothing else - the job\'s payload keeps what it was created with - and the ordinary retry then builds under the named domain. The name is validated and folded as the account row requires, and refused (409 `hosting.domain_in_use`) if another live account serves it - the job\'s own earlier rows excepted. Only a stopped hosting build can be corrected (409 `hosting.job_not_settled`, `hosting.job_not_a_hosting_build`). The evidence and the name before and after land in the audit trail.',
+        'description' => 'The repair a retry cannot be. A hosting build refused because it names no domain (`hosting.domain_missing`) or one another live account serves (`hosting.domain_in_use`) is refused the same way on every retry; this records the name on the job, in a field of its own, and writes nothing else - the job\'s payload keeps what it was created with - and the ordinary retry then builds under the named domain. The name is validated and folded as the account row requires, and refused (409 `hosting.domain_in_use`) if another live account serves it - the job\'s own earlier rows excepted. Only a hosting build that failed or is waiting for review - the two states a retry starts from - can be corrected (409 `hosting.job_not_settled`, `hosting.job_not_a_hosting_build`). The evidence and the name before and after land in the audit trail.',
         'permission' => 'provisioning.retry',
         'body' => ['domain', 'evidence'],
         'response' => $one('AdminNamedHostingDomain'),
@@ -1288,6 +1294,21 @@ return [
         'permission' => 'provisioning.retry',
         'body' => ['verdict', 'evidence'],
         'response' => $one('AdminReinstallVerdict'),
+    ],
+    'api.admin.backups.needs_review' => [
+        'tag' => 'Operator',
+        'summary' => 'Backups waiting for a person',
+        'description' => 'Every backup row in `needs_review`, oldest first. `interrupted_operation` is the state the row left for review — `restoring`, `verifying`, `running`, `delete_requested`, … — or null for a row from before the platform recorded it. `resolvable` says whether the resolve route can settle it: only an interrupted restore or verification can. A row whose interrupted operation is `restoring` holds its machine against any other restore until it is settled.',
+        'permission' => 'backup.manage',
+        'response' => $many('AdminBackupInReview'),
+    ],
+    'api.admin.backups.resolve' => [
+        'tag' => 'Operator',
+        'summary' => 'Record a verdict on a restore or verification the platform lost track of',
+        'description' => 'For a row in `needs_review` whose interrupted operation was a restore or a verification, and no other (422 otherwise). `completed` or `failed`, with what the operator read at the provider: a restore becomes `restored` or returns to `succeeded` with the archive intact; a verification becomes `verified` or `failed` (unreadable). Audited in the same transaction, and the customer is told the outcome under the same key the poller would have used. Nothing here calls a provider.',
+        'permission' => 'backup.manage',
+        'body' => ['verdict', 'evidence'],
+        'response' => $one('AdminBackupVerdict'),
     ],
     /* ---------------------------------------------------------------------
      | The estate an operator configures
@@ -1391,10 +1412,33 @@ return [
     'api.admin.infrastructure.subnets.store' => [
         'tag' => 'Operator',
         'summary' => 'Add a block to a pool',
-        'description' => 'The block is parsed by the same value object the allocator reads it with, so the address family and the prefix length are derived rather than asked for and a block the allocator would reject cannot be written. A gateway must fall inside it, and a network — optional — must be in the same datacenter as the pool.',
+        'description' => 'The block is parsed by the same value object the allocator reads it with, so the address family and the prefix length are derived rather than asked for and a block the allocator would reject cannot be written. A gateway must fall inside it, and a network, when named, must be in the same datacenter as the pool. A block registered for allocation in a pool customers are given addresses from must name a network a customer machine may be attached to (active, customer-facing, not a platform segment), and is refused (422 `infrastructure.subnet_has_no_customer_network`) otherwise: no route attaches a network to a block once it is registered, and a VPS build refuses an address on no such segment. Held space, IPv6 and a management pool\'s blocks need none. An IPv4 block is expanded into the address rows the allocator hands out, in the same transaction: network, broadcast, gateway and every address in `reserved_addresses` are written unavailable, the rest available, and `allocatable_addresses` in the answer says how many. IPv6 is delegated per service and never expanded, and `"allocatable": false` registers a block as held space with no rows; both answer `allocatable_addresses: 0`. An IPv4 block wider than a /16 registered for allocation is refused (422 `infrastructure.subnet_too_wide_to_allocate_from`); an overlap in the block\'s realm is refused (422 `infrastructure.subnet_overlaps`) first.',
         'permission' => 'ipam.manage',
-        'body' => ['cidr', 'gateway', 'network_id'],
+        'body' => ['cidr', 'gateway', 'network_id', 'allocatable', 'reserved_addresses'],
         'response' => $one('AdminSubnet', 201),
+    ],
+    'api.admin.infrastructure.ip_addresses.awaiting_clearance' => [
+        'tag' => 'Operator',
+        'summary' => 'Addresses a timed-out build left waiting for a person',
+        'description' => 'Every address quarantined because a provisioning call timed out. No clock ends these: the platform does not know whether the build made a machine with the address on it, and waiting does not tell it. Each row names the job the timeout closed and the customer the address was held for (null for the platform\'s own). `ends_on_a_clock` is false for every row, and says so beside `quarantined_until`, which nothing acts on for these. Other quarantines are not listed; they end on the pool\'s window, or when a held machine is declared empty.',
+        'permission' => 'ipam.view',
+        'response' => $many('AdminQuarantinedAddress'),
+    ],
+    'api.admin.infrastructure.ip_addresses.adopt' => [
+        'tag' => 'Operator',
+        'summary' => 'Keep a timed-out address with the machine that exists',
+        'description' => 'The operator has looked at the provider and the machine the timed-out build made is there, answering on the address. Records the assignment that has been true since the build, for the customer the address was reserved for; `service_id` defaults to the timed-out job\'s service and may be named instead, and `mac_address` is optional. The assignment names no machine, and nothing on the platform can end an assignment that names no machine: an adopted address does not return to the pool. Refuses (409) an address that is not quarantined (`ipam.address_not_quarantined`) and any quarantine that is not a timeout\'s (`ipam.quarantine_not_clearable`). The evidence is required and audited.',
+        'permission' => 'ipam.manage',
+        'body' => ['evidence', 'service_id', 'mac_address'],
+        'response' => $one('AdminAdoptedAddress'),
+    ],
+    'api.admin.infrastructure.ip_addresses.release' => [
+        'tag' => 'Operator',
+        'summary' => 'Return a timed-out address whose machine does not exist',
+        'description' => 'The operator has looked at the provider and the timed-out build made nothing. The address goes back to the pool in the state an elapsed quarantine leaves it in. Its reservation keeps `provisioning_timed_out` as the reason it ended; the by-hand reason, `operator_action`, is recorded in the audit trail. Refuses (409) an address that is not quarantined (`ipam.address_not_quarantined`) and any quarantine that is not a timeout\'s (`ipam.quarantine_not_clearable`). The evidence is required and audited.',
+        'permission' => 'ipam.manage',
+        'body' => ['evidence'],
+        'response' => $one('AdminReleasedAddress'),
     ],
     'api.admin.infrastructure.hosting_nodes.store' => [
         'tag' => 'Operator',
@@ -1957,6 +2001,56 @@ return [
         'description' => 'Deactivated, never deleted: machines already built point at the row, and "which image is this server running?" is the first question asked when a rebuild goes wrong. Placement and the customer reinstall list both filter on the same flag, so one call removes it from both.',
         'permission' => 'infrastructure.manage',
         'response' => $one('VmTemplate'),
+    ],
+    'api.admin.infrastructure.nodes.status' => [
+        'tag' => 'Operator',
+        'summary' => 'Put a hypervisor node into service, drain it, or take it out',
+        'description' => 'A node the reconcile sweep discovers is recorded in `maintenance`: discovery is not authorisation. This is the operator saying it is cabled, patched and monitored and may take customers (`active`), should take no new ones (`draining`), or is out (`maintenance`). `offline` is refused: nothing in this build writes or reads it as distinct from `maintenance`, and a node set to it by hand would stay there with nothing to bring it back but this route. The reason is required and audited. Placement still asks for a node that is healthy as well as active; health is the sweep\'s.',
+        'permission' => 'node.maintenance',
+        'body' => ['status', 'reason'],
+        'response' => $one('AdminComputeNodeStatus'),
+    ],
+    'api.admin.infrastructure.os_install_profiles.index' => [
+        'tag' => 'Operator',
+        'summary' => 'The answer files a Dedicated build installs from',
+        'description' => 'Withdrawn profiles are listed with `is_active: false`. The template is not returned, only its SHA-256, and of the defaults only their keys: a default may legitimately be a password hash.',
+        'permission' => 'infrastructure.view',
+        'response' => ['envelope' => 'list', 'schema' => 'AdminOsInstallProfile'],
+    ],
+    'api.admin.infrastructure.os_install_profiles.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Record an OS install profile',
+        'description' => <<<'TEXT'
+        The unattended-install recipe a Dedicated build renders and serves to
+        the machine: an installer (`autoinstall`, `preseed` or `kickstart`), a
+        template with `{{ name }}` placeholders, and defaults for them.
+
+        A slug is written once; a corrected recipe is a new profile, and the
+        old one is withdrawn rather than edited, so a machine keeps pointing at
+        what it was built with. The audit entry records the template's
+        SHA-256.
+
+        A build passes `hostname`, `ipv4_address`, `ipv4_prefix_length` and
+        `ipv4_gateway` (the gateway is omitted for an address from a subnet
+        registered without one). A template naming any other placeholder
+        without a default is refused (422
+        `infrastructure.install_profile_incomplete`), because no order-driven
+        build could fill it. A default for `hostname`, `ipv4_address` or
+        `ipv4_prefix_length` is refused (422
+        `infrastructure.install_profile_default_not_allowed`): those are the
+        platform's alone. A default `ipv4_gateway` is allowed, and applies to
+        an address from a subnet registered without a gateway.
+        TEXT,
+        'permission' => 'dedicated.manage',
+        'body' => ['slug', 'name', 'os_family', 'os_version', 'installer', 'template', 'defaults'],
+        'response' => $one('AdminOsInstallProfile', 201),
+    ],
+    'api.admin.infrastructure.os_install_profiles.withdraw' => [
+        'tag' => 'Operator',
+        'summary' => 'Stop installing from a profile',
+        'description' => 'Deactivated, never deleted. The renderer refuses an inactive profile at render time, so a build queued before the withdrawal stops using it too. Withdrawing a withdrawn profile changes nothing and is not audited again.',
+        'permission' => 'dedicated.manage',
+        'response' => $one('AdminOsInstallProfile'),
     ],
     'api.admin.infrastructure.profiles.index' => [
         'tag' => 'Operator',

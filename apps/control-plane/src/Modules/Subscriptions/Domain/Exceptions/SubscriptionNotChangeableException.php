@@ -40,7 +40,7 @@ final class SubscriptionNotChangeableException extends DomainException
     public static function becauseUnitCountIsUnknown(string $subscriptionId): self
     {
         $exception = new self(sprintf(
-            'Subscription %s does not bill a whole multiple of its plan price, so the number of units to move onto the new plan must be supplied explicitly.',
+            'Subscription %s does not bill a whole multiple of its plan price, so the number of units it holds cannot be derived and it cannot be moved onto another plan until an operator corrects it.',
             $subscriptionId,
         ));
 

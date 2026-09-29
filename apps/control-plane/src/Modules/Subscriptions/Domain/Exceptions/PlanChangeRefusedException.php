@@ -40,7 +40,7 @@ final class PlanChangeRefusedException extends DomainException
                 static fn (PlanChangeRefusal $refusal): string => $refusal->value,
                 $refusals,
             )),
-        ]);
+        ])->publishing('refusals');
     }
 
     public function errorCode(): string

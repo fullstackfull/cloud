@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Architecture;
 
+use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Routing\Route as RoutingRoute;
 use Illuminate\Support\Facades\Route;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
@@ -19,6 +20,8 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use PHPUnit\Framework\Attributes\Test;
+use Spatie\Permission\Middleware\PermissionMiddleware;
+use Tests\Support\ReadsTheMiddlewareARouteRuns;
 use Tests\TestCase;
 
 /**
@@ -53,9 +56,20 @@ use Tests\TestCase;
  *
  * The parent column is the other half. A writer whose parent has no writer is
  * exactly what was wrong, and it is invisible unless the chain is asserted.
+ *
+ * The two guard tests below read, for each route, the middleware the router
+ * runs (ReadsTheMiddlewareARouteRuns — Router::gatherRouteMiddleware():
+ * aliases resolved to classes with their parameters, `withoutMiddleware()`
+ * exclusions removed): a permission is an entry whose class is spatie's
+ * PermissionMiddleware, authentication is the entry `Authenticate:sanctum`.
+ * They used to read Route::gatherMiddleware(), which kept a guard that
+ * `->withoutMiddleware(...)` had removed (the OB5-2 class, re-audit of round
+ * four).
  */
 final class EveryConfigurableThingHasAWayToConfigureItTest extends TestCase
 {
+    use ReadsTheMiddlewareARouteRuns;
+
     /**
      * Object => [route name that creates it, the class whose row it needs
      * first, or null for the root of the chain].
@@ -169,18 +183,11 @@ final class EveryConfigurableThingHasAWayToConfigureItTest extends TestCase
                 continue;
             }
 
-            $middleware = $route->gatherMiddleware();
-
-            $guarded = array_filter(
-                $middleware,
-                static fn (mixed $m): bool => is_string($m) && str_starts_with($m, 'permission:'),
-            );
-
-            if ($guarded === []) {
+            if ($this->parametersOf($route, PermissionMiddleware::class) === []) {
                 $unguarded[] = class_basename($model).' ('.$routeName.')';
             }
 
-            if (! in_array('auth:sanctum', $middleware, true)) {
+            if (! in_array(Authenticate::class.':sanctum', $this->middlewareTheRouteRuns($route), true)) {
                 $unguarded[] = class_basename($model).' is not behind authentication';
             }
         }
@@ -206,9 +213,9 @@ final class EveryConfigurableThingHasAWayToConfigureItTest extends TestCase
          */
         $roleRoutes = array_values(array_filter(
             Route::getRoutes()->getRoutes(),
-            static fn (RoutingRoute $route): bool => in_array(
-                'permission:'.Permission::RoleManage->value,
-                $route->gatherMiddleware(),
+            fn (RoutingRoute $route): bool => in_array(
+                PermissionMiddleware::class.':'.Permission::RoleManage->value,
+                $this->middlewareTheRouteRuns($route),
                 true,
             ),
         ));
@@ -222,8 +229,8 @@ final class EveryConfigurableThingHasAWayToConfigureItTest extends TestCase
 
         foreach ($roleRoutes as $route) {
             $this->assertContains(
-                'auth:sanctum',
-                $route->gatherMiddleware(),
+                Authenticate::class.':sanctum',
+                $this->middlewareTheRouteRuns($route),
                 $route->uri().' manages roles without requiring a login.',
             );
 

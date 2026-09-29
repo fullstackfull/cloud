@@ -80,6 +80,9 @@ final class CustomerDedicatedServers
             // status filter already excludes `retired`; a row carrying a
             // retirement date and some other status is a data problem, and the
             // customer surface is not where it should first become visible.
+            // Inert today: nothing in production writes the date, so the
+            // status filter is the one doing the work (DedicatedServerStatus
+            // says what changes when something does).
             ->whereNull('dedicated_servers.retired_at');
     }
 }

@@ -13,6 +13,13 @@ namespace Lynomia\Modules\Ipam\Domain\Enums;
  *          └───────────────────┘                 ↓
  *          └──── quarantine window expires ── quarantined
  *
+ * A timeout's quarantine never takes the bottom edge: no window ends it,
+ * because time does not tell anybody whether the timed-out build made a
+ * machine. An operator who has looked ends it instead, by one of two edges
+ * the drawing leaves out — quarantined → assigned when the machine exists
+ * (IpAllocator::adoptQuarantinedAddress()), quarantined → available when it
+ * does not (IpAllocator::releaseQuarantinedAddress()).
+ *
  * `unavailable` is off to one side and has no incoming transition from the
  * allocator: it is stamped at seed time on the addresses that are not hosts
  * (network, broadcast, gateway) and on anything an operator has taken out of

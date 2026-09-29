@@ -254,6 +254,12 @@ class DedicatedServer extends Model
      * being sold a decommissioned machine, and a belt-and-braces predicate is
      * cheaper than that conversation.
      *
+     * It is also inert. Nothing in production writes `retired_at` — retiring
+     * a machine sets its status alone — so nothing the platform does can
+     * produce a row this clause would exclude, and the status filter is the
+     * one doing the work.
+     * {@see DedicatedServerStatus} says what changes when something does.
+     *
      * @param  Builder<static>  $query
      * @return Builder<static>
      */

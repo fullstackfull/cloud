@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Dedicated\Infrastructure;
 
+use Illuminate\Contracts\Foundation\Application;
 use Lynomia\Modules\Dedicated\Domain\Contracts\DedicatedProvider;
 use Lynomia\Modules\Dedicated\Domain\Enums\BmcProtocol;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\BmcNotConfiguredException;
@@ -13,6 +14,8 @@ use Lynomia\Modules\Dedicated\Infrastructure\Providers\FakeDedicatedProvider;
 use Lynomia\Modules\Dedicated\Infrastructure\Providers\IloDedicatedProvider;
 use Lynomia\Modules\Dedicated\Infrastructure\Providers\IpmiDedicatedProvider;
 use Lynomia\Modules\Dedicated\Infrastructure\Providers\RedfishDedicatedProvider;
+use Lynomia\Modules\Shared\Domain\Exceptions\EndpointRefused;
+use Lynomia\Modules\Shared\Domain\Services\EndpointPolicy;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 
 /**
@@ -33,6 +36,16 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * Instances are memoised per endpoint: an inventory sync makes several calls
  * against one controller, and rebuilding the HTTP stack for each would be pure
  * waste on a device whose entire CPU is slower than a phone's.
+ *
+ * The row's address is asked about again before a connection is built (F-29).
+ * `RecordBmcEndpoint` asks when an operator writes it, and that is the only
+ * road that did: a row from a seeder, an import, SQL, or from before the
+ * policy refused what it refuses now was dialled with the machine's
+ * credential. The memo above is what bounds the cost — one check per endpoint
+ * per factory — and for a row that holds a hostname the check resolves it,
+ * so a power request on such a row resolves the name inside the request, and
+ * a resolver that has no answer turns the request into a refusal.
+ * docs/security.md says so where an operator will read it.
  */
 final class DedicatedProviderFactory
 {
@@ -51,6 +64,8 @@ final class DedicatedProviderFactory
 
     public function __construct(
         private readonly SecretRedactor $redactor,
+        private readonly EndpointPolicy $endpoints,
+        private readonly Application $app,
     ) {}
 
     /**
@@ -102,6 +117,20 @@ final class DedicatedProviderFactory
 
         if (trim($endpoint->address) === '') {
             throw BmcNotConfiguredException::missingAddress($endpointId);
+        }
+
+        /*
+         * The address column as it stands, which is the thing that is dialled;
+         * the port is a separate integer column. A refusal leaves as the
+         * exception this factory already raises for a row it cannot build a
+         * connection from, naming the endpoint id and not the address, so it
+         * takes the road a missing credential already takes — including the
+         * power action's translation into a sentence a customer may read.
+         */
+        try {
+            $this->endpoints->assertMachineAddress($endpoint->address, production: $this->app->environment('production'));
+        } catch (EndpointRefused $refused) {
+            throw BmcNotConfiguredException::addressRefused($endpointId, $refused);
         }
 
         $reference = $endpoint->credentialsReference();

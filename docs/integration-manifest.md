@@ -1,3 +1,12 @@
+> **SUPERSEDED — READ THIS FIRST.** Every `remediation/f*` branch this
+> manifest names was lost with the container that held it, before it was ever
+> pushed. `validate-integration-manifest.py` therefore fails on this tree by
+> design ("no remediation/f* branch has any commit") and is right to. Round
+> two's fixes were rebuilt from `docs/round-2-remediation-ledger.md` onto
+> `rebuild/fNN` branches and merged; `docs/round-2-rebuild-progress.md` is the
+> manifest of what was integrated, with each finding's rebuild tip. This file is
+> kept verbatim as the record of the lost integration.
+
 # The integration manifest, computed rather than remembered
 
 **Taken at `b9f72fb` on `claude/relaxed-turing-nh8ybf`. Recompute before you

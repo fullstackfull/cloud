@@ -19,9 +19,35 @@ return [
     'provider' => env('DEDICATED_PROVIDER'),
 
     'bmc' => [
+        // Both timeouts bound how long a power request can honestly hold its
+        // claim, and `power.claim_lease_minutes` below is sized against them.
         'timeout_seconds' => (int) env('REDFISH_TIMEOUT_SECONDS', 60),
         'verify_tls' => (bool) env('REDFISH_VERIFY_TLS', true),
         'ipmi_timeout_seconds' => (int) env('IPMI_TIMEOUT_SECONDS', 60),
+    ],
+
+    /*
+     * How long a power request may hold its claim before the platform gives
+     * up on the process that made it.
+     *
+     * A claim is committed before the management controller is called and
+     * settled after it answers, so a worker that dies in between — a deploy,
+     * an OOM kill — leaves a row nothing else would ever settle. Past this
+     * lease the row is settled as indeterminate, never released: see
+     * PowerClaimLease for why that is the only safe answer.
+     *
+     * Fifteen minutes, sized against the controller timeouts above rather
+     * than chosen: a request makes at most two controller calls (a `cycle`
+     * reads the chassis, then resets it), each bounded at 60 seconds by
+     * default, so the longest honest window is about two minutes and the
+     * lease is roughly seven times that. Nothing checks the relation. Raising
+     * either timeout towards this figure lets a slow but live request look
+     * abandoned, and a repeat of its key arriving meanwhile is told "we do not
+     * know" about an operation the controller may have accepted. That is a
+     * wrong answer, and never a second instruction to the chassis.
+     */
+    'power' => [
+        'claim_lease_minutes' => (int) env('DEDICATED_POWER_CLAIM_LEASE_MINUTES', 15),
     ],
 
     /*

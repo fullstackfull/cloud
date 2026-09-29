@@ -44,6 +44,14 @@ Released addresses therefore sit in `quarantined` for a configurable period befo
 returning to `available`. An address released because of abuse is quarantined for longer,
 and is flagged so an operator sees why.
 
+One kind of release waits for a person before that period starts. An address released off
+a decommissioned dedicated server is *held* — `quarantined` with no `quarantined_until` —
+because the machine is still in the rack with the address configured on its disks. Its
+clock starts only when an operator returns the machine to stock or retires it.
+`php artisan ipam:capacity` counts the held addresses in each pool and lists the
+longest-waiting of them with the machine each is waiting for. See
+`docs/runbooks/ip-exhaustion.md`.
+
 ## Allocation must be transactional
 
 The failure this design exists to prevent: two provisioning jobs for two different
@@ -69,6 +77,89 @@ succeed.
 
 The reservation is written in the same transaction as the state change, so there is no
 window in which an address is marked reserved but nothing records why.
+
+## A registered block is one the allocator can hand out
+
+The allocator hands out `ip_addresses` rows, not subnets. Registering an IPv4 block through
+`POST /api/admin/infrastructure/ip-pools/{pool}/subnets` therefore expands it into one row
+per address (`SeedSubnetAddresses`) in the same transaction as the subnet row, after the
+overlap check below: the network, broadcast and gateway addresses, and any address named in
+`reserved_addresses`, are written `unavailable`; every other address is `available`. The
+answer carries `allocatable_addresses`, and so does the `infrastructure.subnet.registered`
+audit entry.
+
+Until this was done (F-02) the route wrote the subnet and no rows, and a block an operator
+registered was one `IpAllocator::reserve()` refused as exhausted.
+
+Four cases are handled differently, and each says so:
+
+- **IPv6** is registered without rows (`allocatable_addresses: 0`): it is delegated as a
+  prefix per service, never expanded.
+- **Held space** — `"allocatable": false` — records a block, typically an aggregate, so
+  that nothing inside it can be registered elsewhere, and writes no rows.
+- **An IPv4 block wider than a /16** registered for allocation is refused with
+  `422 infrastructure.subnet_too_wide_to_allocate_from`. Register the pieces to allocate
+  from instead. Held space is overlap-checked like any block, so an aggregate registered as
+  held space cannot then have pieces registered inside it.
+
+- **A block a customer may be given an address from** — registered for allocation in a pool
+  whose scope serves customers — must name a network a customer machine may be attached to
+  (active, customer-facing, not a platform segment), or it is refused with
+  `422 infrastructure.subnet_has_no_customer_network`. No route attaches a network to a block
+  once it is registered, and a VPS build is never given an address on no such segment: it
+  reserves only from subnets whose network can carry a customer machine, so a pool holding
+  only such blocks fails every build as capacity (`ipam.pool_exhausted`) until it goes to
+  review (`vps.network_not_attachable` is left for a network that changed between the
+  reservation and the build). Checkout refuses to sell a VPS onto such a pool
+  (`checkout.not_deliverable`, asked through `IpAllocator::holdsACustomerAttachableHost`).
+  The bridge is not required at registration (a dedicated server is not attached by one);
+  once an active subnet is on a network, its bridge cannot be cleared
+  (`409 infrastructure.still_in_use`). Held space, IPv6 and a management pool's blocks need none.
+
+- **A block registered without a gateway** is accepted: a dedicated server's install profile
+  can carry a default route of its own (see [dedicated.md](dedicated.md)). A VPS cannot — its
+  cloud-init default route is the block's gateway and nothing else — so for a VPS an address
+  in such a block is not one it can be given: checkout refuses a VPS plan whose pool holds no
+  active IPv4 subnet with a gateway holding a host address, `mapping.network` does not count
+  it, the build's reservation passes it over, and a build that meets one anyway (the row
+  changed after the reservation) is refused permanently with `vps.subnet_has_no_gateway`
+  rather than built with `gw=` empty; a reinstall of a machine in one is refused with
+  `vps.reinstall_gateway_missing`. No route changes a registered block's gateway.
+
+`infra:preflight`'s `mapping.network` passes only when the active pools hold at least one
+address the allocator could give a customer machine and a build could attach it at
+(`IpAllocator::customerAttachableCount`: in a subnet whose network is active, customer-facing
+and has a bridge — `Network::canCarryACustomerMachine()`, the rule the build refuses by — and
+that names a gateway, `Subnet::hasGateway()`). A pass names how many allocatable addresses it
+left out for being on no such network or in a block with no gateway. A VPS build reserves
+from exactly the counted subnets (`IpAllocator::reserve(..., attachableOnly: true)`), so it is
+never handed one of the left-out addresses; when only those remain it waits on
+`ipam.pool_exhausted`, whose sentence says it counted only addresses on such a network, in a
+block with a gateway.
+
+## Blocks in one realm never overlap
+
+Everything above is keyed on the `ip_addresses` row, and none of it can see that two rows
+under two overlapping subnets hold the same address *string*. `203.0.113.0/24` in one pool
+and `203.0.113.0/25` in another become two rows each holding `203.0.113.10`; every lock and
+unique index is satisfied, and two customers are handed one address.
+
+So the only place that can refuse it is where a block is registered
+(`RegisterSubnet`, behind `POST /api/admin/infrastructure/ip-pools/{pool}/subnets`). It
+compares parsed blocks, under one platform-wide advisory lock, and refuses an overlap with
+`422 infrastructure.subnet_overlaps`, naming the block in the way, its pool and its
+datacenter, when the two are in one realm:
+
+- **the same datacenter, always**, whatever the space;
+- **any two datacenters, when either block is not wholly inside space designated for
+  reuse** — RFC 1918, RFC 6598 shared space, link-local, loopback, and IPv6 `fd00::/8`
+  and `fe80::/64`. Anything else, documentation space included, is unique in the world
+  and so unique on the platform.
+
+The same RFC 1918 block in two datacenters is accepted: that is a normal estate. The
+pool's `scope` is not consulted — the label is what the estate believes, and the address
+is what the world is. Inactive subnets still count, because deactivating a subnet stops
+allocation from it without releasing what it already handed out.
 
 ## Reservations expire
 

@@ -2,8 +2,12 @@
 
 ## What you are seeing
 
-`DomainOperationsStuck`, or domain operations sitting in `running` /
-`awaiting_registry`.
+Domain operations sitting in `running` / `awaiting_registry`, or in
+`indeterminate` / `needs_review`, on the operator portal.
+
+No alert fires for this, so nothing will page you. `lynomia_domain_operations_total`
+is exported, by disposition — `in_flight`, `needs_attention`, `failed` — and no
+rule reads it. A registrar that stops answering is found by somebody looking.
 
 ## What it means
 

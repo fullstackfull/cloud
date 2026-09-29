@@ -49,6 +49,32 @@ final class RoleChangeRefusedException extends DomainException
     }
 
     /**
+     * The mirror of the grant rule: authority is not taken away by somebody
+     * who does not hold it either. Otherwise a delegate holding `role.manage`
+     * demotes a super admin simply by naming a smaller set.
+     */
+    public static function becauseTheRoleIsNotYoursToRemove(string $role): self
+    {
+        $exception = new self('You cannot remove a role you do not hold yourself.');
+        $exception->withContext(['role' => $role]);
+
+        return $exception->as('rbac.role_not_yours_to_remove');
+    }
+
+    /**
+     * The same rule for a role's permission list: the list is replaced as a
+     * whole, so checking only what the new list adds let a delegate empty a
+     * role of permissions they could never have granted.
+     */
+    public static function becauseThePermissionIsNotYoursToRemove(string $permission): self
+    {
+        $exception = new self('You cannot remove a permission you do not hold yourself.');
+        $exception->withContext(['permission' => $permission]);
+
+        return $exception->as('rbac.permission_not_yours_to_remove');
+    }
+
+    /**
      * Super Admin is granted by a Gate::before bypass, not by the permission
      * rows attached to it. Letting somebody edit that list would let them
      * believe they had restricted it.
@@ -59,6 +85,22 @@ final class RoleChangeRefusedException extends DomainException
         $exception->withContext(['role' => $role]);
 
         return $exception->as('rbac.role_is_protected');
+    }
+
+    /**
+     * `customer` is the baseline every customer login holds, so its list is
+     * a grant to the whole customer base at once, including logins that do
+     * not exist yet. It is fixed by the platform (Role::defaultPermissions()
+     * and the seeder) and edited by nobody at runtime, super admin included.
+     */
+    public static function becauseItIsTheCustomerBaseline(string $role): self
+    {
+        $exception = new self(
+            'The customer role is held by every customer login; its permissions are set by the platform and cannot be edited here.'
+        );
+        $exception->withContext(['role' => $role]);
+
+        return $exception->as('rbac.role_is_the_customer_baseline');
     }
 
     /**

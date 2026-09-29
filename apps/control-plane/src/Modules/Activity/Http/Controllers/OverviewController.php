@@ -45,7 +45,8 @@ final class OverviewController
         $this->authoriseWithinAccount($request, 'service.view');
 
         $customer = $this->actingCustomer->get();
-        $overview = $this->overview->for($customer);
+        $viewer = $request->user()?->getAuthIdentifier();
+        $overview = $this->overview->for($customer, is_string($viewer) ? $viewer : null);
 
         return response()->json([
             'data' => [

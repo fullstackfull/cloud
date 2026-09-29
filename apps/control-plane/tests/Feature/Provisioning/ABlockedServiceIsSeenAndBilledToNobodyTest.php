@@ -23,6 +23,7 @@ use Lynomia\Modules\Provisioning\Application\Actions\ProvisionOrderedService;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use Lynomia\Modules\Subscriptions\Application\Actions\RenewDueSubscriptions;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
@@ -152,6 +153,80 @@ final class ABlockedServiceIsSeenAndBilledToNobodyTest extends ServiceApiTestCas
             $delivered->refresh()->current_period_end->equalTo(CarbonImmutable::parse('2026-07-01 00:00:00')),
             'The delivered service must renew exactly as it did before this rule existed.',
         );
+    }
+
+    #[Test]
+    public function a_failed_never_delivered_service_is_not_billed_for_a_second_period(): void
+    {
+        /*
+         * F-07's other half, as the re-audit after round two measured it: a
+         * build that failed left the service FAILED, and FAILED renewed —
+         * `considered=1 renewed=1`. A FAILED service holds nothing
+         * (`holdsResources()` is false) and was never delivered: the state
+         * machine reaches FAILED only from PROVISIONING, never from ACTIVE.
+         * Whatever an operator later does about it — retry, refund, end it —
+         * a second period is not owed for it in the meantime.
+         */
+        [$failedCustomer] = $this->accountWithOwner();
+        [$deliveredCustomer] = $this->accountWithOwner();
+
+        $failed = $this->subscriptionFor($failedCustomer);
+        $delivered = $this->subscriptionFor($deliveredCustomer);
+
+        $this->serviceFor($failedCustomer, [
+            'subscription_id' => $failed->getKey(),
+            'status' => ServiceStatus::Failed,
+            'activated_at' => null,
+        ]);
+
+        $this->serviceFor($deliveredCustomer, [
+            'subscription_id' => $delivered->getKey(),
+            'status' => ServiceStatus::Active,
+            'activated_at' => now(),
+        ]);
+
+        $this->travelTo(CarbonImmutable::parse('2026-06-01 00:00:00'));
+
+        $sweep = app(RenewDueSubscriptions::class)->execute();
+
+        $this->assertSame(2, $sweep->considered);
+        $this->assertSame(1, $sweep->renewed);
+        $this->assertSame(1, $sweep->skipped);
+        $this->assertSame(0, $sweep->failed);
+
+        $this->assertSame($delivered->getKey(), Invoice::query()->sole()->subscription_id);
+        $this->assertTrue(
+            $failed->refresh()->current_period_end->equalTo(CarbonImmutable::parse('2026-06-01 00:00:00')),
+            'The failed service\'s subscription advanced a period nobody was invoiced for.',
+        );
+    }
+
+    #[Test]
+    public function a_service_that_has_ended_is_not_billed_for_a_second_period(): void
+    {
+        /*
+         * I-1's backstop. Ending a service now ends its subscription, but a
+         * row ended before that existed, or by a path that could not reach
+         * the subscription, must not keep being invoiced: the service is gone.
+         */
+        [$customer] = $this->accountWithOwner();
+        $subscription = $this->subscriptionFor($customer);
+
+        $this->serviceFor($customer, [
+            'subscription_id' => $subscription->getKey(),
+            'status' => ServiceStatus::Terminated,
+            'activated_at' => now()->subMonth(),
+            'terminated_at' => now(),
+        ]);
+
+        $this->travelTo(CarbonImmutable::parse('2026-06-01 00:00:00'));
+
+        $sweep = app(RenewDueSubscriptions::class)->execute();
+
+        $this->assertSame(1, $sweep->considered);
+        $this->assertSame(0, $sweep->renewed);
+        $this->assertSame(1, $sweep->skipped);
+        $this->assertSame(0, Invoice::query()->count());
     }
 
     #[Test]
@@ -346,6 +421,10 @@ final class ABlockedServiceIsSeenAndBilledToNobodyTest extends ServiceApiTestCas
         if ($withPackage) {
             HostingPackage::factory()->create(['plan_id' => $plan->getKey()]);
         }
+
+        // Checkout asks the hosting scheduler whether any node could take the
+        // package (F-07), so a sellable plan needs one.
+        HostingNode::factory()->create();
 
         return $plan->fresh(['prices', 'product']);
     }

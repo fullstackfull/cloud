@@ -21,6 +21,9 @@ enum AuditAction: string
     // Money.
     case InvoiceVoided = 'invoice.voided';
     case PaymentRefunded = 'payment.refunded';
+    // A refund the provider reported failed or cancelled after reporting it
+    // succeeded: un-booked, and the money held again (SettleRefundFromProvider).
+    case RefundReversedByProvider = 'payment.refund_reversed';
 
     /*
      * What the platform sells, and for how much.
@@ -129,6 +132,15 @@ enum AuditAction: string
      * which is why it is an assertion about the world as well as an act.
      */
     case ProvisioningIdentityRepointed = 'provisioning.identity_repointed';
+    /*
+     * An address a timed-out build left in quarantine, cleared by a person who
+     * looked at the provider (F-34). Both are assertions about the world:
+     * `adopted` says the machine the build made exists and answers on the
+     * address, and `released` says it demonstrably does not — the one row that
+     * records an address released by hand, since no column does.
+     */
+    case QuarantinedAddressAdopted = 'ipam.quarantined_address.adopted';
+    case QuarantinedAddressReleased = 'ipam.quarantined_address.released';
     case DriftAcknowledged = 'drift.acknowledged';
     case DriftResolved = 'drift.resolved';
     case ReconciliationRequested = 'infrastructure.reconciliation_requested';
@@ -169,6 +181,15 @@ enum AuditAction: string
      */
     case ReinstallConfirmed = 'reinstall.confirmed';
     case ReinstallAbandoned = 'reinstall.abandoned';
+
+    /**
+     * An operator's verdict on a restore or a verification of a backup that
+     * the platform lost track of (F-09): `confirmed` says the operation
+     * completed, `failed` says it did not. A person read the provider and
+     * said so, and the row leaves review on the strength of it.
+     */
+    case BackupOperationConfirmed = 'backup.operation_confirmed';
+    case BackupOperationFailed = 'backup.operation_failed';
 
     /**
      * Somebody turned an optional message off, or back on.
@@ -344,6 +365,13 @@ enum AuditAction: string
     case GpuDeviceRegistered = 'infrastructure.gpu.registered';
     case VmTemplateRecorded = 'infrastructure.template.recorded';
     case VmTemplateWithdrawn = 'infrastructure.template.withdrawn';
+    // The answer files a Dedicated build installs from (F-02: nothing but a
+    // factory wrote one, and the build does findOrFail on it).
+    case OsInstallProfileRecorded = 'infrastructure.os_install_profile.recorded';
+    case OsInstallProfileWithdrawn = 'infrastructure.os_install_profile.withdrawn';
+    // A person saying a discovered hypervisor node may take customers, or
+    // may not (F-02: nothing moved a node out of `maintenance`).
+    case ComputeNodeStatusChanged = 'infrastructure.node.status_changed';
     case DesiredStateAssigned = 'infrastructure.desired_state.assigned';
     case DesiredStateCleared = 'infrastructure.desired_state.cleared';
     case PlanComputed = 'infrastructure.plan.computed';
@@ -396,7 +424,9 @@ enum AuditAction: string
             self::OrphanAdopted, self::ProvisioningIdentityRepointed,
             self::DriftResolved, self::DriftAcknowledged,
             self::ReinstallConfirmed, self::ReinstallAbandoned,
-            self::DedicatedServerReturnedToStock, self::DedicatedServerRetired => true,
+            self::BackupOperationConfirmed, self::BackupOperationFailed,
+            self::DedicatedServerReturnedToStock, self::DedicatedServerRetired,
+            self::QuarantinedAddressAdopted, self::QuarantinedAddressReleased => true,
             default => false,
         };
     }

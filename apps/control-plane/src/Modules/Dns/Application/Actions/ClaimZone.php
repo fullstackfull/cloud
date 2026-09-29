@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Dns\Application\Actions;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Dns\Application\Jobs\PublishZone;
+use Lynomia\Modules\Dns\Application\Services\ConfiguredReservedZones;
 use Lynomia\Modules\Dns\Domain\Enums\DnsState;
 use Lynomia\Modules\Dns\Domain\Exceptions\DnsRefusedException;
 use Lynomia\Modules\Dns\Domain\Exceptions\InvalidDomainNameException;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DomainName;
+use Lynomia\Modules\Dns\Domain\ValueObjects\ReservedZones;
 use Lynomia\Modules\Dns\Infrastructure\DnsProviderFactory;
 use Lynomia\Modules\Dns\Infrastructure\Models\DnsZone;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
@@ -45,6 +48,7 @@ final readonly class ClaimZone
 {
     public function __construct(
         private DnsProviderFactory $providers,
+        private ConfiguredReservedZones $reserved,
     ) {}
 
     /**
@@ -115,26 +119,62 @@ final readonly class ClaimZone
     }
 
     /**
+     * The platform's own names, every parent of one and everything beneath one.
+     *
+     * What is reserved, and why all three directions, is written once, on
+     * {@see ReservedZones}; this is where it is enforced. The list is the one
+     * the estate preflight reports on, read from the same place, so an
+     * operator who is told what is held is told what this refuses.
+     *
+     * A list with an entry that is not a name holds everything: the claim is
+     * refused whatever it names, because the guard cannot tell what the
+     * operator meant to hold (I-3). The claimant's own name has already been
+     * read by then, so a name they did mistype is still answered as theirs.
+     * The refusal is the platform's condition — `dns.zone.unavailable`, 503,
+     * disclosing nothing — and the operator is told here, at error level,
+     * with counts and never the entries, and by the preflight's failure.
+     *
+     * In production, a list that reads but holds too little is refused the
+     * same way: nothing reserved at all, or a host the platform answers on
+     * whose names beside it any account could claim
+     * ({@see ReservedZones::holdsTooLittle()} — exactly the states the estate
+     * preflight blocks a production estate on). The preflight used to be the
+     * only thing that knew, and nothing consumed its verdict: a production
+     * estate on the shipped empty list took `www.` and `mail.` beside its own
+     * control plane from any account (F-26). The log line names the
+     * variables the hosts came from and counts the entries; it never names a
+     * host or an entry. Outside production nothing changes — a rehearsal is
+     * warned by the preflight, not stopped.
+     *
      * @throws DnsRefusedException
      */
     private function assertNotReserved(DomainName $domain): void
     {
-        /** @var list<string> $reserved */
-        $reserved = (array) config('dns.reserved_zones', []);
+        $reserved = $this->reserved->read();
+        $malformed = $reserved->malformed();
 
-        foreach ($reserved as $name) {
-            $held = DomainName::fromString($name);
+        if ($malformed > 0) {
+            Log::error('A zone claim was refused because DNS_RESERVED_ZONES holds an entry that is not a domain name; every claim by every account is refused until it is corrected.', [
+                'malformed_entries' => $malformed,
+                'entries' => count($reserved->configured()),
+                'preflight_finding' => 'dns.reserved_zones',
+            ]);
 
-            /*
-             * Both directions. Claiming the platform's own zone is the obvious
-             * attack; claiming a *parent* of it is the same attack one step
-             * out, and it is the one that gets missed — an account holding
-             * `example.com` can serve `panel.example.com` whatever the platform
-             * thinks it owns.
-             */
-            if ($domain->equals($held) || $held->isWithin($domain)) {
-                throw DnsRefusedException::zoneIsReserved($domain->value());
-            }
+            throw DnsRefusedException::reservationUnreadable();
+        }
+
+        if (app()->isProduction() && $reserved->holdsTooLittle()) {
+            Log::error('A zone claim was refused because this production estate reserves too little of its own names (DNS_RESERVED_ZONES is empty, or a host the platform answers on has claimable names beside it); every claim by every account is refused until it is corrected.', [
+                'entries' => count($reserved->configured()),
+                'derived' => array_keys($reserved->derived()),
+                'preflight_finding' => 'dns.reserved_zones',
+            ]);
+
+            throw DnsRefusedException::reservationIncomplete();
+        }
+
+        if ($reserved->protects($domain)) {
+            throw DnsRefusedException::zoneIsReserved($domain->value());
         }
     }
 

@@ -66,4 +66,58 @@ enum PlanChangeRefusal: string
      * rather than reconciled.
      */
     case PriceNotForPlan = 'price_not_for_plan';
+
+    /**
+     * An invoice for this subscription is still open.
+     *
+     * Most often the one the last upgrade left behind. A plan move is priced
+     * from the plan the subscription is on, and while that plan's money is
+     * unpaid a second move would be priced from money that never arrived: the
+     * re-audit flapped small -> large -> small three times, paid nothing, and
+     * was left with 162.000 KWD of wallet credit. The customer settles what
+     * they owe on the subscription, or has it voided, and the change is
+     * theirs to make again.
+     */
+    case InvoiceOutstanding = 'invoice_outstanding';
+
+    /**
+     * Every unit the plan has is already held (`stock_limit`).
+     *
+     * The same rule a checkout obeys, under the same lock: a plan change was
+     * a second way onto a finite plan that never asked.
+     */
+    case OutOfStock = 'out_of_stock';
+
+    /**
+     * The change could not be delivered: what the provider half needs for the
+     * target plan is not there (PlanChangeDelivery) - a hosting plan with no
+     * single package on sale, or a change of shape nothing can make.
+     *
+     * The rule checkout applies to the same plan (`checkout.not_deliverable`),
+     * on the plan-change path. Without it the upgrade was accepted, paid and
+     * billed at the new price for ever, and nothing reached the panel (F-07).
+     * The customer is told the plan is unavailable, and nothing about why.
+     */
+    case NotDeliverable = 'not_deliverable';
+
+    /**
+     * The last change was paid for and is still being delivered: its
+     * invoice is paid and its settlement has not yet been heard
+     * (PlanChangeDelivery::aPaidChangeAwaitsDelivery()). A change made in
+     * that window used to be accepted, and made the paid one look superseded
+     * when the subscription ended (X1).
+     */
+    case PreviousChangePending = 'previous_change_pending';
+
+    /** The account already holds as many of this plan as it may (`per_customer_limit`). */
+    case PerCustomerLimit = 'per_customer_limit';
+
+    /**
+     * How many units the subscription holds cannot be derived from what it
+     * bills - a price the catalogue has since moved off, which the recurring
+     * amount no longer divides by. A plan change keeps the unit count and the
+     * request cannot name one, so the change waits for an operator to correct
+     * the subscription rather than guessing at one unit and under-billing.
+     */
+    case UnitCountUnknown = 'unit_count_unknown';
 }

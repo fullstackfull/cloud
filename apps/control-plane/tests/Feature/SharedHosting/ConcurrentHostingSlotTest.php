@@ -14,6 +14,7 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\TestDatabaseGuard;
 use Tests\TestCase;
 
 /**
@@ -236,6 +237,8 @@ final class ConcurrentHostingSlotTest extends TestCase
      */
     private function wipe(): void
     {
+        TestDatabaseGuard::refuseToEmpty(DB::connection((string) config('database.default')));
+
         foreach ([
             'hosting_accounts',
             'hosting_nodes',

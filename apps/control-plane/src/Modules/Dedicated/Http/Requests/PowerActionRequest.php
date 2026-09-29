@@ -46,6 +46,11 @@ use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedPowerAction;
  * it is required here for the same reason it is required on the reinstall
  * route: an operation that cannot be safely repeated must be something the
  * caller can identify.
+ *
+ * The promise holds for a request that died mid-call too. Its claim is
+ * answered as indeterminate once its lease lapses, so a caller repeating the
+ * key gets an answer rather than a refusal for ever — and never a second
+ * instruction to the chassis.
  */
 final class PowerActionRequest extends FormRequest
 {

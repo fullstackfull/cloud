@@ -22,6 +22,7 @@ use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
 use Spatie\Permission\Middleware\PermissionMiddleware;
 use Tests\Support\BuysSharedHosting;
+use Tests\Support\StaffHoldingExactly;
 use Tests\TestCase;
 
 /**
@@ -52,6 +53,7 @@ final class EndingAHostingAccountThroughEitherDoorTest extends TestCase
 {
     use BuysSharedHosting;
     use RefreshDatabase;
+    use StaffHoldingExactly;
 
     private const string NONE = '(none)';
 
@@ -313,8 +315,8 @@ final class EndingAHostingAccountThroughEitherDoorTest extends TestCase
     {
         /*
          * Granted directly rather than through a seeded role. The default seed
-         * gives both permissions to one role, so the weaker principals need a
-         * custom role — and custom roles are creatable.
+         * gives both permissions to one role, and an operator may edit any
+         * staff role's permissions, so the weaker principals are reachable.
          */
         $permissions = match ($who) {
             self::NONE => [],
@@ -324,8 +326,10 @@ final class EndingAHostingAccountThroughEitherDoorTest extends TestCase
             default => throw new RuntimeException('Unknown principal '.$who),
         };
 
-        $user = User::factory()->create();
-        $user->givePermissionTo($permissions);
+        // Through a staff role emptied for the test (StaffHoldingExactly): a
+        // login with no staff role is refused by the /api/admin staff gate
+        // before either permission is read.
+        $user = $this->staffHoldingExactly($permissions);
 
         return $user->fresh() ?? $user;
     }

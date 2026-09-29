@@ -33,14 +33,18 @@ use Throwable;
  * it read as "what the last attempt found", and before this sweep wrote one
  * the finding on a swept job was whatever an EARLIER attempt had written. F-15
  * measured what that costs: an attempt that had found a stranger's machine at
- * its reserved VPS identity left `vps.create_identity_taken` behind; the
- * repoint that finding licenses was taken; the next attempt built under the
- * new identity and its worker died; this sweep moved the job to review
- * without touching `result` — and the old finding licensed a second repoint,
- * and a second machine. The sweep's own code, stamped with the attempt it
- * belongs to, replaces whatever was there. (`RepointReservedIdentity` also
- * refuses a finding from any attempt but the last, independently; either
- * half alone closes that door.)
+ * its reserved VPS identity left `vps.create_identity_taken` behind; instead
+ * of the repoint that finding licensed, the operator had the stranger removed
+ * at the hypervisor and retried; the retry built under the SAME identity and
+ * its worker died; this sweep moved the job to review without touching
+ * `result` — and the old finding, still about the identity the job held,
+ * licensed a repoint off the identity the job's own machine now sat under,
+ * and the next retry built a second machine. The sweep's own code, stamped
+ * with the attempt it belongs to, replaces whatever was there.
+ * (`RepointReservedIdentity` also refuses a finding from any attempt but the
+ * last, independently; either half alone closes that door. A build under a
+ * NEW identity after a repoint is not this door: the old finding is about the
+ * identity the job was moved off, and the repoint refuses it on that alone.)
  */
 final readonly class DetectStaleJobs
 {

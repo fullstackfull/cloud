@@ -12,6 +12,7 @@ use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Dns\Infrastructure\DnsProviderFactory;
 use Lynomia\Modules\Ipam\Infrastructure\ReverseDnsProviderFactory;
 use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
+use Lynomia\Support\Environment\SettleTheApplicationEnvironment;
 use RuntimeException;
 
 /**
@@ -123,18 +124,26 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
      * Whether this process is running as "production" only because nothing said
      * otherwise.
      *
-     * Both halves matter. A missing environment file alone is not enough — a
+     * Every clause matters. A missing environment file alone is not enough — a
      * container may legitimately carry everything in real environment variables
-     * — so APP_ENV must also be absent from the environment before the guard
-     * stands down.
+     * — so APP_ENV must also be absent from the environment, and a cached
+     * configuration counts as configured: a host that ran `config:cache` loads
+     * no environment file at all, and that is the normal shape of a production
+     * deployment. The question is SettleTheApplicationEnvironment's, asked
+     * through it so the two cannot disagree again; they did (OB-3, re-audit of
+     * round three), and a cached production configuration naming fake
+     * providers booted with this guard stood down. The guard adds one clause
+     * of its own: a console `--env=` argument also said something.
      */
     private function productionIsAnUnconfiguredDefault(): bool
     {
-        return ! $this->environmentWasNamed() && ! is_file($this->app->environmentFilePath());
+        return ! $this->environmentWasNamed()
+            && SettleTheApplicationEnvironment::nothingWasConfigured($this->app);
     }
 
     /**
-     * Whether APP_ENV is present in the process environment.
+     * Whether APP_ENV is present in the process environment, or a console
+     * `--env=` argument named the environment.
      *
      * Read from the superglobals and getenv() rather than through `env()`,
      * which this codebase forbids outside config/ for a reason that matters
@@ -144,17 +153,20 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
      * in production, which is the one place it exists for. The question being
      * asked is not "what is the configured environment" (that is
      * `$this->app->isProduction()`, already answered above) but "did anything
-     * out there say so at all".
+     * out there say so at all". A command line that says `--env=production`
+     * (in any casing; see SettleTheApplicationEnvironment) said so.
      */
     private function environmentWasNamed(): bool
     {
-        foreach ([$_SERVER['APP_ENV'] ?? null, $_ENV['APP_ENV'] ?? null, getenv('APP_ENV')] as $value) {
-            if (is_string($value) && $value !== '') {
-                return true;
-            }
+        if (SettleTheApplicationEnvironment::appEnvWasNamed()) {
+            return true;
         }
 
-        return false;
+        $argv = $_SERVER['argv'] ?? null;
+
+        return $this->app->runningInConsole()
+            && is_array($argv)
+            && SettleTheApplicationEnvironment::consoleArgument($argv) !== null;
     }
 
     /**
@@ -174,6 +186,15 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
 
         if (is_file($path)) {
             return '';
+        }
+
+        if ($this->app->configurationIsCached()) {
+            return sprintf(
+                ' The configuration was read from the cache at %s, which says "production"; no environment '
+                .'file is read while it exists. Rebuild it with `php artisan config:cache` from the intended '
+                .'environment, or remove it.',
+                $this->app->getCachedConfigPath(),
+            );
         }
 
         return sprintf(

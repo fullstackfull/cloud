@@ -56,7 +56,9 @@ final class InvalidDnsRecordException extends DomainException
     {
         $exception = new self(sprintf('A %s record needs %s.', $type->value, $expected));
 
-        return $exception->withContext(['type' => $type->value, 'value' => $content, 'expected' => $expected]);
+        return $exception
+            ->withContext(['type' => $type->value, 'value' => $content, 'expected' => $expected])
+            ->publishing('value');
     }
 
     public static function ttlOutOfRange(string $name, int $ttl, int $min, int $max): self

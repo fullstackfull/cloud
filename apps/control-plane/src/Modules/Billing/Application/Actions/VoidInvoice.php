@@ -4,20 +4,40 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Billing\Application\Actions;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
+use Lynomia\Modules\Billing\Domain\Events\InvoiceVoided;
 use Lynomia\Modules\Billing\Domain\Exceptions\PaidInvoiceCannotBeVoidedException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 
 /**
  * Withdraws an invoice that should not have been issued.
  *
- * Voiding is only legal before any money has arrived, and the test is the
+ * Voiding is only legal while the invoice holds no money, and the test is the
  * money rather than the status: an invoice that is still open because it was
  * only half paid has taken a payment, and voiding it would leave that payment
  * attached to a document the platform says never applied. The state machine
  * refuses paid → void on its own; this action refuses the partially paid case
  * the machine cannot see.
+ *
+ * One exception, for an invoice that is still open: money that has already
+ * gone back to the customer against it, by any route - credited to the wallet
+ * against it (a top-up carrying its id), or refunded, a card refund still
+ * pending at the provider included. Such an invoice may be voided once nothing
+ * is left on it: once what it was paid, less everything that went back by
+ * those routes (the parts WhatAnInvoiceStillHolds counts), is nothing. That is a
+ * lapsing plan-change upgrade, or the open invoice of a subscription that has
+ * ended, whose part payment ReturnWhatAnInvoiceStillHolds returns before
+ * voiding it - or whose part payment a refund in flight is already returning,
+ * which the return leaves to that refund (N-1). Should that refund fail at the
+ * provider, what the void invoice then holds again goes to the wallet when the
+ * failure is recorded (IssueRefund, SettleRefundFromProvider: both call
+ * ReturnWhatAnInvoiceStillHolds for a void invoice). With nothing gone back, any
+ * money on the invoice refuses the void as before; and a paid or refunded
+ * invoice is refused for its money whatever went back, before the state
+ * machine refuses the transition.
  *
  * A void invoice keeps its number. Numbers are a series a tax authority may
  * audit, and a gap that turns out to be a withdrawn document is answerable in
@@ -42,7 +62,26 @@ final readonly class VoidInvoice
                 return $locked;
             }
 
-            if ($locked->amountPaid()->isPositive()) {
+            $goneBackMinor = WhatAnInvoiceStillHolds::creditedToTheWalletMinor($locked)
+                + WhatAnInvoiceStillHolds::refundedMinor($locked);
+
+            /*
+             * Measured on the document, not on the captures: a capture that
+             * is attached and not yet settled does not make the invoice
+             * unvoidable - settlement finds it void and hands it to
+             * CompensateUncollectableCapture, which credits what the invoice
+             * still holds of it.
+             */
+            $heldMinor = $locked->amount_paid_minor - $goneBackMinor;
+
+            $tookMoney = $locked->amountPaid()->isPositive();
+
+            // Money on it and none of it gone back is the original rule,
+            // unchanged; a paid or refunded document is refused for its money
+            // first, as it always was.
+            if (($tookMoney && in_array($locked->status, [InvoiceStatus::Paid, InvoiceStatus::Refunded], true))
+                || ($tookMoney && $goneBackMinor === 0)
+                || $heldMinor > 0) {
                 throw PaidInvoiceCannotBeVoidedException::forInvoice(
                     (string) $locked->getKey(),
                     $locked->amountPaid(),
@@ -57,7 +96,26 @@ final readonly class VoidInvoice
                 $locked->save();
             }
 
-            return $this->transitionInvoice->execute($locked, InvoiceStatus::Void)->refresh();
+            $voided = $this->transitionInvoice->execute($locked, InvoiceStatus::Void)->refresh();
+
+            /*
+             * Announced inside this transaction, and heard synchronously. A
+             * voided plan-change invoice undoes the upgrade it billed, and
+             * that has to be one unit with the void: heard after the commit
+             * from a queue, there was a window in which the invoice was void,
+             * nothing was open to refuse a change, and the customer could
+             * step off the unpaid plan and be credited as though it had been
+             * paid (re-audit, B4). A listener that fails rolls the void back
+             * with it.
+             */
+            event(new InvoiceVoided(
+                invoiceId: (string) $voided->getKey(),
+                customerId: (string) $voided->customer_id,
+                subscriptionId: $voided->subscription_id === null ? null : (string) $voided->subscription_id,
+                voidedAt: CarbonImmutable::now(),
+            ));
+
+            return $voided;
         });
     }
 }

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Lynomia\Modules\SharedHosting\Infrastructure\Providers;
 
 use Carbon\CarbonImmutable;
+use Lynomia\Modules\Shared\Domain\Naming\DnsName;
+use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
 use Lynomia\Modules\SharedHosting\Domain\Contracts\HostingProvider;
 use Lynomia\Modules\SharedHosting\Domain\Contracts\WordPressInstaller;
@@ -44,14 +46,39 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
  *    exists so that the one case the sync must refuse to write — a panel that
  *    answers with no numbers at all — can be reproduced deterministically;
  *
- *  - the licence answer is read from the node row rather than always being
- *    "valid". An unlicensed node is a first-class state, and a fake that
- *    always reported a valid licence would leave the entire licensing path
- *    untested;
+ *  - the licence answer is the PANEL's, not the platform's row read back to
+ *    it: valid unless the node's hostname carries LICENCE_LAPSED_MARKER. It
+ *    used to be read from `hosting_nodes.panel_licensed`, which is circular —
+ *    a node an operator has just registered says "unlicensed" because
+ *    nothing has asked the panel yet, the fake repeated it, the sync wrote it
+ *    back, and the node could never become licensed. An unlicensed node is
+ *    still a first-class state, reached by the marker as every other fault;
  *
  *  - it refuses to exist in production. The fake reports accounts as created
  *    without creating them, so in production it would mark services active and
- *    send login details for hosting that is not there.
+ *    send login details for hosting that is not there;
+ *
+ *  - it refuses a credential nobody can log in with: an empty or blank
+ *    password, or the redactor's own placeholder, on an account, a password
+ *    change or a WordPress install. It used to take anything, never looking
+ *    at the one field an account is useless without, and the platform sent
+ *    it both — an account build that read a `password` key nothing wrote, and
+ *    an install that read back an `admin_password` the payload's cast had
+ *    already replaced — with every test on those paths green (F-24). This is
+ *    not a model of a panel: what WHM or DirectAdmin does with an empty
+ *    password has never been established in this repository. It is the
+ *    simulator declining to report success for a request no caller can have
+ *    meant, as the compute simulator declines a resize with nothing to
+ *    change;
+ *
+ *  - for the same reason it refuses an account for a domain no site can have
+ *    — one DnsName does not accept, a bare label, or anything at or under
+ *    `.invalid` or `localhost` (RFC 2606, RFC 6761) — and a contact address
+ *    nobody can receive at. `<username>.hosting.invalid` is the name F-04's
+ *    build used to invent, and this simulator reported it created. `.test`,
+ *    `.example` and `example.com` are accepted by decision: RFC 2606 reserves
+ *    them for testing and documentation, which is what this panel is for.
+ *    See assertNameIsServable().
  */
 final class FakeHostingProvider implements HostingProvider, WordPressInstaller, WordPressStagingProvider
 {
@@ -94,6 +121,28 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
 
     /** A username carrying this reports no measurements at all, as a panel mid-restart does. */
     public const string NO_USAGE_MARKER = 'no-usage';
+
+    /**
+     * A node whose hostname carries this answers that its licence has lapsed.
+     *
+     * Read from the hostname, as listAccounts() reads its node-level markers,
+     * because the licence belongs to the panel on that node and not to any
+     * account. The row's `panel_licensed` is never read: it is what the sync
+     * WRITES from this answer.
+     */
+    public const string LICENCE_LAPSED_MARKER = 'licence-lapsed';
+
+    /**
+     * Top-level names that by definition never name a site on the internet:
+     * `.invalid` never resolves (RFC 2606, RFC 6761 section 6.4) and
+     * `localhost` is the loopback (RFC 6761 section 6.3).
+     *
+     * `test` and `example` are reserved too, and deliberately absent: see the
+     * class docblock.
+     *
+     * @var list<string>
+     */
+    private const array NAMES_NO_SITE_CAN_HAVE = ['invalid', 'localhost'];
 
     /**
      * WordPress installations, keyed by node then domain.
@@ -153,6 +202,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
     public function createAccount(HostingNode $node, CreateAccountRequest $request): HostingAccountResult
     {
         $this->assertNoMarkers($node, $request->username, 'create_account');
+        $this->assertCredentialIsUsable($node, $request->username, $request->password, 'create_account');
+        $this->assertNameIsServable($node, $request->username, $request->primaryDomain, $request->contactEmail);
 
         $this->restore();
 
@@ -258,6 +309,7 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
     public function changePassword(HostingNode $node, string $username, string $password): void
     {
         $this->require($node, $username, 'change_password');
+        $this->assertCredentialIsUsable($node, $username, $password, 'change_password');
 
         // Held by the panel, as a real panel holds it — and only by the panel.
         // Nothing the platform writes can read it back from here; a test that
@@ -367,20 +419,27 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
     public function licenceStatus(HostingNode $node): LicenceStatus
     {
         /*
-         * Read from the node row rather than always answering "valid". The
-         * unlicensed path is a first-class state the platform has to handle —
-         * scheduler exclusion, a permanent failure for that node, an operator
-         * alert — and a fake that always reported a valid licence would leave
-         * every one of those branches unexecuted by the suite.
+         * The panel's own answer, as a real panel gives its vendor's: never
+         * the platform's row read back to it. The row is what
+         * SyncHostingNodeHealth writes FROM this; reading it here made a
+         * freshly registered node (`panel_licensed` false because nothing had
+         * asked yet) unlicensed for ever. The unlicensed path — scheduler
+         * exclusion, a permanent failure for that node, an operator alert —
+         * stays reachable through LICENCE_LAPSED_MARKER.
+         *
+         * Nothing here is a licence: the controlled panel names no product and
+         * has no vendor. "valid" means the simulated panel serves.
          */
+        $lapsed = str_contains(strtolower($node->hostname), self::LICENCE_LAPSED_MARKER);
+
         return new LicenceStatus(
-            valid: $node->panel_licensed,
+            valid: ! $lapsed,
             product: self::NAME,
-            state: $node->licence_status ?? ($node->panel_licensed ? 'active' : 'expired'),
-            expiresAt: $node->panel_licensed ? CarbonImmutable::now()->addYear() : CarbonImmutable::now()->subDay(),
-            detail: $node->panel_licensed
-                ? 'the fake panel reports a licence because the node row says it has one'
-                : 'the node row records no valid licence',
+            state: $lapsed ? 'expired' : 'active',
+            expiresAt: $lapsed ? CarbonImmutable::now()->subDay() : CarbonImmutable::now()->addYear(),
+            detail: $lapsed
+                ? 'the controlled panel reports its licence as lapsed, by design'
+                : 'the controlled panel reports that it serves; it holds no real licence',
         );
     }
 
@@ -427,6 +486,117 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
         }
     }
 
+    /**
+     * Refuse a credential nobody can log in with, and record nothing.
+     *
+     * A refusal, not an unknown outcome: nothing was written, and a caller is
+     * entitled to know it. The credential itself is never quoted back, and a
+     * refused one is not held.
+     *
+     * The two arms are not equally strong, and the difference is worth
+     * keeping in view. A blank password is useless to anybody. `[redacted]`
+     * is a perfectly valid ten-character password; it is refused because on
+     * this platform it is evidence of a bug — a credential read back from a
+     * column cast through RedactedJsonCast, whose redactor had already
+     * replaced it — which makes this an oracle's assertion, not a panel's
+     * behaviour, and it is marked as one.
+     *
+     * This is where that bug becomes observable, in simulation. It is not
+     * where it is prevented. Against a real panel nothing here runs, so the
+     * guards that hold in production are the handlers' own: the account build
+     * mints its password when it runs (F-04), and the WordPress install mints
+     * its own and refuses a job whose payload carries `admin_password` at all
+     * (F-45).
+     *
+     * @throws HostingProviderException
+     */
+    private function assertCredentialIsUsable(HostingNode $node, string $username, string $credential, string $operation): void
+    {
+        $unusable = match (true) {
+            trim($credential) === '' => 'the platform sent an empty credential',
+            $credential === SecretRedactor::PLACEHOLDER => "the platform sent the redactor's own placeholder instead of a credential",
+            default => null,
+        };
+
+        if ($unusable === null) {
+            return;
+        }
+
+        throw HostingProviderException::requestFailed(self::NAME, $operation, [
+            'node' => $node->hostname,
+            'username' => $username,
+            'provider_message' => $unusable.'; the fake panel will not report success for a login nobody can use',
+        ]);
+    }
+
+    /**
+     * Refuse an account for a site no resolver can serve, or for a contact
+     * address nobody can receive at, and record nothing.
+     *
+     * A refusal, not an unknown outcome, like assertCredentialIsUsable(), and
+     * like it an oracle's assertion rather than a panel's behaviour: what WHM
+     * or DirectAdmin does with `abc.hosting.invalid` has not been established
+     * in this repository. Against a real panel nothing here runs; the guard
+     * that holds in production is CreateHostingAccountHandler's own, which
+     * refuses a job with no domain rather than inventing one (F-04).
+     *
+     * @throws HostingProviderException
+     */
+    private function assertNameIsServable(HostingNode $node, string $username, string $domain, string $contact): void
+    {
+        $domainProblem = self::whyNoSiteCanHave($domain);
+
+        if ($domainProblem !== null) {
+            throw HostingProviderException::requestFailed(self::NAME, 'create_account', [
+                'node' => $node->hostname,
+                'username' => $username,
+                'provider_message' => 'the primary domain '.$domainProblem.'; the fake panel will not open an account for a site nobody can reach',
+            ]);
+        }
+
+        $contact = trim($contact);
+        $at = strrpos($contact, '@');
+        $contactProblem = match (true) {
+            $contact === '' => 'is empty',
+            $at === false || filter_var($contact, FILTER_VALIDATE_EMAIL) === false => 'is not an address',
+            default => self::whyNoSiteCanHave(substr($contact, $at + 1)),
+        };
+
+        if ($contactProblem !== null) {
+            throw HostingProviderException::requestFailed(self::NAME, 'create_account', [
+                'node' => $node->hostname,
+                'username' => $username,
+                'provider_message' => 'the contact address '.$contactProblem.'; the fake panel will not write to an address nobody receives at',
+            ]);
+        }
+    }
+
+    /**
+     * Why no site on the internet can have this name, or null.
+     */
+    private static function whyNoSiteCanHave(string $name): ?string
+    {
+        $problem = DnsName::problemWith($name);
+
+        if ($problem !== null) {
+            return 'is not a DNS name: '.$problem;
+        }
+
+        $labels = explode('.', DnsName::canonical($name));
+
+        if (count($labels) < 2) {
+            return 'is a bare label, not a domain';
+        }
+
+        $top = $labels[count($labels) - 1];
+
+        if (in_array($top, self::NAMES_NO_SITE_CAN_HAVE, true)) {
+            return sprintf('is under .%s, which never names a site on the internet', $top);
+        }
+
+        return null;
+    }
+
     private function require(HostingNode $node, string $username, string $operation): RemoteAccount
     {
         $this->assertNoMarkers($node, $username, $operation);
@@ -450,6 +620,7 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
     {
         $this->assertNoMarkers($node, $request->username, 'install_wordpress');
         $this->require($node, $request->username, 'install_wordpress');
+        $this->assertCredentialIsUsable($node, $request->username, $request->adminPassword, 'install_wordpress');
 
         $this->restore();
 

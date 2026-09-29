@@ -77,12 +77,18 @@ final class OrderStateMachine extends AbstractStateMachine
                 OrderStatus::Provisioning,
                 OrderStatus::ProvisioningFailed,
                 OrderStatus::ManualReview,
+                // Refunded in full while the build waits. A refund records
+                // the money and nothing else, from wherever the order stands
+                // once it has been paid; the build carries on.
+                OrderStatus::Refunded,
             ],
 
             OrderStatus::Provisioning->value => [
                 OrderStatus::Active,
                 OrderStatus::ProvisioningFailed,
                 OrderStatus::ManualReview,
+                // As above, mid-build.
+                OrderStatus::Refunded,
             ],
 
             OrderStatus::ProvisioningFailed->value => [
@@ -114,6 +120,8 @@ final class OrderStateMachine extends AbstractStateMachine
             OrderStatus::Suspended->value => [
                 OrderStatus::Active,
                 OrderStatus::Terminated,
+                // As from ACTIVE: the service is kept, suspended as it is.
+                OrderStatus::Refunded,
             ],
 
             /*

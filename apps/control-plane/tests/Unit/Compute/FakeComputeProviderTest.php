@@ -111,7 +111,14 @@ final class FakeComputeProviderTest extends TestCase
          * real cluster: the call did not come back, so whether a machine
          * exists is unknown. Retrying builds a second one; releasing the node
          * capacity gives it to somebody else while the first is still running
-         * on it. The fake makes both mistakes reachable in a test.
+         * on it.
+         *
+         * This marker is the half in which nothing was built, and this comment
+         * used to say it made both mistakes reachable. It made neither: with
+         * no first machine there is no second, and no capacity in use to give
+         * away. The half in which the machine exists is the built-unanswered
+         * marker, and AnUnansweredComputeCallMayHaveLandedTest is where it is
+         * proved (F-24).
          */
         try {
             $this->provider->createVirtualMachine($this->request(
@@ -123,6 +130,8 @@ final class FakeComputeProviderTest extends TestCase
             $this->assertTrue($e->isIndeterminate());
             $this->assertTrue($e->context()['indeterminate']);
         }
+
+        $this->assertNull($this->provider->getVm('pve-01', '101'), 'This marker is the half in which nothing was built.');
     }
 
     #[Test]

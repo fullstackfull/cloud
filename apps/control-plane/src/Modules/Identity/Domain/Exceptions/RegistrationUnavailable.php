@@ -21,10 +21,13 @@ use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
  * reliable readout of deployment state from an unauthenticated endpoint. The
  * first version of this class put the list of unpublished documents in the
  * exception context with a comment saying it was "logged and never rendered".
- * That was wrong: a domain exception's context is rendered to the client as
- * `error.details`, so the refusal answered every visitor with
+ * That was wrong at the time: a domain exception's whole context was rendered
+ * to the client as `error.details`, so the refusal answered every visitor with
  * `{"unpublished_documents":["terms","aup"]}`. A test asserting the response
- * body named nothing is what caught it.
+ * body named nothing is what caught it. The renderer now publishes only keys
+ * a class declares with `publishing()`, and this class still carries nothing:
+ * the log is where the operator looks, and a context is one declaration away
+ * from a public response body.
  *
  * So the detail an operator needs is written to the log by the caller, where
  * it was supposed to be, and this exception says only that registration is

@@ -22,11 +22,14 @@ final class BackupNotConfiguredException extends DomainException
      * The cluster has no datastore declared.
      *
      * Nothing identifying the platform's own infrastructure goes in the
-     * context. The API renderer publishes a DomainException's context verbatim
-     * as `error.details`, so a configuration key or a cluster id put here
-     * reaches the customer — and "backups.datastores.kw-cluster" tells them
-     * the name of the cluster their neighbours are on and the shape of the
-     * platform's configuration.
+     * context. When this was written the API renderer published a
+     * DomainException's context verbatim as `error.details`, so a
+     * configuration key or a cluster id put here reached the customer — and
+     * "backups.datastores.kw-cluster" tells them the name of the cluster their
+     * neighbours are on and the shape of the platform's configuration. The
+     * renderer now publishes only what a class declares, and this one declares
+     * nothing. The key is still written to the log here rather than carried,
+     * because the log is where somebody looks for it.
      *
      * Both go to the log instead, where the audience is somebody holding a
      * runbook. The customer gets a sentence that says it is our problem and

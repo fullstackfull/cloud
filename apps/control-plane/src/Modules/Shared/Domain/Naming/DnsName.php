@@ -133,9 +133,13 @@ final readonly class DnsName implements Stringable
      * It is the fold behind `hosting_accounts.primary_domain`'s CHECK
      * constraint, which computes `lower(btrim(…))` in the database. The two
      * agree for ASCII and only for ASCII — PHP's `strtolower` is byte-wise
-     * and PostgreSQL's `lower()` follows the locale — so a caller folds a
-     * name only after {@see self::problemWith()} has accepted it, and that
-     * refuses anything outside ASCII.
+     * and PostgreSQL's `lower()` follows the locale — so a name outside ASCII
+     * folded here is one that column refuses. Nothing here prevents that. The
+     * hosting build, which is what writes that column through the capacity
+     * reservation, asks {@see self::problemWith()} first, and that refuses
+     * anything outside ASCII. Other callers fold without asking — the
+     * WordPress order and copy, and the checkout fingerprint — and none of
+     * them writes a column this CHECK guards.
      */
     public static function canonicalAsSubmitted(string $candidate): string
     {

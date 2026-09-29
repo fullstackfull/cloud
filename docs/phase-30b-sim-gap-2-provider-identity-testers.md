@@ -124,7 +124,7 @@ create a virtual machine, and a test that created one would not be a test.
 
 | driver | identity proof | authorisation read | `Supported` from a read | left `Unknown` |
 |---|---|---|---|---|
-| `proxmox` | `data.version` **and** `release`/`repoid`; `/nodes` exists | `/access/permissions` | `create`/`start`/`stop`/`reboot`/`resize`/`reinstall`/`suspend`/`unsuspend`/`console`/`destroy`/`templates`/`inventory_sync`, each when every privilege its requests need is held (F-13: `reinstall` and `templates` were once left `Unknown`, which only the simulator could satisfy); `task_polling` | `gpu_passthrough` |
+| `proxmox` | `data.version` **and** `release`/`repoid`; `/nodes` exists | `/access/permissions` | `create`/`start`/`stop`/`reboot`/`resize`/`reinstall`/`suspend`/`unsuspend`/`console`/`destroy`/`templates`/`inventory_sync`, each when every privilege the tester maps to it is held — its reading of what the adapter's requests need, unverified against a cluster and short in places its docblock names (F-13: `reinstall` and `templates` were once left `Unknown`, which only the simulator could satisfy); `task_polling` | `gpu_passthrough` |
 | `proxmox_backup` | Proxmox identity; `/nodes` exists; `pbs`-type storage attached | `/storage?type=pbs` | — | `create`, `restore`, `delete`, `retention` when a datastore exists |
 | `cpanel` | `metadata.command === 'version'` | `/myprivs` | `create_account`, `terminate`, `suspend`, `unsuspend`, `change_package`, `usage` from held ACLs | `sso`, and anything whose ACL key this platform does not recognise |
 | `directadmin` | url-encoded, non-HTML, documented field present | `/CMD_API_SHOW_USERS` | `usage` | everything that changes an account |

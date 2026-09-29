@@ -26,6 +26,21 @@ use Spatie\Permission\PermissionRegistrar;
  * not from the rows attached to it, so an operator editing that list would be
  * changing something that does not decide anything — and would reasonably
  * believe they had restricted it.
+ *
+ * Customer is refused too, for anybody, super admin included: every customer
+ * login holds it, so its list is a grant to the whole customer base. The
+ * re-audit of round three (OB-1) measured a delegate (support + role.manage +
+ * catalog.view) giving it its own permissions — 200 — after which every
+ * customer login read /api/admin/operators and /api/admin/customers. Its
+ * permissions are fixed by Role::defaultPermissions() and the seeder; the
+ * /api/admin staff gate (EnsureTheCallerIsStaff) is the second layer.
+ *
+ * A delegate (an operator holding `role.manage` without Super Admin) may
+ * neither add nor remove a permission they do not hold. The list is replaced
+ * as a whole, so checking only the new list let a support operator empty
+ * `infrastructure-admin` (measured: 200, remaining []). The removal side is
+ * judged against the role's permissions read under a lock on the role row,
+ * inside the transaction that makes the change.
  */
 final readonly class SetRolePermissions
 {
@@ -44,6 +59,10 @@ final readonly class SetRolePermissions
             throw RoleChangeRefusedException::becauseTheRoleIsProtected($role->name);
         }
 
+        if ($role->name === RoleEnum::Customer->value) {
+            throw RoleChangeRefusedException::becauseItIsTheCustomerBaseline($role->name);
+        }
+
         /*
          * An operator may not grant through a role what they could not grant
          * directly. Without this, `role.manage` on its own is every permission
@@ -58,8 +77,19 @@ final readonly class SetRolePermissions
         }
 
         return $this->record->execute(
-            act: function () use ($role, $permissions): Role {
+            act: function () use ($actor, $role, $permissions): Role {
+                Role::query()->lockForUpdate()->findOrFail($role->getKey());
+
+                /** @var list<string> $before */
                 $before = $role->permissions()->pluck('name')->values()->all();
+
+                if (! $actor->hasRole(RoleEnum::SuperAdmin->value)) {
+                    foreach (array_diff($before, $permissions) as $permission) {
+                        if (! $actor->can($permission)) {
+                            throw RoleChangeRefusedException::becauseThePermissionIsNotYoursToRemove($permission);
+                        }
+                    }
+                }
 
                 $role->syncPermissions($permissions);
 

@@ -70,7 +70,8 @@ final class OrderController
             // every line of every one of them, and GET /orders/{order} is where
             // the lines live.
             ->withCount('items')
-            ->with('coupon')
+            // Invoices for is_cancellable: one query for the page, not one per order.
+            ->with(['coupon', 'invoices'])
             ->when($status !== null, fn ($query) => $query->where('status', $status->value))
             // The ULID tie-breaks orders created in the same millisecond, so
             // paging is stable and a row cannot appear on two pages.

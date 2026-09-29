@@ -5,7 +5,12 @@ declare(strict_types=1);
 namespace Tests\Feature\Vps;
 
 use Lynomia\Modules\Compute\Domain\Enums\PowerState;
+use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\Vps\Domain\Enums\ReinstallState;
+use Lynomia\Modules\Vps\Infrastructure\Models\VmReinstall;
 use PHPUnit\Framework\Attributes\Test;
 
 /**
@@ -98,5 +103,72 @@ final class ShowVirtualMachineEndpointTest extends VpsApiTestCase
         $this->assertStringNotContainsString((string) $machine->node_id, $body);
         $this->assertStringNotContainsString((string) $machine->cluster_id, $body);
         $this->assertStringNotContainsString($this->node()->provider_name, $body);
+    }
+
+    #[Test]
+    public function a_rebuild_settled_as_failed_says_whether_it_had_already_replaced_the_disk(): void
+    {
+        /*
+         * F-20. The portal decides whether to tell a customer their disk is
+         * gone by reading `reinstall.data_destroyed`, not the state name —
+         * because `failed` is published both ways, and the state name alone
+         * cannot say which.
+         *
+         * Both rebuilds are driven through `VmReinstall::advanceTo()`, the one
+         * writer of `destroyed_at`, rather than given the column directly: the
+         * first reaches the destructive state, is held for review, and is
+         * settled as `failed` by the transition an operator's verdict takes;
+         * the second fails before anything was replaced.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+
+        $erased = $this->machineFor($customer, hostname: 'erased');
+        $intact = $this->machineFor($customer, hostname: 'intact');
+
+        $this->rebuildThrough($erased, ReinstallState::Queued, ReinstallState::Preparing, ReinstallState::Reinstalling, ReinstallState::NeedsReview, ReinstallState::Failed);
+        $this->rebuildThrough($intact, ReinstallState::Queued, ReinstallState::Preparing, ReinstallState::Failed);
+
+        $this->actingAs($user)
+            ->getJson('/api/v1/vps/'.$erased->id)
+            ->assertOk()
+            ->assertJsonPath('data.reinstall.state', ReinstallState::Failed->value)
+            // Settled: nobody is looking at it any more, so nothing else on the
+            // page will raise it.
+            ->assertJsonPath('data.reinstall.needs_attention', false)
+            ->assertJsonPath('data.reinstall.data_destroyed', true);
+
+        $this->actingAs($user)
+            ->getJson('/api/v1/vps/'.$intact->id)
+            ->assertOk()
+            ->assertJsonPath('data.reinstall.state', ReinstallState::Failed->value)
+            ->assertJsonPath('data.reinstall.data_destroyed', false);
+    }
+
+    /**
+     * A rebuild of this machine, moved from `requested` through each state in
+     * turn by the model's own transitions.
+     */
+    private function rebuildThrough(VirtualMachine $machine, ReinstallState ...$states): VmReinstall
+    {
+        $job = ProvisioningJob::factory()->create([
+            'kind' => ProvisioningJobKind::ReinstallVps,
+            'customer_id' => $machine->service?->customer_id,
+        ]);
+
+        /** @var VmReinstall $operation */
+        $operation = VmReinstall::query()->create([
+            'virtual_machine_id' => $machine->getKey(),
+            'service_id' => $machine->service_id,
+            'customer_id' => $machine->service?->customer_id,
+            'provisioning_job_id' => $job->getKey(),
+            'state' => ReinstallState::Requested,
+            'state_changed_at' => now(),
+        ]);
+
+        foreach ($states as $state) {
+            $operation->advanceTo($state);
+        }
+
+        return $operation;
     }
 }

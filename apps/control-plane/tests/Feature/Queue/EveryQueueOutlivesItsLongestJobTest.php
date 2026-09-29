@@ -186,6 +186,29 @@ final class EveryQueueOutlivesItsLongestJobTest extends TestCase
         $this->assertAccepted('migrate --force');
     }
 
+    /**
+     * Every other test here calls the guard's handle() directly, because
+     * Laravel raises no CommandStarting while running unit tests. This is the
+     * one that fails if nothing would call it outside them: a starting command
+     * announced through the application's own event dispatcher must reach the
+     * guard.
+     */
+    #[Test]
+    public function the_application_hands_a_starting_command_to_the_guard(): void
+    {
+        config()->set('queue.connections.redis-infrastructure.retry_after', 900);
+
+        try {
+            event(new CommandStarting('horizon', new StringInput('horizon'), new NullOutput));
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('could run one job twice', $e->getMessage());
+
+            return;
+        }
+
+        $this->fail('An unsafe `horizon` was announced through the application and nothing refused it: the guard is not listening.');
+    }
+
     #[Test]
     public function horizon_itself_is_refused_when_any_supervisor_is(): void
     {

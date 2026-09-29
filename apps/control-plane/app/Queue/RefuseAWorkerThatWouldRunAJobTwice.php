@@ -34,14 +34,22 @@ use Throwable;
  *    whenever the configuration is.
  *
  * The invocation is read by binding a copy of the input to the command's own
- * definition, so defaults (`--timeout=60`, the default connection) are the
- * command's and not restated here. An input that does not bind is left alone:
- * the command itself will refuse it a moment later with Symfony's own message.
+ * definition, so option defaults (`--timeout=60`) are the command's and not
+ * restated here. The one default a definition cannot give is the connection:
+ * the argument is optional, and `queue:work` resolves an empty one to
+ * `config('queue.default')` inside `handle()` rather than in its definition
+ * (`WorkCommand.php:121-122`, inherited by `horizon:work`), so that one
+ * fallback is restated below. An input that does not bind is left alone: the
+ * command itself will refuse it a moment later with Symfony's own message.
  *
- * Not testable by running a real command under `APP_ENV=testing`: Laravel's
- * console kernel only reroutes Symfony's command events when
- * `! runningUnitTests()`, so `CommandStarting` never fires in the test
- * environment. The tests call {@see handle()} directly.
+ * Inert under `APP_ENV=testing`: Laravel's console kernel only reroutes
+ * Symfony's command events when `! runningUnitTests()`, so `CommandStarting`
+ * never fires in the test environment, and a worker started there is not
+ * checked. Most tests therefore call {@see handle()} directly
+ * (`EveryQueueOutlivesItsLongestJobTest`); the real path — the listener
+ * registered and reached by a real `queue:work` — is proved by
+ * `AWorkerThatWouldRunAJobTwiceDoesNotStartTest`, which starts the worker as a
+ * child process under `APP_ENV=staging`.
  */
 final readonly class RefuseAWorkerThatWouldRunAJobTwice
 {

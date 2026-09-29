@@ -8,6 +8,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Billing\Application\Actions\CompensateUncollectableCapture;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
+use Lynomia\Modules\Billing\Application\Queries\TheSubscriptionAnInvoiceBills;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Exceptions\UnsettleableCaptureException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
@@ -86,7 +87,15 @@ final class SettleInvoiceOnPaymentCaptured implements ShouldQueue
             throw UnsettleableCaptureException::forCapture($event->transactionId, $event->invoiceId);
         }
 
-        if ($invoice->status === InvoiceStatus::Void) {
+        /*
+         * The same for an open invoice of a subscription that has ended: its
+         * open invoices are withdrawn as it ends, and one that could not be is
+         * refused at payment - but a capture opened before the end can still
+         * arrive. Applying it would pay for nothing that will be delivered, so
+         * it goes to the wallet too (O-1, N-3).
+         */
+        if ($invoice->status === InvoiceStatus::Void
+            || ($invoice->status === InvoiceStatus::Open && TheSubscriptionAnInvoiceBills::hasEnded($invoice))) {
             /*
              * The document was withdrawn while this payment was in flight —
              * the customer cancelled their order after opening the payment

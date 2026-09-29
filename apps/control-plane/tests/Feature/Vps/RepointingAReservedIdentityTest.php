@@ -13,8 +13,10 @@ use Lynomia\Modules\Compute\Infrastructure\Providers\FakeComputeProvider;
 use Lynomia\Modules\Provisioning\Application\Actions\DetectStaleJobs;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\Vps\Application\Actions\RepointReservedIdentity;
 use Lynomia\Modules\Vps\Application\Handlers\CreateVpsHandler;
 use PHPUnit\Framework\Attributes\Test;
+use ReflectionClassConstant;
 use Tests\Feature\Vps\Concerns\DrivesVpsCreatesThroughTheOperatorPath;
 use Tests\TestCase;
 
@@ -69,7 +71,10 @@ final class RepointingAReservedIdentityTest extends TestCase
         $this->assertNull($job->reserved_provider_nodes);
         $this->assertNull($job->reserved_provider_hostnames);
         $this->assertSame($taken, $job->result['repoints'][0]['from'] ?? null);
-        $this->assertSame(['web-01'], $job->result['repoints'][0]['hostnames'] ?? null);
+        // The history says what was sent under the old identity: nothing, as
+        // the stranger was found before a create was. (It used to say
+        // ['web-01'], a name recorded at the reservation and never sent.)
+        $this->assertSame([], $job->result['repoints'][0]['hostnames'] ?? null);
 
         $entry = AuditEntry::query()->where('action', AuditAction::ProvisioningIdentityRepointed)->sole();
         $this->assertSame($taken, $entry->context['from'] ?? null);
@@ -118,6 +123,45 @@ final class RepointingAReservedIdentityTest extends TestCase
         $this->assertSame(CreateVpsHandler::FOUND_ITS_OWN_BUILD, $job->refresh()->result['error']['code'] ?? null);
 
         $this->assertRefused($job, 'provisioning.repoint_would_duplicate');
+    }
+
+    #[Test]
+    public function a_job_holding_a_provider_task_is_not_repointed(): void
+    {
+        /*
+         * The other half of "nothing of this job's is at the provider": a
+         * task the provider accepted is something built, provider reference
+         * or not.
+         */
+        $job = $this->aJobWhoseIdentityIsTaken();
+        DB::table('provisioning_jobs')->where('id', $job->id)->update([
+            'remote_job_id' => 'UPID:pve-01:0000ABCD:00000000:00000000:qmcreate:'.$job->reserved_provider_id.':root@pam:',
+        ]);
+
+        $this->assertRefused($job, 'provisioning.repoint_would_duplicate');
+    }
+
+    #[Test]
+    public function a_job_that_has_held_every_identity_it_could_be_moved_to_is_not_repointed(): void
+    {
+        /*
+         * The new id is drawn down the job's own derived sequence and is never
+         * one it has held. When every candidate the action looks at is one it
+         * has held, the answer is a refusal, not a reuse.
+         */
+        $job = $this->aJobWhoseIdentityIsTaken();
+        $candidates = (int) (new ReflectionClassConstant(RepointReservedIdentity::class, 'MAX_CANDIDATES'))->getValue();
+
+        // As many repoints already made as there are candidates, so the draws
+        // start past them — and each one's `from` is one of those draws.
+        $result = $job->result ?? [];
+        $result['repoints'] = array_map(
+            static fn (int $n): array => ['from' => (string) CreateVpsHandler::derivedId($job->idempotency_key.'|repoint|'.$n)],
+            range($candidates + 1, 2 * $candidates),
+        );
+        DB::table('provisioning_jobs')->where('id', $job->id)->update(['result' => json_encode($result, JSON_THROW_ON_ERROR)]);
+
+        $this->assertRefused($job, 'provisioning.repoint_no_fresh_identity');
     }
 
     #[Test]

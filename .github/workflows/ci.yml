@@ -19,6 +19,51 @@ env:
   PHP_VERSION: '8.4'
   NODE_VERSION: '22'
 
+# Gates that could be handed an empty subject refuse it, and none of them
+# asserts a size. Stated once here rather than at every site.
+#
+# A gate that scans nothing passes silently and reads, in review, exactly like
+# a gate that found nothing wrong (F-38). So where a gate's subject is a
+# pathspec, a glob or a directory that a rename or a move could empty, it is
+# asserted non-empty before the gate runs -- per subject, not as a union,
+# because a union stays non-empty while any one of its parts survives.
+#
+# Membership: a guard is in this class when an empty subject would make the
+# gate PASS. One whose empty set would instead produce a flood of failures --
+# a false red -- is not: validate-runbooks.py's refusal of an empty set of
+# defined commands and validate-monitoring.py's of an empty set of exported
+# metrics are of that other kind.
+#
+# The sites, a site being one step, one validator or one Makefile recipe. No
+# total is given: a count typed here went stale once already, when a validator
+# that refuses an empty subject was added and neither the list nor its total
+# moved (I-5).
+#   - steps in this file: "Verify migrations are reversible", "Typecheck and
+#     Lint cover every workspace", "Ansible lint", "OpenTofu is formatted and
+#     valid", "Fail if a credential was committed under infrastructure/",
+#     "Fail if a fake provider is configured outside the development
+#     template" and "Fail on unresolved placeholders in application source";
+#   - validators the Infrastructure job runs, each refusing its own
+#     empty subject: validate-inventory.py, validate-monitoring.py,
+#     validate-runbooks.py, validate-runbook-alerts.py,
+#     check-ci-cannot-apply.py and list-tofu-root-modules.py;
+#   - Makefile recipes that repeat a step here: infra-validate's ansible-lint
+#     and lint-frontend.
+# The validator list is checked: test_ci_steps.py runs each validator the
+# Infrastructure job calls over an empty tree and fails unless the ones that
+# refuse it are exactly the ones named above. The step and recipe lists are
+# not checked by anything.
+#
+# Non-emptiness, not size: a subject gutted to a single file still passes, and
+# that is the bar each site is held to. The one deliberate exception is the
+# frontend's exact count of four workspaces, argued at that step. The count
+# guards inside the self-tests the Infrastructure job runs are not
+# counterexamples: each counts cases that are literal source in the file
+# beside the assertion, reviewer-maintained rather than tool-discovered.
+#
+# The next increment would be a drift check -- committed expected counts per
+# subject, failing on a fall -- and it is deliberately not built here.
+
 jobs:
   backend:
     name: Backend (PHP ${{ matrix.php }}, PostgreSQL ${{ matrix.postgres }})
@@ -114,12 +159,26 @@ jobs:
           DB_PASSWORD: lynomia_ci
         run: php artisan migrate:fresh --seed --env=testing --force
 
+      # Every migration, not a fixed number of them. This used to pass
+      # --step=100, which rolls back at most a hundred and reports success
+      # either way: from the 101st migration on, the oldest would never have
+      # been reversed and the step would have gone on saying they were. The
+      # count is the tracked migrations', asserted non-empty, because a rename
+      # of database/migrations would otherwise make this roll back nothing and
+      # pass, which is the failure the rest of this file exists to refuse.
       - name: Verify migrations are reversible
         working-directory: apps/control-plane
         env:
           DB_PASSWORD: lynomia_ci
         run: |
-          php artisan migrate:rollback --env=testing --force --step=100
+          set -euo pipefail
+          steps=$(git ls-files -- 'database/migrations/*.php' | wc -l)
+          if [ "$steps" -eq 0 ]; then
+            echo "::error::No tracked migrations under database/migrations; there is nothing to reverse, which is not a pass."
+            exit 1
+          fi
+          echo "Rolling back all $steps migration(s)."
+          php artisan migrate:rollback --env=testing --force --step="$steps"
           php artisan migrate --env=testing --force
 
       # APP_ENV again, and for the same reason: `artisan test` boots the
@@ -181,6 +240,57 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # Typecheck and Lint below run `--workspaces`, over every workspace the
+      # root package.json declares. They used to pass `--if-present`, and three
+      # of the four workspaces defined no scripts, so a type error in
+      # packages/ui exited 0 and removing apps/web's own scripts would have
+      # made both steps green on zero work. The flag is gone and every
+      # package now declares both scripts, so a workspace that loses them fails
+      # with "Missing script" instead of vanishing.
+      #
+      # That leaves the corpus itself, because `"packages/*"` is a glob and a
+      # glob that matches nothing narrows the run without a word: move
+      # packages/ and both steps lint and typecheck apps/web alone, at exit 0.
+      # Two assertions, because the two ways to narrow it are disjoint and
+      # neither sees the other's:
+      #   - each subject directory has tracked files, which catches the
+      #     directory moving and cannot see the glob being deleted from
+      #     package.json (the files are still there);
+      #   - npm resolves exactly four workspaces, which catches the glob going
+      #     and asks npm the question the steps' names claim an answer to.
+      # An exact four, where the Ansible subjects below are only asserted
+      # non-empty: those are discovered by the tool from the filesystem, while
+      # this set is declared in one reviewed file that is itself this gate's
+      # subject. Adding a workspace is a deliberate edit of package.json, and
+      # changing the four is part of making it. Names are not asserted:
+      # renaming a package does not narrow anything.
+      #
+      # `npm query .workspace` reports the workspace tree npm has INSTALLED,
+      # not the globs as written: with nothing installed it reports none while
+      # `--workspaces` still runs every declared one, and with a workspace
+      # dropped from package.json but still linked it reports the narrowed
+      # set, in step with `--workspaces`. In every arrangement measured it
+      # disagreed with the steps below only by reporting fewer -- a red, not a
+      # silent pass -- and here, straight after `npm ci`, the two are the same.
+      #
+      # The same two assertions are in the Makefile's lint-frontend, which runs
+      # these scripts the way this job does; change one, change both.
+      - name: Typecheck and Lint cover every workspace
+        run: |
+          set -euo pipefail
+          for subject in apps/web packages; do
+            if [ -z "$(git ls-files -- "$subject")" ]; then
+              echo "::error::$subject has no tracked files; the lint and typecheck corpus has narrowed without a word."
+              exit 1
+            fi
+          done
+          count=$(npm query .workspace | node -e 'let s = ""; process.stdin.on("data", (c) => { s += c; }).on("end", () => { const w = JSON.parse(s); if (!Array.isArray(w)) { process.exit(3); } console.log(w.length); })')
+          if [ "$count" != "4" ]; then
+            echo "::error::npm resolves $count workspaces, not 4; the lint and typecheck corpus has changed."
+            exit 1
+          fi
+          echo "npm resolves $count workspaces, and every subject directory has tracked files."
 
       - name: Typecheck
         run: npm run typecheck
@@ -334,14 +444,39 @@ jobs:
       - name: Fail if a secret or environment file was committed
         run: |
           set -euo pipefail
+          # grep exits 0 on a match, 1 on none and 2 when it could not scan,
+          # and an `if` reads 2 as 1. `scan` runs a grep and fails the step
+          # on anything above 1. It is called in the current shell, never in
+          # a pipeline or a $(...), where its `exit` would end only a subshell.
+          # Its error goes to fd 3, the step's own stdout, where the runner
+          # reads `::error::`, even when the grep's output is redirected.
+          exec 3>&1
+          scan() {
+            local status=0
+            "$@" || status=$?
+            if [ "$status" -gt 1 ]; then
+              echo "::error::'$1 $2' exited $status: the scan did not run, which is neither a finding nor a clean result." >&3
+              exit 1
+            fi
+            return "$status"
+          }
           echo "Scanning tracked files for committed secrets..."
 
-          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v '\.example$'; then
+          # Listed once, in an assignment `set -e` checks, and read from a
+          # here-string: a pipeline's status is its last non-zero one, so a
+          # failed listing followed by a grep with nothing to read is a 1.
+          # -z, because without it git quotes a name holding a non-ASCII
+          # byte, a quote or a backslash ("apps/\303\274/.env"), and a quoted
+          # name ends in a quote rather than in what the pattern looks for.
+          tracked="$(git ls-files -z | tr '\0' '\n')"
+          env_files="$(mktemp)"
+          scan grep -E '(^|/)\.env($|\.)' <<< "$tracked" > "$env_files" || true
+          if scan grep -v '\.example$' "$env_files"; then
             echo "::error::A .env file is tracked in git."
             exit 1
           fi
 
-          if git ls-files | grep -E '\.(pem|key|p12|pfx)$|(^|/)id_(rsa|ed25519|ecdsa)$'; then
+          if scan grep -E '\.(pem|key|p12|pfx)$|(^|/)id_(rsa|ed25519|ecdsa)$' <<< "$tracked"; then
             echo "::error::A private key appears to be tracked in git."
             exit 1
           fi
@@ -355,7 +490,7 @@ jobs:
           # credential proves nothing. Excluding the test tree instead would
           # mean a real key pasted into a test was no longer caught, which is
           # the one thing this step exists to prevent.
-          if git grep -nIE '(sk_live_[A-Za-z0-9]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' \
+          if scan git grep -nIE '(sk_live_[A-Za-z0-9]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' \
               -- ':!*.example' \
                  ':!**/SecretRedactor.php' \
                  ':!apps/control-plane/tests/Support/SecretFixtures.php'; then
@@ -411,7 +546,7 @@ jobs:
       - name: Alert rules name metrics something exports
         run: python3 infrastructure/scripts/validate-monitoring.py infrastructure
 
-      # Seven distinct assertions live in that validator and "the job is green"
+      # That validator makes many distinct assertions, and "the job is green"
       # is evidence for none of them individually. This drives it over
       # synthetic trees and requires a red for each.
       - name: The monitoring validator still refuses what it claims to refuse
@@ -425,6 +560,17 @@ jobs:
       - name: The runbook validator still refuses a command that does not exist
         run: python3 infrastructure/scripts/test_validate_runbooks.py
 
+      # A runbook that names an alert no rule defines describes a page that can
+      # never arrive. validate-monitoring.py walks from a rule to its runbook;
+      # this walks back, and nothing did until fifteen invented names had
+      # accumulated. It also keeps the runbooks README's counts derived rather
+      # than typed, and its list of pages with no alert complete.
+      - name: Runbooks name alerts that exist
+        run: python3 infrastructure/scripts/validate-runbook-alerts.py infrastructure
+
+      - name: The runbook alert gate still refuses each case its self-test pins
+        run: python3 infrastructure/scripts/test_validate_runbook_alerts.py
+
       - name: Ansible syntax
         working-directory: infrastructure/ansible
         run: |
@@ -435,29 +581,105 @@ jobs:
           done
 
       # Offline so the build does not ask Galaxy whether our own YAML parses.
+      #
+      # ansible-lint discovers its own corpus and says nothing about its size:
+      # with playbooks/ and roles/ both moved out it prints "Passed: 0
+      # failure(s), 0 warning(s) on 18 files. Profile 'production' was
+      # required, and it passed." at exit 0, down from 126, in a line that
+      # reads exactly like a clean run. So each subject is asserted on its own
+      # -- a union check would pass while either one survived -- and asserted
+      # non-empty, not sized. With roles/ alone gone syntax-check would fail
+      # anyway, but only incidentally; this fails for the reason. The same
+      # assertion is in the Makefile's infra-validate, which runs this lint the
+      # same way; change one, change both.
       - name: Ansible lint
         working-directory: infrastructure/ansible
-        run: ansible-lint --offline
+        run: |
+          set -euo pipefail
+          for subject in playbooks roles; do
+            if [ -z "$(git ls-files -- "$subject")" ]; then
+              echo "::error::infrastructure/ansible/$subject has no tracked files; ansible-lint would pass over what is left."
+              exit 1
+            fi
+          done
+          ansible-lint --offline
 
+      # The version satisfies what the configuration requires: every
+      # versions.tf under infrastructure/tofu says `required_version =
+      # "~> 1.10"`. The 1.8.7 pinned here before could not have initialised the
+      # root module at all (OpenTofu refuses with "Unsupported OpenTofu Core
+      # version"); it never had to, because validate never ran there.
       - uses: opentofu/setup-opentofu@v1
         with:
-          tofu_version: 1.8.7
+          tofu_version: 1.10.7
 
+      # F-38. This step used to run init and validate inside
+      # infrastructure/tofu/environments/*/, which hold only .example templates
+      # and no configuration. OpenTofu 1.8.7 answers such a directory with
+      # "initialized in an empty directory" and "Success! The configuration is
+      # valid.", exit 0 both times, so validate passed without parsing a line.
+      #
+      # So no directory is named here. list-tofu-root-modules.py derives the
+      # root modules from the tree -- every directory under
+      # infrastructure/tofu holding configuration that no other module calls
+      # -- and refuses a tree with none; validating a root validates each
+      # module it calls. The assignment is checked by `set -e`, which a
+      # command substitution in a `for` list would not be, and an empty answer
+      # is refused again here rather than trusted. The script decides what is
+      # called by reading the files with a lexer of its own, which is not HCL's
+      # and is not claimed complete; so after every root is initialised, it is
+      # run again with --loaded-by-tofu, and refuses any module directory that
+      # is neither a root nor in the module manifest `tofu init` wrote in some
+      # root -- a module OpenTofu never loaded, whatever the lexer read. The
+      # manifest says that only when init wrote it afresh: OpenTofu 1.10.7
+      # merges into an existing .terraform/modules/modules.json, keeping stale
+      # entries. So a tracked path under any .terraform/ is refused first, and
+      # each root's .terraform/ is removed before its init (the lock file,
+      # .terraform.lock.hcl, is kept).
+      # test_list_tofu_root_modules.py runs this step as written with a stub
+      # tofu and fails if it validates a directory with no configuration,
+      # misses a root, skips the manifest check, or passes a tree with none.
       - name: OpenTofu is formatted and valid
         run: |
           set -euo pipefail
           tofu fmt -check -recursive infrastructure/tofu
-          for dir in infrastructure/tofu/environments/*/; do
+          tracked="$(git ls-files -z -- infrastructure/tofu | tr '\0' '\n')"
+          while IFS= read -r path; do
+            case "$path" in
+              .terraform/* | */.terraform/*)
+                echo "::error::$path is tracked; a committed .terraform/ can make tofu init's module manifest vouch for a module it never loaded."
+                exit 1
+                ;;
+            esac
+          done <<< "$tracked"
+          roots="$(python3 infrastructure/scripts/list-tofu-root-modules.py .)"
+          if [ -z "$roots" ]; then
+            echo "::error::No OpenTofu root module found; validate would have nothing to parse."
+            exit 1
+          fi
+          while IFS= read -r dir; do
             echo "-- $dir"
             # -backend=false: CI has no business holding state credentials, and
             # does not need them to decide whether the configuration parses.
-            ( cd "$dir" && tofu init -backend=false -input=false && tofu validate )
-          done
+            ( cd "$dir" && rm -rf .terraform && tofu init -backend=false -input=false && tofu validate )
+          done <<< "$roots"
+          python3 infrastructure/scripts/list-tofu-root-modules.py . --loaded-by-tofu
+
+      - name: The validate step still runs where the configuration is
+        run: python3 infrastructure/scripts/test_list_tofu_root_modules.py
 
       # Nothing in this job applies anything. A pipeline that can reimage a node
       # on merge is a pipeline that eventually will, on a branch nobody meant to
       # merge. CI validates; a person applies.
-      - name: No workflow applies infrastructure
+      #
+      # The step is named for what the check reads: the `run:` text of the
+      # steps in .github/workflows, for a list of known applying commands. It
+      # does not follow a step into a script, a Makefile target (`make
+      # deploy-staging` applies) or an action, so it is a tripwire over what
+      # CI spells out and not a proof that no workflow can apply. Its
+      # docstring says what it reads and what it does not, and its output
+      # line how much of the tree falls in each.
+      - name: No workflow run step names a known applying command
         run: python3 infrastructure/scripts/check-ci-cannot-apply.py .
 
       # Including the distinction that makes it usable rather than merely
@@ -468,14 +690,54 @@ jobs:
 
       # infrastructure/ is the tree that talks to everything, so it is the
       # likeliest place for a credential to be committed.
+      #
+      # Asserted present first. `git ls-files infrastructure` over a path that
+      # is not there prints nothing, grep finds nothing in nothing, and the
+      # step used to announce "No committed credentials under infrastructure/"
+      # about a directory that no longer existed -- a renamed tree with a
+      # tfstate in it, which only this step looks for, went through clean.
       - name: Fail if a credential was committed under infrastructure/
         run: |
           set -euo pipefail
-          if git ls-files infrastructure | grep -E '\.(pem|key|p12|pfx|tfstate)$|(^|/)id_(rsa|ed25519|ecdsa)$'; then
+          # grep exits 0 on a match, 1 on none and 2 when it could not scan,
+          # and an `if` reads 2 as 1. `scan` runs a grep and fails the step
+          # on anything above 1. It is called in the current shell, never in
+          # a pipeline or a $(...), where its `exit` would end only a subshell.
+          # Its error goes to fd 3, the step's own stdout, where the runner
+          # reads `::error::`, even when the grep's output is redirected.
+          exec 3>&1
+          scan() {
+            local status=0
+            "$@" || status=$?
+            if [ "$status" -gt 1 ]; then
+              echo "::error::'$1 $2' exited $status: the scan did not run, which is neither a finding nor a clean result." >&3
+              exit 1
+            fi
+            return "$status"
+          }
+          # -z: see the secret scan above; git quotes an unusual name otherwise.
+          tracked="$(git ls-files -z -- infrastructure | tr '\0' '\n')"
+          if [ -z "$tracked" ]; then
+            echo "::error::infrastructure/ has no tracked files; this scan would have nothing to scan."
+            exit 1
+          fi
+          if scan grep -E '\.(pem|key|p12|pfx|tfstate)$|(^|/)id_(rsa|ed25519|ecdsa)$' <<< "$tracked"; then
             echo "::error::A key or state file is tracked under infrastructure/."
             exit 1
           fi
           echo "No committed credentials under infrastructure/."
+
+      # The scan steps above and in the other jobs read grep's exit status in
+      # full, so that a scan which failed to run is not read as a clean one;
+      # this runs each as written against throwaway repositories, including
+      # ones where grep or git grep is made to fail, and then runs every step
+      # that defines `scan` over this checkout itself, so that a tracked file
+      # tripping a scan -- a test fixture, say -- fails here, where it is
+      # found, and not only in the job that runs the scan. It also holds the header
+      # at the top of this file to the validators that refuse an empty
+      # subject.
+      - name: The scan steps still fail when a scan cannot run
+        run: python3 infrastructure/scripts/test_ci_steps.py
 
   production-guards:
     name: Production guards
@@ -506,35 +768,119 @@ jobs:
           # machine. Excluding by pattern instead (any `*.example`) would let a
           # deployment template ship `fake` unnoticed, which is the case this
           # step exists to catch.
-          # Regular files only: a tracked symlink to a directory would make
-          # grep emit a warning that reads like an error and hides real ones.
-          templates=$(git ls-files -- '*.env*' 'infrastructure/**' 'deployments/**' \
-            | grep -vx 'apps/control-plane/.env.example' \
-            | grep -vx 'apps/control-plane/.env.testing.example' \
-            | grep -vx '.env.example' \
-            | while read -r file; do [ -f "$file" ] && printf '%s\n' "$file"; done || true)
-
+          #
           # A guard that has nothing to scan passes silently and reads, in
           # review, exactly like a guard that found nothing wrong. This step
           # used to scan `deployments/production`, a directory that is not in
           # the repository at all, and had therefore never checked anything.
-          if [ -z "$templates" ]; then
+          #
+          # The fix for that asked a weaker question than it needed to: whether
+          # the UNION of its pathspecs was empty. `'*.env*'` alone keeps a union
+          # non-empty, and the third pathspec, `'deployments/**'`, matched
+          # nothing at all, there being no deployments/ directory -- so with
+          # infrastructure/ renamed, every template in it left the scan and the
+          # step still passed. So each pathspec is asserted on its own, and the
+          # one that matches nothing is gone rather than asserted.
+          # grep exits 0 on a match, 1 on none and 2 when it could not scan,
+          # and an `if` reads 2 as 1. `scan` runs a grep and fails the step
+          # on anything above 1. It is called in the current shell, never in
+          # a pipeline or a $(...), where its `exit` would end only a subshell.
+          # Its error goes to fd 3, the step's own stdout, where the runner
+          # reads `::error::`, even when the grep's output is redirected.
+          exec 3>&1
+          scan() {
+            local status=0
+            "$@" || status=$?
+            if [ "$status" -gt 1 ]; then
+              echo "::error::'$1 $2' exited $status: the scan did not run, which is neither a finding nor a clean result." >&3
+              exit 1
+            fi
+            return "$status"
+          }
+          specs=('*.env*' 'infrastructure/**')
+          for spec in "${specs[@]}"; do
+            if [ -z "$(git ls-files -- "$spec")" ]; then
+              echo "::error::'$spec' matches no tracked file; this guard's subject has moved."
+              exit 1
+            fi
+          done
+
+          # The files are held in an array and handed to one grep, quoted: a
+          # name with a space in it is one file, not two that do not exist.
+          # A tracked symlink to a directory is skipped (there is one,
+          # infrastructure/ansible/playbooks/group_vars); any other tracked
+          # name that is not a readable file (one deleted from the working
+          # tree, or one with a newline in it, which the listing splits) fails
+          # the step rather than leaving the scan. The three excluded templates are matched as
+          # exact names. -z, so that git does not quote a name with a
+          # non-ASCII byte, a quote or a backslash in it.
+          listing="$(git ls-files -z -- "${specs[@]}" | tr '\0' '\n')"
+          templates=()
+          while IFS= read -r file; do
+            case "$file" in
+              apps/control-plane/.env.example | apps/control-plane/.env.testing.example | .env.example) continue ;;
+            esac
+            if [ -d "$file" ]; then
+              continue
+            fi
+            if [ ! -f "$file" ]; then
+              echo "::error::$file is tracked and is not a file this guard can read."
+              exit 1
+            fi
+            templates+=("$file")
+          done <<< "$listing"
+
+          if [ "${#templates[@]}" -eq 0 ]; then
             echo "::error::This guard has no files to scan; its paths are wrong."
             exit 1
           fi
 
-          if printf '%s\n' $templates | xargs -r grep -nE '_PROVIDER[=:][[:space:]]*["'"'"']?fake'; then
+          if scan grep -nHE '_PROVIDER[=:][[:space:]]*["'"'"']?fake' -- "${templates[@]}"; then
             echo "::error::A fake provider is configured outside the development template."
             exit 1
           fi
 
           echo "No fake provider configured outside the development template."
 
+      # "Application source" is what PHPStan's `paths` and phpunit.xml's
+      # `<source>` both say it is, and that includes apps/control-plane/app,
+      # which this step used to leave out: the console command classes (the
+      # reconcilers the scheduler runs, and the operator commands nobody
+      # schedules), the queue's retry clocks and double-run refusal, a service
+      # provider and the base controller. All of it is scanned, regardless of what schedules it.
+      #
+      # Each subject is asserted to have tracked files first, because
+      # `git grep` over a pathspec that matches nothing exits 1 -- the same
+      # status as a clean tree -- so a rename would make this step a permanent
+      # pass.
       - name: Fail on unresolved placeholders in application source
         run: |
           set -euo pipefail
-          if git grep -nIE 'TODO: implement|FIXME: required|NotImplementedException' \
-              -- 'apps/control-plane/src' 'apps/web/src'; then
+          # grep exits 0 on a match, 1 on none and 2 when it could not scan,
+          # and an `if` reads 2 as 1. `scan` runs a grep and fails the step
+          # on anything above 1. It is called in the current shell, never in
+          # a pipeline or a $(...), where its `exit` would end only a subshell.
+          # Its error goes to fd 3, the step's own stdout, where the runner
+          # reads `::error::`, even when the grep's output is redirected.
+          exec 3>&1
+          scan() {
+            local status=0
+            "$@" || status=$?
+            if [ "$status" -gt 1 ]; then
+              echo "::error::'$1 $2' exited $status: the scan did not run, which is neither a finding nor a clean result." >&3
+              exit 1
+            fi
+            return "$status"
+          }
+          subjects=(apps/control-plane/src apps/control-plane/app apps/web/src)
+          for subject in "${subjects[@]}"; do
+            if [ -z "$(git ls-files -- "$subject")" ]; then
+              echo "::error::$subject has no tracked files; a scan of it would pass by finding nothing."
+              exit 1
+            fi
+          done
+          if scan git grep -nIE 'TODO: implement|FIXME: required|NotImplementedException' \
+              -- "${subjects[@]}"; then
             echo "::error::Unresolved implementation placeholder in application source."
             exit 1
           fi

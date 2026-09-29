@@ -128,9 +128,13 @@ final class VirtualMachineResource extends JsonResource
              * replaced. The failure code and message are deliberately not
              * here: they are the platform's own vocabulary for its scheduler
              * and its adapters, and a customer reading "vps.reinstall_storage
-             * _unknown" learns nothing they can act on. The state is enough
-             * for the portal to say a true sentence in the customer's own
-             * language.
+             * _unknown" learns nothing they can act on. The state and
+             * `data_destroyed` together are enough for the portal to say a
+             * true sentence in the customer's own language; the state alone
+             * is not, because `failed` is published both for a rebuild that
+             * never touched the disk and for one that replaced it — which is
+             * how a customer whose disk was erased came to read only "The
+             * rebuild did not run" (F-20).
              */
             'reinstall' => $this->reinstall === null ? null : [
                 'id' => (string) $this->reinstall->getKey(),

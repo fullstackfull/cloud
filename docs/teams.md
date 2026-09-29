@@ -71,6 +71,22 @@ At most one live offer per address per account, enforced by a partial unique
 index rather than by a check — without it, pressing Invite twice makes two
 tokens, and revoking the one on screen leaves the other working.
 
+One address is mailed at most once per `teams.invitation_cooldown_minutes`
+by one account. The hourly budget bounds how much an account sends and not
+where, so without the wait one offer resent in a loop put the whole budget
+into one inbox. A resend inside the wait is refused before it mints anything,
+and withdrawing the offer and inviting the address again is held to the same
+clock; both answer `membership.invitation_sent_too_recently` with
+`retry_at`, the moment the wait ends. That is when the cooldown stops
+refusing the same request, not a promise that it will then succeed: the
+hourly budget, a full account or another administrator's act in the
+meantime can still refuse it. The wait is per account on purpose: a wait
+shared across accounts would tell one customer that another had just invited
+the address. It is also per address, not per inbox: `victim+1@` and
+`victim+2@` each have a wait of their own even when both deliver to one
+mailbox, because which addresses do is not something the platform can see.
+The hourly budget is what bounds those.
+
 ## Ownership
 
 Ownership is transferred, never granted. `POST /team/transfer-ownership` moves
@@ -107,6 +123,7 @@ membership row every time and nothing caches it.
 | `teams.invitation_ttl_days` | 14 | Long enough to survive a holiday; short enough that a forgotten invitation is not a standing key |
 | `teams.max_members` | 25 | Blast radius, not commerce: a stolen owner session can otherwise add logins faster than the notifications are read, and each survives the password change that closes the original hole |
 | `security.rate_limits.team_invitations` | 30/hour per account | The resource being spent is somebody else's inbox |
+| `teams.invitation_cooldown_minutes` | 10 | The budget above says how much, not where: this caps one address at one mail per wait from one account. Per address, not per inbox — which addresses share a mailbox is not visible here |
 | `security.rate_limits.invitations` | 10/minute per caller | Redemption answers differently for a live offer than for nothing; the limit is what stops that difference being measured at scale |
 
 ## What is audited

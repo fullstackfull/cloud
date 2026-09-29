@@ -13,6 +13,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
 use Lynomia\Http\Responses\ApiError;
 use Lynomia\Http\Responses\ErrorCatalogue;
+use Lynomia\Modules\Identity\Application\Actions\NotifyAboutAccountSecurity;
 use Lynomia\Modules\Identity\Application\Actions\RecordLoginActivity;
 use Lynomia\Modules\Identity\Domain\Enums\LoginOutcome;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
@@ -40,7 +41,7 @@ final class PasswordResetController
         ], 202);
     }
 
-    public function reset(Request $request, RecordLoginActivity $recordActivity): JsonResponse
+    public function reset(Request $request, RecordLoginActivity $recordActivity, NotifyAboutAccountSecurity $security): JsonResponse
     {
         $validated = $request->validate([
             'token' => ['required', 'string'],
@@ -55,7 +56,7 @@ final class PasswordResetController
                 'password_confirmation' => $request->input('password_confirmation'),
                 'token' => $validated['token'],
             ],
-            function (User $user, string $password) use ($request, $recordActivity): void {
+            function (User $user, string $password) use ($request, $recordActivity, $security): void {
                 $user->forceFill([
                     'password' => $password,
                     'remember_token' => Str::random(60),
@@ -72,6 +73,10 @@ final class PasswordResetController
                 $user->tokens()->delete();
 
                 $recordActivity->execute(LoginOutcome::PasswordReset, $request, $user, $user->email);
+
+                // Proving control of the mailbox is also how an attacker who
+                // holds it takes the account, so the person is told either way.
+                $security->passwordChanged($user);
 
                 event(new PasswordReset($user));
             },

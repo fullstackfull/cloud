@@ -71,6 +71,27 @@ class BackupFileRestore extends Model
     }
 
     /**
+     * File restores that may still be reading this archive: in flight, or in
+     * review because nobody has seen them end.
+     *
+     * The same states that hold the machine ({@see FileRestoreState::holdingTheMachine()}),
+     * asked about the source rather than the destination. Deleting an archive
+     * a restore is reading from leaves the named files half-written from a
+     * source that is no longer there — the reason a whole-machine restore has
+     * always held its archive against deletion — and nothing asked this until
+     * the round-three re-audit deleted one under a running file restore.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeReadingFrom(Builder $query, string $backupId): Builder
+    {
+        return $query
+            ->where('backup_id', $backupId)
+            ->whereIn('state', FileRestoreState::holdingTheMachine());
+    }
+
+    /**
      * @return BelongsTo<Backup, $this>
      */
     public function backup(): BelongsTo

@@ -58,7 +58,7 @@ final class ProductionRefusesTheReferenceEstateTest extends TestCase
 
     private function policy(): EndpointPolicy
     {
-        return new EndpointPolicy;
+        return $this->app->make(EndpointPolicy::class);
     }
 
     // ---------------------------------------------------------------------

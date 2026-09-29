@@ -6,10 +6,15 @@ namespace Tests\Support;
 
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Compute\Domain\Enums\ClusterStatus;
+use Lynomia\Modules\Compute\Domain\Enums\NodeStatus;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
+use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
 use Lynomia\Modules\Ipam\Domain\Enums\IpVersion;
+use Lynomia\Modules\Ipam\Domain\Services\IpAllocator;
+use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 
 /**
  * The estate rows a VPS plan needs before checkout will sell it.
@@ -44,8 +49,14 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 trait PlaceableEstate
 {
     /**
-     * One active cluster, one active public IPv4 pool, one active image on
-     * that cluster. Safe to call more than once.
+     * One active cluster with a node in service, one active public IPv4 pool
+     * with a subnet, on a network a customer machine can be plugged into,
+     * holding a host address, one active image on that cluster.
+     * Safe to call more than once.
+     *
+     * The node and the address are what a sale also asks for (F-07 (c)): a
+     * cluster with no node in service, or a pool with no address to hand out,
+     * is configuration that cannot deliver, and checkout refuses it.
      */
     protected function estateThatCanPlaceAVps(): ComputeCluster
     {
@@ -61,6 +72,26 @@ trait PlaceableEstate
 
         if ($pools === 0) {
             IpPool::factory()->create();
+        }
+
+        $nodes = ComputeNode::query()
+            ->where('cluster_id', $cluster->getKey())
+            ->where('status', NodeStatus::Active)
+            ->count();
+
+        if ($nodes === 0) {
+            ComputeNode::factory()->create(['cluster_id' => $cluster->getKey()]);
+        }
+
+        foreach (IpPool::query()->where('is_active', true)->where('ip_version', IpVersion::V4)->get() as $pool) {
+            // Asked of the allocator the build reserves by: a host on a subnet
+            // whose network can carry a customer machine. A subnet on no
+            // network used to be enough here, which is the estate F-07 (round
+            // four's re-audit) sold and could never build.
+            if (! app(IpAllocator::class)->holdsACustomerAttachableHost($pool)) {
+                $subnet = Subnet::factory()->onACustomerNetwork()->create(['ip_pool_id' => $pool->getKey()]);
+                IpAddress::factory()->create(['subnet_id' => $subnet->getKey()]);
+            }
         }
 
         $images = VmTemplate::query()

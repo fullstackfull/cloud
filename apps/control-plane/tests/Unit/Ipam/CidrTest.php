@@ -159,4 +159,150 @@ final class CidrTest extends TestCase
             'words' => ['gateway'],
         ];
     }
+
+    // ---- overlap: whether two blocks share an address ----------------------
+
+    #[Test]
+    #[DataProvider('pairsOfBlocks')]
+    public function two_blocks_overlap_exactly_when_they_share_an_address(string $a, string $b, bool $overlap): void
+    {
+        $first = Cidr::fromString($a);
+        $second = Cidr::fromString($b);
+
+        // Symmetric, both ways round, or the answer depends on which block
+        // happened to be registered first.
+        $this->assertSame($overlap, $first->overlaps($second), "{$a} against {$b}");
+        $this->assertSame($overlap, $second->overlaps($first), "{$b} against {$a}");
+    }
+
+    /**
+     * @return array<string, array{string, string, bool}>
+     */
+    public static function pairsOfBlocks(): array
+    {
+        return [
+            'the same block' => ['203.0.113.0/24', '203.0.113.0/24', true],
+            'the same block, spelled from a host' => ['203.0.113.0/24', '203.0.113.7/24', true],
+            'a half inside the whole' => ['203.0.113.0/24', '203.0.113.0/25', true],
+            'the upper half inside the whole' => ['203.0.113.0/24', '203.0.113.128/25', true],
+            'a host route inside a /16' => ['10.1.0.0/16', '10.1.2.3/32', true],
+            'the last address of a block' => ['10.0.0.0/8', '10.255.255.255/32', true],
+            'everything overlaps the default route' => ['0.0.0.0/0', '198.51.100.7/32', true],
+            'adjacent halves' => ['203.0.113.0/25', '203.0.113.128/25', false],
+            'neighbouring /8s' => ['10.0.0.0/8', '11.0.0.0/8', false],
+            'the address just past a block' => ['10.0.0.0/8', '11.0.0.0/32', false],
+            'disjoint' => ['198.51.100.0/24', '203.0.113.0/24', false],
+            'v6 prefix inside a v6 prefix' => ['2001:db8::/32', '2001:db8:1234::/48', true],
+            'v6 host inside a v6 /64' => ['2001:db8:1:2::/64', '2001:db8:1:2::abcd/128', true],
+            'adjacent v6 /64s' => ['2001:db8:1:2::/64', '2001:db8:1:3::/64', false],
+            'v6 blocks differing in the last bit of the prefix' => ['2001:db8::/33', '2001:db8:8000::/33', false],
+            'everything v6 overlaps ::/0' => ['::/0', 'fd12:3456::/48', true],
+        ];
+    }
+
+    #[Test]
+    public function blocks_of_two_families_never_overlap(): void
+    {
+        // ::/0 contains every v6 address and 0.0.0.0/0 every v4 one. They are
+        // different address spaces, not a containment, whichever way round.
+        $this->assertFalse(Cidr::fromString('0.0.0.0/0')->overlaps(Cidr::fromString('::/0')));
+        $this->assertFalse(Cidr::fromString('::/0')->overlaps(Cidr::fromString('0.0.0.0/0')));
+        $this->assertFalse(Cidr::fromString('10.0.0.0/8')->overlaps(Cidr::fromString('::a00:0/104')));
+    }
+
+    // ---- reuse: whether two buildings may each hold a block ----------------
+
+    #[Test]
+    #[DataProvider('blocksAndWhetherTheyMayBeReused')]
+    public function a_block_is_locally_reusable_only_when_it_is_wholly_inside_space_designated_for_reuse(
+        string $cidr,
+        bool $reusable,
+    ): void {
+        $this->assertSame($reusable, Cidr::fromString($cidr)->isLocallyReusable(), $cidr);
+    }
+
+    /**
+     * Every designated range appears whole and as a block inside it, and each
+     * is fenced by the blocks just outside it on either side, so that a range
+     * drawn one bit too wide or too narrow reddens a row rather than passing.
+     *
+     * @return array<string, array{string, bool}>
+     */
+    public static function blocksAndWhetherTheyMayBeReused(): array
+    {
+        return [
+            // RFC 1918.
+            '10/8 whole' => ['10.0.0.0/8', true],
+            'inside 10/8' => ['10.20.30.0/24', true],
+            'just below 10/8' => ['9.255.255.0/24', false],
+            'just above 10/8' => ['11.0.0.0/24', false],
+            '172.16/12 whole' => ['172.16.0.0/12', true],
+            'the top of 172.16/12' => ['172.31.255.0/24', true],
+            'just below 172.16/12' => ['172.15.255.0/24', false],
+            'just above 172.16/12' => ['172.32.0.0/24', false],
+            '192.168/16 whole' => ['192.168.0.0/16', true],
+            'inside 192.168/16' => ['192.168.5.0/24', true],
+            'just below 192.168/16' => ['192.167.255.0/24', false],
+            'just above 192.168/16' => ['192.169.0.0/24', false],
+
+            // RFC 6598 shared address space, reused behind every CGNAT.
+            '100.64/10 whole' => ['100.64.0.0/10', true],
+            'the top of 100.64/10' => ['100.127.255.0/24', true],
+            'just below 100.64/10' => ['100.63.255.0/24', false],
+            'just above 100.64/10' => ['100.128.0.0/24', false],
+
+            // RFC 3927 link-local and RFC 1122 loopback: meaningful only on
+            // one link or one host by definition.
+            '169.254/16 whole' => ['169.254.0.0/16', true],
+            'just above 169.254/16' => ['169.255.0.0/24', false],
+            'just below 169.254/16' => ['169.253.255.0/24', false],
+            '127/8 whole' => ['127.0.0.0/8', true],
+            'just above 127/8' => ['128.0.0.0/24', false],
+            'just below 127/8' => ['126.255.255.0/24', false],
+
+            // Documentation space is not designated for reuse. It is not
+            // routed, which is a different question: two buildings holding
+            // 203.0.113.0/24 hand out one address string twice.
+            'TEST-NET-1' => ['192.0.2.0/24', false],
+            'TEST-NET-2' => ['198.51.100.0/24', false],
+            'TEST-NET-3' => ['203.0.113.0/24', false],
+            'public' => ['9.0.0.0/8', false],
+            'multicast' => ['224.0.0.0/4', false],
+            'the default route' => ['0.0.0.0/0', false],
+
+            // Straddles: half inside a reusable range is not inside it.
+            '10/7 straddles 10/8 and the public 11/8' => ['10.0.0.0/7', false],
+            '172.0/11 straddles 172.16/12' => ['172.0.0.0/11', false],
+            '192.168/15 straddles 192.168/16 and the public 192.169/16' => ['192.168.0.0/15', false],
+            '100.0/9 straddles 100.64/10' => ['100.0.0.0/9', false],
+            '126/7 straddles 127/8' => ['126.0.0.0/7', false],
+            '169.254/15 straddles 169.254/16' => ['169.254.0.0/15', false],
+
+            // RFC 4193: only L=1, fd00::/8, is locally assigned. fc00::/8 is
+            // held for a centrally assigned scheme whose prefixes would be
+            // unique, so it is not space two buildings may both hold.
+            'fd00::/8 whole' => ['fd00::/8', true],
+            'inside fd00::/8' => ['fd12:3456:789a::/48', true],
+            'fc00::/8, held for central assignment' => ['fc00::/8', false],
+            'fc00::/7 straddles fd00::/8' => ['fc00::/7', false],
+            'just above fd00::/8' => ['fe00::/8', false],
+
+            // RFC 4291 section 2.5.6: link-local unicast is fe80::/64. The
+            // rest of fe80::/10 is not link-local.
+            'fe80::/64 whole' => ['fe80::/64', true],
+            'a host on fe80::/64' => ['fe80::1234/128', true],
+            'fe80::/10 is wider than link-local' => ['fe80::/10', false],
+            'fe80:0:0:1::/64 is inside fe80::/10 and not link-local' => ['fe80:0:0:1::/64', false],
+
+            // v6 loopback, and its neighbours.
+            '::1/128' => ['::1/128', true],
+            '::2/128' => ['::2/128', false],
+            '::/127 straddles ::1' => ['::/127', false],
+
+            'v6 documentation' => ['2001:db8::/32', false],
+            'v6 global unicast' => ['2a00:1450::/32', false],
+            'v6 multicast' => ['ff02::/16', false],
+            'the v6 default route' => ['::/0', false],
+        ];
+    }
 }

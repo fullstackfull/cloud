@@ -53,8 +53,15 @@ final class SyncDedicatedServer implements ShouldQueue
         $server = DedicatedServer::query()->find($this->serverId);
 
         if ($server === null) {
-            // Retired between the sweep and the worker. Failing the job would
-            // page somebody about a machine deliberately removed.
+            // The row is gone, and retirement is not why: retirement keeps the
+            // row, because the row is what answers "where did this serial
+            // number go". Nothing in the platform deletes a dedicated server,
+            // so a row missing here was removed by hand. Failing the job would
+            // page somebody about a machine a person deliberately took away.
+            //
+            // A machine retired between the sweep and this worker never
+            // reaches this branch: its row is found and the sync runs once
+            // more, and the next sweep leaves it out.
             return;
         }
 

@@ -26,9 +26,16 @@ import {
 /**
  * The reference an adoption would attach: what the job found, or else the
  * identity it reserved before calling — the place its build would be.
+ *
+ * Except where the job's current finding is that somebody else's machine, by
+ * name, holds that identity: then the machine there is the stranger's, and
+ * this page does not propose adopting it, whatever the server would say.
  */
 function adoptableReference(job: AdminProvisioningJob): string | null {
-  return job.provider_reference ?? job.reserved_provider_id ?? null
+  if (job.provider_reference != null) return job.provider_reference
+  if (job.error_reason === 'named_otherwise') return null
+
+  return job.reserved_provider_id ?? null
 }
 
 /**
@@ -42,9 +49,23 @@ function adoptableReference(job: AdminProvisioningJob): string | null {
  *
  * Each carries what the runbook tells the operator to read (F-15): the finding
  * and its reason, the whole error rather than a truncation of it, and for a
- * VPS create the provider identity it reserved with every node and name a
- * create under it was sent with. And all three ways out are here — retry,
- * adopt, and repoint — each refused by the server where it would be wrong.
+ * VPS create the provider identity it reserved, with every node an attempt
+ * under it was placed on and every name a create under it was sent with.
+ * And the three ways out — retry, adopt and repoint — are offered wherever
+ * the page has what the act needs. Retry is offered on every job. Adopt is
+ * labelled for the machine rather than for "what it built", since it is
+ * offered, with the reserved id, on jobs that may have built nothing — right
+ * after a repoint, say — and attaches a reference rather than asking for
+ * one, so it is offered only where the page has one to attach (see
+ * adoptableReference): not on a job that has neither found a provider
+ * resource nor reserved an identity — which, until something is found, is
+ * every job but a VPS create; a shared-hosting create whose answer was lost
+ * is one, and the API can adopt it where this page cannot. Repoint is
+ * offered only on a job that holds a reserved identity, since that is all it
+ * can move. Beyond that, which of them a job may take is the server's to say,
+ * and the page shows its refusal when it gives one. The one thing the page
+ * withholds on its own reading of a finding is Adopt with an identity the
+ * job's current finding says somebody else's machine holds.
  */
 export function AdminProvisioningPage() {
   const { t } = useTranslation()

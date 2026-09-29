@@ -14,9 +14,12 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
+use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Orders\Application\Actions\PlaceOrder;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutLine;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
@@ -62,9 +65,15 @@ final class OrderToProvisionedServiceTest extends TestCase
         // machine by itself. The image is part of that shape now — a plan
         // that names none and a cluster offering no single one leaves the
         // service waiting for an operator rather than building an empty disk.
+        // And a node in service on the cluster and a host address in the
+        // pool, on a network a customer machine can be plugged into: a sale
+        // refuses a cluster with neither (F-07 (c)), and a pool whose subnet
+        // is on no such network (F-07, round four's re-audit).
         $cluster = ComputeCluster::factory()->create(['status' => 'active']);
-        IpPool::factory()->create(['is_active' => true, 'ip_version' => 4]);
+        $pool = IpPool::factory()->create(['is_active' => true, 'ip_version' => 4]);
         VmTemplate::factory()->create(['cluster_id' => $cluster->getKey()]);
+        ComputeNode::factory()->create(['cluster_id' => $cluster->getKey()]);
+        IpAddress::factory()->create(['subnet_id' => Subnet::factory()->onACustomerNetwork()->create(['ip_pool_id' => $pool->getKey()])->getKey()]);
     }
 
     private function vpsPlan(int $monthlyMinor = 9_000): Plan
@@ -266,6 +275,7 @@ final class OrderToProvisionedServiceTest extends TestCase
         // Staged on the cluster the plan names, so the image resolves where
         // the machine is going rather than where the default one lives.
         VmTemplate::factory()->create(['cluster_id' => $elsewhere->getKey()]);
+        ComputeNode::factory()->create(['cluster_id' => $elsewhere->getKey()]);
 
         $plan = $this->vpsPlan();
         $plan->forceFill([

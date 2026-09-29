@@ -37,6 +37,9 @@ spec.loader.exec_module(trust)
 PASSED = 0
 FAILED = 0
 
+# How many check() calls a full run makes; see the end of main().
+EXPECTED_CHECKS = 20
+
 
 def check(description: str, condition: bool, detail: str = "") -> None:
     global PASSED, FAILED
@@ -205,6 +208,18 @@ def main() -> int:
           all(prefix.count(".") == 2 for prefix in networks), str(networks))
 
     print(f"\n{PASSED}/{PASSED + FAILED} passed")
+
+    # There is no case table here to count: the checks are the calls above,
+    # some inside loops. So the count is of the check() calls actually made,
+    # which is literal source in this file maintained by whoever edits it. A
+    # run that makes fewer -- a block deleted, a loop emptied -- would
+    # otherwise report a smaller perfect score and exit 0.
+    if PASSED + FAILED != EXPECTED_CHECKS:
+        print(
+            f"made {PASSED + FAILED} check(s) and this file says "
+            f"{EXPECTED_CHECKS}; change both together or neither"
+        )
+        return 1
     return 1 if FAILED else 0
 
 

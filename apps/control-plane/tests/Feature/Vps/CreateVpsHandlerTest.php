@@ -11,6 +11,7 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
+use Lynomia\Modules\Compute\Infrastructure\Providers\FakeComputeProvider;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Ipam\Application\Actions\SeedSubnetAddresses;
 use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
@@ -83,7 +84,7 @@ final class CreateVpsHandlerTest extends TestCase
         $this->customer = Customer::factory()->create();
     }
 
-    private function job(array $overrides = []): ProvisioningJob
+    private function job(array $overrides = [], array $payload = []): ProvisioningJob
     {
         $service = Service::factory()->create([
             'customer_id' => $this->customer->id,
@@ -96,7 +97,7 @@ final class CreateVpsHandlerTest extends TestCase
             'kind' => 'create_vps',
             'provider' => 'fake',
             'status' => 'running',
-            'payload' => [
+            'payload' => array_merge([
                 'cluster_id' => $this->cluster->id,
                 'ip_pool_id' => $this->pool->id,
                 'vcpu' => 2,
@@ -111,7 +112,7 @@ final class CreateVpsHandlerTest extends TestCase
                 'os_family' => 'debian',
                 'architecture' => 'x86_64',
                 'ssh_keys' => ['ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 customer@example.com'],
-            ],
+            ], $payload),
         ], $overrides));
     }
 
@@ -164,15 +165,55 @@ final class CreateVpsHandlerTest extends TestCase
     #[Test]
     public function a_retried_job_does_not_commit_capacity_twice(): void
     {
+        /*
+         * A retry that reaches the capacity commitment again. The provider
+         * refuses the create outright — nothing is built, and the failure is
+         * transient, so the engine runs the job again by itself — and it
+         * does so without compensating: RunProvisioningJob::scheduleRetry()
+         * leaves the capacity this attempt committed for the next attempt to
+         * use. So the second run looks under the reserved identity, finds
+         * nothing, and commits capacity for the same job again; it is the
+         * job's idempotency key, passed as the reservation key, that keeps
+         * that from being a second machine's worth.
+         *
+         * One hypervisor across both runs, as a real cluster is. (The same
+         * test with a first run that builds cannot pin this: the second run
+         * finds that machine and stops before capacity — which is the next
+         * test's subject, not this one's.)
+         */
+        $job = $this->job(payload: ['hostname' => FakeComputeProvider::failingHostname('web-01')]);
+
+        $factory = app(ComputeProviderFactory::class);
+        $this->app->instance(ComputeProviderFactory::class, $factory);
+
+        $first = app(CreateVpsHandler::class)->execute($job);
+        $second = app(CreateVpsHandler::class)->execute($job->fresh());
+
+        // Both runs got as far as the provider's create, so both went through
+        // the capacity commitment on the way.
+        foreach (['first' => $first, 'second' => $second] as $run => $result) {
+            $this->assertSame(FailureClass::Transient, $result->failureClass, $run.' run: '.$result->errorMessage);
+            $this->assertSame('compute.provider_request_failed', $result->errorCode, $run.' run: '.$result->errorMessage);
+        }
+
+        // Capacity is keyed on the job's idempotency key. Without that, the
+        // second commitment never comes back — release is driven by destroying
+        // a machine, and there is only one machine to destroy.
+        $this->assertSame(2, $this->node->fresh()->allocated_cpu_cores);
+        $this->assertSame(4096, (int) $this->node->fresh()->allocated_memory_mib);
+    }
+
+    #[Test]
+    public function a_second_run_that_finds_the_first_runs_machine_commits_nothing_more(): void
+    {
+        /*
+         * One hypervisor across both runs, as a real cluster is. The first
+         * run builds; the second asks for the same reserved identity, finds
+         * that machine there (F-15), and stops before it reserves anything —
+         * so it builds nothing, records nothing, and commits nothing.
+         */
         $job = $this->job();
 
-        /*
-         * One hypervisor across both runs, as a real cluster is. The second
-         * run asks for the same reserved identity and finds the first run's
-         * machine there (F-15), so it builds nothing — and what this test
-         * pins is that the capacity commitment is not doubled on the way to
-         * finding that out either.
-         */
         $factory = app(ComputeProviderFactory::class);
         $this->app->instance(ComputeProviderFactory::class, $factory);
 
@@ -180,11 +221,9 @@ final class CreateVpsHandlerTest extends TestCase
         $second = app(CreateVpsHandler::class)->execute($job->fresh());
 
         $this->assertSame(CreateVpsHandler::FOUND_ITS_OWN_BUILD, $second->errorCode);
-
-        // Capacity is keyed on the job's idempotency key. Without that, the
-        // second commitment never comes back — release is driven by destroying
-        // a machine, and there is only one machine to destroy.
+        $this->assertSame(1, VirtualMachine::query()->count());
         $this->assertSame(2, $this->node->fresh()->allocated_cpu_cores);
+        $this->assertSame(1, $this->node->fresh()->vm_count);
     }
 
     #[Test]

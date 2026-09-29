@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Subscriptions;
 
+use ArrayObject;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Lynomia\Modules\Backups\Application\Actions\HoldBackupsThroughRetention;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Compute\Application\Actions\EnforceComputeSuspension;
@@ -27,6 +29,7 @@ use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
 use Lynomia\Modules\Provisioning\Application\Actions\BeginRetentionWindow;
 use Lynomia\Modules\Provisioning\Application\Actions\TransitionService;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Provisioning\Domain\Events\ServiceStatusChanged;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\SharedHosting\Application\Actions\SuspendHostingAccount;
 use Lynomia\Modules\SharedHosting\Application\Actions\UnsuspendHostingAccount;
@@ -164,6 +167,44 @@ final class SubscriptionSuspensionLifecycleTest extends TestCase
         $this->assertTrue($state->startsOnBoot);
     }
 
+    /**
+     * The row passes through `reactivating` on the way back, and through it
+     * only: the state that says "paid for, machine not yet back" is written
+     * before the hypervisor is asked, and left when it answers.
+     *
+     * This is the oracle for `ServiceStatus::Reactivating` being written at
+     * all. The producer gate cannot give one: `CustomerServiceState::
+     * underlyingStatuses()` names the case in list literals that a filter
+     * reads, which a token classifier counts as producers, so replacing the
+     * listener's one real write with `Active` left that gate green, and every
+     * assertion on the final status too. Each move is read from the event
+     * TransitionService raises for it.
+     */
+    #[Test]
+    public function payment_moves_the_service_through_reactivating_before_active(): void
+    {
+        $this->suspendSubscription();
+
+        $moves = $this->recordMoves();
+
+        $this->reactivateSubscription();
+
+        $this->assertSame([['suspended', 'reactivating'], ['reactivating', 'active']], $moves->getArrayCopy());
+    }
+
+    #[Test]
+    public function a_reactivation_the_provider_refuses_goes_through_reactivating_and_back(): void
+    {
+        $this->suspendSubscription();
+        $this->lockTakenBySomethingElse();
+
+        $moves = $this->recordMoves();
+
+        $this->reactivateSubscription();
+
+        $this->assertSame([['suspended', 'reactivating'], ['reactivating', 'suspended']], $moves->getArrayCopy());
+    }
+
     #[Test]
     public function a_reactivation_the_provider_will_not_confirm_does_not_pretend(): void
     {
@@ -278,6 +319,26 @@ final class SubscriptionSuspensionLifecycleTest extends TestCase
 
         $this->assertSame(ServiceStatus::Active, $this->service->fresh()?->status);
         $this->assertSame(PowerState::Running, $this->remote()?->powerState);
+    }
+
+    /**
+     * Every status move of this test's service from here on, as [from, to].
+     *
+     * @return ArrayObject<int, array{string, string}>
+     */
+    private function recordMoves(): ArrayObject
+    {
+        /** @var ArrayObject<int, array{string, string}> $moves */
+        $moves = new ArrayObject;
+        $id = (string) $this->service->getKey();
+
+        Event::listen(ServiceStatusChanged::class, static function (ServiceStatusChanged $moved) use ($moves, $id): void {
+            if ($moved->serviceId === $id) {
+                $moves[] = [$moved->from->value, $moved->to->value];
+            }
+        });
+
+        return $moves;
     }
 
     private function suspendSubscription(SubscriptionStatus $from = SubscriptionStatus::PastDue): void

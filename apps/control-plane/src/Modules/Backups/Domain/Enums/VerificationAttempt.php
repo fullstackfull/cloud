@@ -7,7 +7,8 @@ namespace Lynomia\Modules\Backups\Domain\Enums;
 /**
  * What came of asking one provider to read one archive back.
  *
- * Three outcomes and not two, because the third one used to be counted as the
+ * Three outcomes and not two — four, counting the row that moved while the
+ * sweep held a stale copy of it — because the third one used to be counted as the
  * second. `NotAskable` is a provider that does not offer verification on
  * demand at all — Proxmox Backup Server verifies on its own schedule and has
  * no endpoint to start one — and that is a fact about the provider, not a
@@ -28,4 +29,10 @@ enum VerificationAttempt
 
     /** This provider cannot be asked to verify. The row was left untouched. */
     case NotAskable;
+
+    /**
+     * The row was moved by somebody else — a restore, a deletion request —
+     * after the sweep loaded it. Left to whoever moved it.
+     */
+    case Superseded;
 }

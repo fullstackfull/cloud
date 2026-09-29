@@ -214,12 +214,17 @@ final class InventoryController
             ? Network::query()->findOrFail($request->string('network_id')->value())
             : null;
 
+        /** @var list<string> $reserved */
+        $reserved = array_values(array_map(strval(...), $request->array('reserved_addresses')));
+
         $subnet = $register->execute(
             $found,
             $request->string('cidr')->value(),
             $request->input('gateway'),
             $network,
             $this->operator($request),
+            reservedAddresses: $reserved,
+            allocatable: $request->boolean('allocatable', true),
         );
 
         return response()->json([
@@ -230,6 +235,15 @@ final class InventoryController
                 'prefix_length' => $subnet->prefix_length,
                 'gateway' => $subnet->gateway,
                 'network_id' => $subnet->network_id,
+                /*
+                 * The rows written available, which is what registering the
+                 * block was for. Zero for IPv6 and for held space, said rather
+                 * than left for the first order to discover.
+                 */
+                'allocatable_addresses' => IpAddress::query()
+                    ->where('subnet_id', $subnet->getKey())
+                    ->available()
+                    ->count(),
             ],
         ], Response::HTTP_CREATED);
     }
@@ -552,7 +566,15 @@ final class InventoryController
             $this->operator($request),
             self::NETWORK_EDITABLE,
             $request->input('version'),
-            $this->takesOutOfService($changes, 'is_active')
+            /*
+             * Clearing the bridge takes the network out of service for a VPS
+             * as surely as switching it off: the build attaches a machine only
+             * where Network::canCarryACustomerMachine() holds, which needs a
+             * bridge, so every active subnet on the network would become
+             * addresses no build can use (F-07, round four's re-audit). It is
+             * refused on the same count. Renaming the bridge is not.
+             */
+            $this->takesOutOfService($changes, 'is_active') || self::clearsTheBridge($changes)
                 ? static fn (): int => Subnet::query()
                     ->where('network_id', $found->getKey())
                     ->where('is_active', true)
@@ -648,6 +670,25 @@ final class InventoryController
         }
 
         /*
+         * The hostname is what gets dialled when the node has no API endpoint,
+         * so it is asked about whenever this edit leaves the node in that
+         * state and touches either field: a new hostname on a node without an
+         * endpoint, or an endpoint cleared on a node whose hostname was never
+         * asked about. The create road asks the same question
+         * (RegisterHostingNode). A fake panel dials nothing.
+         */
+        $endpointAfter = array_key_exists('api_endpoint', $changes) ? $changes['api_endpoint'] : $found->api_endpoint;
+        $hostnameAfter = (string) ($changes['hostname'] ?? $found->hostname);
+
+        if (
+            $found->panel !== HostingPanel::Fake
+            && trim((string) $endpointAfter) === ''
+            && (array_key_exists('hostname', $changes) || array_key_exists('api_endpoint', $changes))
+        ) {
+            $this->endpoints->assertMachineAddress($hostnameAfter, production: app()->environment('production'));
+        }
+
+        /*
          * Offline means the platform will not reach it. Draining — no new
          * accounts, the existing ones untouched — is the supported way to wind
          * a node down and is never refused.
@@ -674,6 +715,16 @@ final class InventoryController
                 'accepts_new_accounts' => $found->accepts_new_accounts,
             ],
         ]);
+    }
+
+    /**
+     * Whether a network change clears its bridge (null or blank).
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    private static function clearsTheBridge(array $changes): bool
+    {
+        return array_key_exists('bridge', $changes) && trim((string) ($changes['bridge'] ?? '')) === '';
     }
 
     /**

@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Dedicated\Application\Actions;
 
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Dedicated\Application\Services\PowerClaimLease;
 use Lynomia\Modules\Dedicated\Domain\DTOs\BmcOperation;
 use Lynomia\Modules\Dedicated\Domain\Enums\BmcProtocol;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedPowerAction;
@@ -73,6 +74,13 @@ use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
  * know" repeated is still the truth and a second reset is not a way to find
  * out.
  *
+ * A claim whose process died before the controller answered is the same
+ * answer arrived at another way. It is bounded by {@see PowerClaimLease}:
+ * inside the lease a repeat is refused as still in flight, and past it the
+ * claim is settled as indeterminate — never released, so the unique index
+ * stays the only gate and the key is answered from the row rather than
+ * refused for ever.
+ *
  * Two different keys are two intents and both execute: a customer who reboots
  * at nine and again at noon meant both, and this deliberately does not
  * deduplicate a verb forever.
@@ -101,6 +109,7 @@ final readonly class ChangeDedicatedServerPower
     public function __construct(
         private DedicatedProviderFactory $providers,
         private DedicatedOperationGuard $guard,
+        private PowerClaimLease $lease,
     ) {}
 
     /**
@@ -279,7 +288,17 @@ final readonly class ChangeDedicatedServerPower
      * defect this table exists to close; the unique index means one of them
      * loses at the database and reads the winner's row instead.
      *
-     * @throws DedicatedOperationRefusedException the winning request has not settled yet
+     * The row it reads may be a claim whose process died before the
+     * controller answered — a row identical to a winner still waiting on a
+     * slow BMC. Nothing in the row can tell them apart; the lease is sized so
+     * that no honest request outlives it (config/dedicated.php argues the
+     * arithmetic), so inside it the claim is treated as in flight, and past
+     * it the claim is settled as indeterminate here, by the same conditional
+     * write the sweep uses, and answered from the row. It is never deleted
+     * and never claimed again, so this request does not reach the chassis
+     * either way.
+     *
+     * @throws DedicatedOperationRefusedException the winning request has not settled yet and its lease has not lapsed
      */
     private function claim(
         DedicatedServer $server,
@@ -314,6 +333,12 @@ final readonly class ChangeDedicatedServerPower
         } catch (UniqueConstraintViolationException) {
             /** @var DedicatedPowerOperation $existing */
             $existing = DedicatedPowerOperation::query()->where('idempotency_key', $key)->firstOrFail();
+
+            if ($this->lease->hasLapsed($existing)) {
+                // Whether this call or another writer settled it, the row now
+                // says what the key answers; the return value is not needed.
+                $this->lease->settleAsAbandoned($existing);
+            }
 
             if (! $existing->outcome->isSettled()) {
                 throw DedicatedOperationRefusedException::becauseTheSameRequestIsStillInFlight(
@@ -377,6 +402,14 @@ final readonly class ChangeDedicatedServerPower
         };
     }
 
+    /**
+     * Record what the controller said.
+     *
+     * Unconditional, unlike the lease's write, and on purpose: this is the
+     * owning process with a real answer, and a real answer beats the "we do
+     * not know" the lease may have written while this request was still
+     * waiting on a slow controller. See {@see PowerClaimLease}.
+     */
     private function settle(
         ?DedicatedPowerOperation $record,
         PowerOperationOutcome $outcome,

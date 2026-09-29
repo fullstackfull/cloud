@@ -10,10 +10,18 @@ use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
+use Lynomia\Modules\Compute\Domain\Enums\NodeStatus;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
+use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
+use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
 use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\OsInstallProfile;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Orders\Application\Actions\PlaceOrder;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutLine;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
@@ -22,6 +30,9 @@ use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Payments\Application\Actions\StartInvoicePayment;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\SharedHosting\Domain\Enums\HostingNodeStatus;
+use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use PHPUnit\Framework\Attributes\Test;
@@ -51,9 +62,12 @@ use PHPUnit\Framework\Attributes\Test;
  * The distinction these tests keep is between what Lynomia's own database says
  * and what a provider would say if asked. Nothing here contacts a provider,
  * and nothing here claims a machine can actually be built — only that the
- * configuration needed to ask for one exists. A Dedicated plan resolves its
- * chassis inside its own handler from inventory, so it has no local mapping to
- * check and is not gated here.
+ * configuration needed to ask for one exists. For a VPS that includes a node
+ * in service on the cluster and a subnet in the pool with a host address to
+ * hand out — rows an operator writes — but not whether the node has room or
+ * the pool has an address free at this moment: that is capacity, and the
+ * build's job waits for it. A Dedicated plan resolves its datacenter, pool and
+ * install profile the same way; whether a machine is free is the handler's.
  */
 final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestCase
 {
@@ -89,6 +103,56 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
         $this->assertNotNull(Invoice::query()->where('order_id', $order->getKey())->first());
     }
 
+    #[Test]
+    public function a_hosting_plan_no_hosting_node_can_take_is_not_orderable(): void
+    {
+        /*
+         * F-07 as the re-audit after round two measured it: a package and zero
+         * hosting nodes was accepted, paid, built into a FAILED service with a
+         * `needs_review` job saying "No hosting node can take an account on
+         * package ...", and renewed. That sentence is a fact about this
+         * platform's own rows, knowable before the money moves.
+         *
+         * A fleet with nodes that the scheduler would exclude is the same
+         * fact: a node that is offline, draining, closed to new accounts or
+         * unlicensed takes nobody.
+         */
+        $fleets = [
+            'no node at all' => static fn (): null => null,
+            'an offline node' => static fn (): HostingNode => HostingNode::factory()->status(HostingNodeStatus::Offline)->create(),
+            'a draining node' => static fn (): HostingNode => HostingNode::factory()->draining()->create(),
+            'a node closed to new accounts' => static fn (): HostingNode => HostingNode::factory()->create(['accepts_new_accounts' => false]),
+            'an unlicensed node' => static fn (): HostingNode => HostingNode::factory()->panel(HostingPanel::Cpanel)->unlicensed()->create(),
+        ];
+
+        foreach ($fleets as $fleet => $build) {
+            HostingNode::query()->delete();
+            $build();
+
+            [$customer] = $this->accountWithOwner();
+            $plan = $this->hostingPlan(withPackage: true, withNode: false);
+
+            try {
+                $this->place($customer, $plan);
+                $this->fail('A hosting order was accepted with '.$fleet.' to put it on.');
+            } catch (CheckoutRejectedException $e) {
+                $this->assertSame('checkout.not_deliverable', $e->errorCode(), $fleet);
+            }
+
+            $this->assertSame(0, Order::query()->where('customer_id', $customer->getKey())->count(), $fleet);
+        }
+
+        // The positive control: one node that can take the package, and the
+        // same plan is sold.
+        HostingNode::query()->delete();
+        HostingNode::factory()->create();
+
+        [$customer] = $this->accountWithOwner();
+        $this->place($customer, $this->hostingPlan(withPackage: true, withNode: false));
+
+        $this->assertSame(1, Order::query()->where('customer_id', $customer->getKey())->count());
+    }
+
     // ---- vps --------------------------------------------------------------
 
     #[Test]
@@ -113,19 +177,247 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
         $this->assertSame(1, Order::query()->count());
     }
 
-    // ---- dedicated is not gated here --------------------------------------
-
     #[Test]
-    public function a_dedicated_plan_is_not_refused_for_want_of_a_local_mapping(): void
+    public function a_vps_plan_on_a_cluster_with_no_node_in_service_or_a_pool_with_no_address_is_not_orderable(): void
     {
         /*
-         * A dedicated server reserves a chassis from inventory inside its own
-         * handler; there is no catalogue mapping to resolve up front, so there
-         * is nothing here that could truthfully be checked. Gating it on
-         * something invented would refuse a product that is perfectly orderable.
+         * F-07 (c), as the re-audit after round three found it: an ACTIVE
+         * cluster with no compute node at all, or only nodes an operator has
+         * not put in service (SyncClusterInventory creates them in
+         * maintenance until somebody activates them), and a pool with no
+         * subnet behind it, sold, took the money and built a service straight
+         * into needs_review. These are rows an operator writes, like a
+         * hosting node, and they are refused at sale. Room on a node and a
+         * free address are not: the positive controls below sell a node with
+         * nothing free and a pool whose every host is taken.
+         */
+        $cluster = ComputeCluster::factory()->create(['status' => 'active']);
+        VmTemplate::factory()->create(['cluster_id' => $cluster->getKey()]);
+        $pool = IpPool::factory()->create(['is_active' => true, 'ip_version' => 4]);
+
+        $refused = function (string $what): void {
+            [$customer] = $this->accountWithOwner();
+
+            try {
+                $this->place($customer, $this->planFor(ProductKind::Vps));
+                $this->fail('A VPS was sold onto '.$what.'.');
+            } catch (CheckoutRejectedException $e) {
+                $this->assertSame('checkout.not_deliverable', $e->errorCode(), $what);
+            }
+        };
+
+        // A subnet with a host to hand out, on a network a machine can be
+        // plugged into, so every refusal below is the node's.
+        $subnet = Subnet::factory()->onACustomerNetwork()->create(['ip_pool_id' => $pool->getKey()]);
+        IpAddress::factory()->create(['subnet_id' => $subnet->getKey()]);
+
+        $refused('a cluster with no compute node');
+
+        foreach ([NodeStatus::Maintenance, NodeStatus::Draining, NodeStatus::Offline] as $status) {
+            ComputeNode::factory()->status($status)->create(['cluster_id' => $cluster->getKey()]);
+            $refused('a cluster whose only nodes are '.$status->value);
+        }
+
+        // A node in service elsewhere does not serve this cluster (the other
+        // cluster is offline, so it is not a second candidate either).
+        ComputeNode::factory()->create([
+            'cluster_id' => ComputeCluster::factory()->create(['status' => 'offline'])->getKey(),
+        ]);
+        $refused('a cluster whose node in service is in another cluster');
+
+        $this->assertSame(0, Order::query()->count());
+
+        // Now the pool: a node in service, and the subnet taken away.
+        ComputeNode::factory()->create(['cluster_id' => $cluster->getKey()]);
+        IpAddress::query()->where('subnet_id', $subnet->getKey())->delete();
+        $subnet->delete();
+
+        $refused('a pool with no subnet');
+
+        $unseeded = Subnet::factory()->onACustomerNetwork()->create(['ip_pool_id' => $pool->getKey()]);
+        $refused('a pool whose subnet has no address rows');
+
+        IpAddress::factory()->unavailable()->create(['subnet_id' => $unseeded->getKey()]);
+        $refused('a pool whose subnet holds only addresses taken out of service');
+
+        $inactive = Subnet::factory()->onACustomerNetwork()->create(['ip_pool_id' => $pool->getKey(), 'is_active' => false]);
+        IpAddress::factory()->create(['subnet_id' => $inactive->getKey()]);
+        $refused('a pool whose only host address is in a switched-off subnet');
+
+        $this->assertSame(0, Order::query()->count());
+
+        // Positive control: every host in the pool taken, and a node with no
+        // room. Both are capacity - the build's job waits for them - so the
+        // sale goes through.
+        IpAddress::factory()->assigned()->create(['subnet_id' => $unseeded->getKey()]);
+        ComputeNode::query()->where('cluster_id', $cluster->getKey())->where('status', NodeStatus::Active->value)
+            ->update(['allocated_memory_mib' => 262144, 'allocated_cpu_cores' => 128, 'allocated_storage_gib' => 8192]);
+
+        [$customer] = $this->accountWithOwner();
+        $this->place($customer, $this->planFor(ProductKind::Vps));
+
+        $this->assertSame(1, Order::query()->count());
+    }
+
+    #[Test]
+    public function a_vps_plan_whose_pool_has_no_subnet_a_machine_can_be_plugged_in_at_is_not_orderable(): void
+    {
+        /*
+         * F-07, as the re-audit of round four found it (A×D): the sale asked
+         * only for an active IPv4 subnet holding a host address, never which
+         * network the subnet is on, while CreateVpsHandler reserves only from
+         * subnets whose network can carry a customer machine
+         * (IpAllocator `attachableOnly`, Network::canCarryACustomerMachine()).
+         * A pool whose only subnet was on no network, on a network with no
+         * bridge, on a management or an inactive network was sold, paid, and
+         * built into ipam.pool_exhausted on every attempt - needs_review with
+         * the money held. Each is refused at sale now; a host already
+         * reserved or assigned on a network that can carry the machine is
+         * capacity and still sells.
+         */
+        $cluster = ComputeCluster::factory()->create(['status' => 'active']);
+        VmTemplate::factory()->create(['cluster_id' => $cluster->getKey()]);
+        ComputeNode::factory()->create(['cluster_id' => $cluster->getKey()]);
+        $pool = IpPool::factory()->create(['is_active' => true, 'ip_version' => 4]);
+
+        $refused = function (string $what): void {
+            [$customer] = $this->accountWithOwner();
+
+            try {
+                $this->place($customer, $this->planFor(ProductKind::Vps));
+                $this->fail('A VPS was sold onto '.$what.'.');
+            } catch (CheckoutRejectedException $e) {
+                $this->assertSame('checkout.not_deliverable', $e->errorCode(), $what);
+            }
+        };
+
+        $networkless = Subnet::factory()->create(['ip_pool_id' => $pool->getKey(), 'network_id' => null]);
+        IpAddress::factory()->create(['subnet_id' => $networkless->getKey()]);
+        $refused('a pool whose only subnet is on no network');
+
+        foreach ([
+            'a network with no bridge' => Network::factory()->create(['bridge' => null]),
+            'a network with an empty bridge' => Network::factory()->create(['bridge' => '']),
+            'a management network' => Network::factory()->management()->create(['bridge' => 'vmbr0']),
+            'an inactive network' => Network::factory()->inactive()->create(['bridge' => 'vmbr1']),
+            'a network not customer-facing' => Network::factory()->create(['bridge' => 'vmbr1', 'is_customer_facing' => false]),
+        ] as $what => $network) {
+            $subnet = Subnet::factory()->create(['ip_pool_id' => $pool->getKey(), 'network_id' => $network->getKey()]);
+            IpAddress::factory()->create(['subnet_id' => $subnet->getKey()]);
+            $refused('a pool whose only subnets are on '.$what);
+        }
+
+        // An attachable subnet whose only host is out of service is no host.
+        $carrying = Subnet::factory()->onACustomerNetwork()->create(['ip_pool_id' => $pool->getKey()]);
+        IpAddress::factory()->unavailable()->create(['subnet_id' => $carrying->getKey()]);
+        $refused('a pool whose attachable subnet holds only addresses taken out of service');
+
+        $this->assertSame(0, Order::query()->count());
+
+        // Positive control: the attachable subnet's host is assigned already.
+        // Waiting for one to come free is capacity, so the sale goes through.
+        IpAddress::factory()->assigned()->create(['subnet_id' => $carrying->getKey()]);
+
+        [$customer] = $this->accountWithOwner();
+        $this->place($customer, $this->planFor(ProductKind::Vps));
+
+        $this->assertSame(1, Order::query()->count());
+    }
+
+    #[Test]
+    public function a_vps_plan_that_names_a_cluster_or_pool_that_cannot_take_it_is_not_orderable(): void
+    {
+        /*
+         * A declared target used to be trusted as given: the re-audit sold a
+         * plan whose constraints named an offline cluster and an inactive
+         * pool. The estate below has exactly one active cluster and one
+         * active customer pool, so every refusal here is about the plan's own
+         * declaration and not about ambiguity.
+         */
+        [$activeCluster, $activePool] = $this->oneOfEverything();
+
+        $offline = ComputeCluster::factory()->create(['status' => 'offline']);
+        VmTemplate::factory()->create(['cluster_id' => $offline->getKey()]);
+
+        $inactivePool = IpPool::factory()->create(['is_active' => false, 'ip_version' => 4]);
+        $managementPool = IpPool::factory()->management()->create(['is_active' => true, 'ip_version' => 4]);
+
+        $declarations = [
+            'an offline cluster' => ['cluster_id' => (string) $offline->getKey(), 'ip_pool_id' => (string) $activePool->getKey()],
+            'a cluster that does not exist' => ['cluster_id' => '01jzzzzzzzzzzzzzzzzzzzzzzz', 'ip_pool_id' => (string) $activePool->getKey()],
+            'an inactive pool' => ['cluster_id' => (string) $activeCluster->getKey(), 'ip_pool_id' => (string) $inactivePool->getKey()],
+            'a pool that does not exist' => ['cluster_id' => (string) $activeCluster->getKey(), 'ip_pool_id' => '01jzzzzzzzzzzzzzzzzzzzzzzz'],
+            'a management pool' => ['cluster_id' => (string) $activeCluster->getKey(), 'ip_pool_id' => (string) $managementPool->getKey()],
+        ];
+
+        foreach ($declarations as $what => $constraints) {
+            [$customer] = $this->accountWithOwner();
+            $plan = $this->planFor(ProductKind::Vps);
+            $plan->forceFill(['placement_constraints' => $constraints])->save();
+
+            try {
+                $this->place($customer, $plan->fresh(['prices', 'product']));
+                $this->fail('A VPS order was accepted for a plan that names '.$what.'.');
+            } catch (CheckoutRejectedException $e) {
+                $this->assertSame('checkout.not_deliverable', $e->errorCode(), $what);
+            }
+        }
+
+        $this->assertSame(0, Order::query()->count());
+
+        // The positive control: the same plan naming the active pair sells.
+        [$customer] = $this->accountWithOwner();
+        $plan = $this->planFor(ProductKind::Vps);
+        $plan->forceFill(['placement_constraints' => [
+            'cluster_id' => (string) $activeCluster->getKey(),
+            'ip_pool_id' => (string) $activePool->getKey(),
+        ]])->save();
+
+        $this->place($customer, $plan->fresh(['prices', 'product']));
+
+        $this->assertSame(1, Order::query()->count());
+    }
+
+    // ---- dedicated ---------------------------------------------------------
+
+    #[Test]
+    public function a_dedicated_plan_with_nothing_to_build_it_from_cannot_be_ordered(): void
+    {
+        /*
+         * This row used to be `a_dedicated_plan_is_not_refused_for_want_of_a_local_mapping`
+         * and asserted the order was accepted. It was asserting the defect
+         * (F-02): the Dedicated build reserves a machine in a datacenter, an
+         * address from a pool and installs from an OS install profile, and an
+         * order for a plan with none of the three was taken, paid, and could
+         * never be built. Those three are rows this platform holds, so they
+         * are checked before money moves, as a hosting package and a cluster
+         * are.
          */
         [$customer] = $this->accountWithOwner();
         $plan = $this->planFor(ProductKind::Dedicated);
+
+        try {
+            $this->place($customer, $plan);
+            $this->fail('An order was accepted for a Dedicated plan the estate holds nothing to build from.');
+        } catch (CheckoutRejectedException $e) {
+            $this->assertSame('checkout.not_deliverable', $e->errorCode());
+        }
+
+        $this->assertSame(0, Order::query()->count());
+        $this->assertSame(0, Invoice::query()->count());
+    }
+
+    #[Test]
+    public function a_dedicated_plan_whose_machine_address_and_install_profile_resolve_is_accepted(): void
+    {
+        [$customer] = $this->accountWithOwner();
+        $plan = $this->planFor(ProductKind::Dedicated);
+        $plan->forceFill(['resources' => ['hardware_profile' => 'ded-standard-1', 'ipv4_count' => 1]])->save();
+
+        $datacenter = Datacenter::factory()->create();
+        DedicatedServer::factory()->inDatacenter($datacenter)->profile('ded-standard-1')->create();
+        IpPool::factory()->create(['datacenter_id' => $datacenter->getKey(), 'is_active' => true, 'ip_version' => 4]);
+        OsInstallProfile::factory()->create();
 
         $this->place($customer, $plan);
 
@@ -239,11 +531,12 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
     public function the_refusal_tells_the_customer_nothing_about_the_estate(): void
     {
         /*
-         * `error.details` is published to the client verbatim, so anything put
-         * on the exception's context is a public field. The reason a plan
-         * cannot be placed names a cluster, an IP pool or a panel package —
-         * the shape of the estate, handed to anybody who can reach the
-         * checkout endpoint, for a refusal they cannot act on anyway.
+         * `error.details` is whatever the exception's class declares with
+         * publishing(), and a context is one declaration away from it. The
+         * reason a plan cannot be placed names a cluster, an IP pool or a
+         * panel package — the shape of the estate, handed to anybody who can
+         * reach the checkout endpoint, for a refusal they cannot act on
+         * anyway — so it is not carried at all, and this row reads the body.
          */
         [, $user] = $this->accountWithOwner();
         $vps = $this->vpsPlan(withPlacement: false);
@@ -320,7 +613,7 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
 
         // Beside one customer pool it is not ambiguity either: there is still
         // exactly one pool a customer may be given an address from.
-        IpPool::factory()->create(['is_active' => true, 'ip_version' => 4]);
+        $this->inService($cluster, IpPool::factory()->create(['is_active' => true, 'ip_version' => 4]));
 
         $this->place($customer, $plan->fresh(['prices', 'product']));
 
@@ -346,12 +639,17 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
         ));
     }
 
-    private function hostingPlan(bool $withPackage, int $monthlyMinor = 9_000): Plan
+    private function hostingPlan(bool $withPackage, int $monthlyMinor = 9_000, bool $withNode = true): Plan
     {
         $plan = $this->planFor(ProductKind::SharedHosting, $monthlyMinor);
 
         if ($withPackage) {
             HostingPackage::factory()->create(['plan_id' => $plan->getKey()]);
+        }
+
+        // A package is not enough: something has to be able to host it.
+        if ($withNode && ! HostingNode::query()->exists()) {
+            HostingNode::factory()->create();
         }
 
         return $plan->fresh(['prices', 'product']);
@@ -363,11 +661,41 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
 
         if ($withPlacement) {
             $cluster = ComputeCluster::factory()->create(['status' => 'active']);
-            IpPool::factory()->create(['is_active' => true, 'ip_version' => 4]);
+            $pool = IpPool::factory()->create(['is_active' => true, 'ip_version' => 4]);
             VmTemplate::factory()->create(['cluster_id' => $cluster->getKey()]);
+            $this->inService($cluster, $pool);
         }
 
         return $plan->fresh(['prices', 'product']);
+    }
+
+    /**
+     * One active cluster with one image, and one active customer pool.
+     *
+     * @return array{ComputeCluster, IpPool}
+     */
+    private function oneOfEverything(): array
+    {
+        $cluster = ComputeCluster::factory()->create(['status' => 'active']);
+        VmTemplate::factory()->create(['cluster_id' => $cluster->getKey()]);
+        $pool = IpPool::factory()->create(['is_active' => true, 'ip_version' => 4]);
+        $this->inService($cluster, $pool);
+
+        return [$cluster, $pool];
+    }
+
+    /**
+     * A node in service on the cluster and a subnet in the pool, on a network
+     * a customer machine can be plugged into, with a host address to hand
+     * out: what a VPS needs configured before it is sold. The subnet used to
+     * be on no network at all — an estate the build can never reserve from,
+     * which this fixture asserted was sellable (F-07, round four's re-audit).
+     */
+    private function inService(ComputeCluster $cluster, IpPool $pool): void
+    {
+        ComputeNode::factory()->create(['cluster_id' => $cluster->getKey()]);
+        $subnet = Subnet::factory()->onACustomerNetwork()->create(['ip_pool_id' => $pool->getKey()]);
+        IpAddress::factory()->create(['subnet_id' => $subnet->getKey()]);
     }
 
     private function planFor(ProductKind $kind, int $monthlyMinor = 9_000): Plan

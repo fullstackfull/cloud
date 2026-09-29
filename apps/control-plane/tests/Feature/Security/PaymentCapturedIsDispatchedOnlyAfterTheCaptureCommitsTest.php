@@ -15,6 +15,7 @@ use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
 use Lynomia\Modules\Payments\Infrastructure\Providers\FakePaymentProvider;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\TestDatabaseGuard;
 use Tests\TestCase;
 
 /**
@@ -68,6 +69,7 @@ final class PaymentCapturedIsDispatchedOnlyAfterTheCaptureCommitsTest extends Te
     protected function tearDown(): void
     {
         DB::purge(self::WORKER_CONNECTION);
+        TestDatabaseGuard::refuseToEmpty(DB::connection());
         DB::statement('TRUNCATE customers, users, webhook_events RESTART IDENTITY CASCADE');
 
         parent::tearDown();

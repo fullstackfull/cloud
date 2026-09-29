@@ -30,8 +30,9 @@ use PHPUnit\Framework\TestCase;
  * refuse it), and two non-ASCII names. Those last two are the ones a future
  * change to multibyte lower-casing would move — and the database's CHECK
  * constraint computes `lower()` under a UTF-8 locale, so the application and
- * the column already disagree about them. That is latent only because every
- * producer runs `problemWith()`, which refuses non-ASCII, before it folds.
+ * the column already disagree about them. That is latent only because the
+ * hosting build, which writes that column, runs `problemWith()` — which
+ * refuses non-ASCII — before it folds.
  */
 final class DnsNameFoldsANameAsItWasSubmittedTest extends TestCase
 {
@@ -54,7 +55,7 @@ final class DnsNameFoldsANameAsItWasSubmittedTest extends TestCase
             'vertical tab' => ["\x0Bexample.test\x0B"],
             'nul' => ["\0example.test\0"],
             'dots and spaces interleaved' => [' . example.test . '],
-            'dot then space then dot' => ['.\t.Example.Test.\n.'],
+            'dots with a tab and a newline between' => [".\t.Example.Test.\n."],
             'inner space survives' => ['exa mple.test'],
             'inner double dot survives' => ['example..test'],
             'only dots' => ['...'],

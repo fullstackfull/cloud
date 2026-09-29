@@ -41,15 +41,19 @@ final class RoleController
                 return [
                     'name' => $role->name,
                     'label' => $known?->label() ?? $role->name,
-                    'is_staff_role' => $known?->isStaffRole() ?? true,
+                    // A role row the enum does not declare is not staff: the staff
+                    // gate (EnsureTheCallerIsStaff) does not let it through.
+                    'is_staff_role' => $known?->isStaffRole() ?? false,
                     /*
                      * Super Admin's authority comes from the Gate::before
                      * bypass and not from these rows, so the list is empty and
                      * editing it would change nothing while looking like it
-                     * had. Published as a flag so the screen can say so rather
+                     * had. Customer is every customer login's baseline, fixed
+                     * by the platform. Both are refused by SetRolePermissions;
+                     * published as a flag so the screen can say so rather
                      * than offering a control that refuses.
                      */
-                    'permissions_are_editable' => $role->name !== RoleEnum::SuperAdmin->value,
+                    'permissions_are_editable' => self::editable($role),
                     'grants_everything' => $role->name === RoleEnum::SuperAdmin->value,
                     'permissions' => $role->permissions->pluck('name')->sort()->values()->all(),
                     'operators' => (int) ($holders[$role->name] ?? 0),
@@ -105,6 +109,15 @@ final class RoleController
         ]);
     }
 
+    /**
+     * The same answer SetRolePermissions gives. A role the enum does not
+     * declare is editable, as the action does not refuse it.
+     */
+    private static function editable(Role $role): bool
+    {
+        return RoleEnum::tryFrom($role->name)?->permissionsAreEditable() ?? true;
+    }
+
     public function show(Request $request, string $role): JsonResponse
     {
         $found = Role::query()->with('permissions')->where('name', $role)->firstOrFail();
@@ -114,7 +127,7 @@ final class RoleController
             'data' => [
                 'name' => $found->name,
                 'label' => $known?->label() ?? $found->name,
-                'permissions_are_editable' => $found->name !== RoleEnum::SuperAdmin->value,
+                'permissions_are_editable' => self::editable($found),
                 'grants_everything' => $found->name === RoleEnum::SuperAdmin->value,
                 'permissions' => $found->permissions->pluck('name')->sort()->values()->all(),
             ],

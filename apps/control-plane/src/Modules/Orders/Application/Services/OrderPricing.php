@@ -252,10 +252,12 @@ final readonly class OrderPricing
     /**
      * Refuses what this platform already knows it cannot place.
      *
-     * Local configuration only — a hosting package, a cluster, an IP pool, an
-     * OS image — and every one of those answers is a row already held, so it
-     * can be asked before a customer is charged. Nothing here contacts a
-     * provider or claims a machine can actually be built.
+     * Local configuration only — a hosting package and a hosting node that
+     * could take it, an active cluster, an active customer IP pool, an OS
+     * image — and every one of those answers is a row already held, so it can
+     * be asked before a customer is charged. Nothing here contacts a provider
+     * or claims a machine can actually be built. The exact list is
+     * LocalPlacementFeasibility's docblock, which is the code that asks it.
      *
      * The rule is {@see LocalPlacementFeasibility}, which is also what the
      * provisioning path resolves through. That is the point of it being one
@@ -263,15 +265,15 @@ final readonly class OrderPricing
      * and the one that drifts is the one that takes the money.
      *
      * The reason goes to the log and not to the customer. It names a cluster,
-     * an IP pool or a panel package, and a DomainException's context is
-     * published as `error.details` — so carrying it on the exception would
-     * hand the shape of the estate to anybody who can reach the checkout
-     * endpoint. The operator's copy is here; the customer's is a sentence
-     * saying it is not available right now and nothing was charged.
+     * an IP pool or a panel package, the shape of the estate, which nobody who
+     * can reach the checkout endpoint should be handed; it is kept off the
+     * exception entirely rather than left one `publishing()` away from
+     * `error.details`. The operator's copy is here; the customer's is a
+     * sentence saying it is not available right now and nothing was charged.
      */
     private function assertDeliverable(Plan $plan): void
     {
-        $placement = $this->placement->resolve($plan);
+        $placement = $this->placement->resolveForSale($plan);
 
         if ($placement->isFeasible()) {
             return;

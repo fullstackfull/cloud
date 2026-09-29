@@ -28,7 +28,14 @@ use RuntimeException;
  * (EndExpiredServices) and the operator's `DELETE /api/admin/services/{service}`.
  * Both come through here, and the per-kind actions below have no production
  * caller outside this class — tests call them directly, which is why that
- * sentence is scoped to production. Before F-19 the operator's route kept its
+ * sentence is scoped to production — with one exception: the hosting-account
+ * route calls EndHostingService::afterTheAccountEnded() once the account is
+ * gone from the panel. That call destroys nothing at a provider, but it does
+ * end the service row — and through it the order and the subscription (I-1)
+ * — so the route asks for service.terminate before making it, the same key
+ * this class's authorityOver() demands.
+ * LayeringTest::every_way_to_end_a_service_is_a_door_somebody_chose measures
+ * the set. Before F-19 the operator's route kept its
  * own dispatch table, `dedicated … else VPS`, and sent every hosting service
  * down the VPS path, where it was refused for having no virtual machine.
  *

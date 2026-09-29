@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Lynomia\Http\Concerns\ConfirmsCurrentPassword;
 use Lynomia\Modules\Identity\Application\Actions\ManageTwoFactor;
+use Lynomia\Modules\Identity\Application\Actions\NotifyAboutAccountSecurity;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
 final class TwoFactorController
@@ -17,6 +18,7 @@ final class TwoFactorController
 
     public function __construct(
         private readonly ManageTwoFactor $twoFactor,
+        private readonly NotifyAboutAccountSecurity $security,
     ) {}
 
     /**
@@ -47,6 +49,8 @@ final class TwoFactorController
             throw ValidationException::withMessages(['code' => __('validation.requests.auth.code_invalid')]);
         }
 
+        $this->security->twoFactorEnabled($user);
+
         return response()->json([
             'data' => ['recovery_codes' => $recoveryCodes],
             'meta' => [
@@ -62,7 +66,18 @@ final class TwoFactorController
         $user = $this->currentUser($request);
         $this->requirePasswordConfirmation($request, $user);
 
+        /*
+         * Read before the row is cleared. Only a confirmed enrolment was
+         * protecting anything, so only ending one is news — an enrolment begun
+         * and abandoned is cleared here too, silently.
+         */
+        $enrolledAt = $user->hasTwoFactorEnabled() ? $user->two_factor_confirmed_at : null;
+
         $this->twoFactor->disable($user);
+
+        if ($enrolledAt !== null) {
+            $this->security->twoFactorDisabled($user, $enrolledAt);
+        }
 
         return response()->json(status: 204);
     }

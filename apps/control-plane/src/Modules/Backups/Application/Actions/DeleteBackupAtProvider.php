@@ -7,8 +7,10 @@ namespace Lynomia\Modules\Backups\Application\Actions;
 use Lynomia\Modules\Backups\Domain\Contracts\BackupProvider;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
+use Lynomia\Modules\Backups\Domain\Exceptions\IllegalBackupTransitionException;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
+use Lynomia\Modules\Backups\Infrastructure\Models\BackupFileRestore;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 
 /**
@@ -53,7 +55,30 @@ final readonly class DeleteBackupAtProvider
         private SecretRedactor $redactor,
     ) {}
 
+    /**
+     * Remove one archive, or leave it to whoever moved the row first.
+     *
+     * The retention sweep hands this rows it loaded before it started, and a
+     * customer can keep one — `delete_requested → succeeded` — and restore it
+     * in the meantime. The move to `deleting` is a compare-and-set
+     * ({@see Backup::transitionTo()}) and happens before the provider is
+     * asked, so a stale `delete_requested` copy is a refusal here and the
+     * provider is never told to delete an archive that is being restored.
+     */
     public function execute(Backup $backup): Backup
+    {
+        try {
+            return $this->settle($backup);
+        } catch (IllegalBackupTransitionException $e) {
+            if (! $e->wasRaced()) {
+                throw $e;
+            }
+
+            return $backup->refresh();
+        }
+    }
+
+    private function settle(Backup $backup): Backup
     {
         if (! in_array($backup->state, [BackupState::DeleteRequested, BackupState::Deleting], true)) {
             return $backup;
@@ -77,6 +102,18 @@ final readonly class DeleteBackupAtProvider
         }
 
         $provider = $this->providers->for($cluster);
+
+        if ($backup->state === BackupState::DeleteRequested
+            && BackupFileRestore::query()->readingFrom((string) $backup->getKey())->exists()) {
+            /*
+             * A file restore is reading this archive. RequestBackupDeletion
+             * refuses to mark one, so this is a row marked before it did;
+             * asking the provider now would pull the source out from under
+             * the restore. Left as it is and looked at again on the next pass,
+             * while it can still be called off.
+             */
+            return $backup;
+        }
 
         if ($backup->state === BackupState::DeleteRequested) {
             $backup->transitionTo(BackupState::Deleting, []);

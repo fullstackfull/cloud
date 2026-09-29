@@ -25,6 +25,23 @@ return [
     'max_members' => (int) env('TEAM_MAX_MEMBERS', 25),
 
     /*
+     * How long an account waits before it may mail the same address again.
+     *
+     * `security.rate_limits.team_invitations` bounds how much one account
+     * sends in an hour, and says nothing about where it goes: the whole
+     * budget could go to one address, back to back, by pressing Resend or by
+     * withdrawing an offer and inviting the address again. This bounds how
+     * often one address is mailed. Both roads compare against the same clock
+     * — the last time this account mailed this address — so at the default
+     * one address gets at most one invitation mail every ten minutes from one
+     * account. Per address, not per inbox: two addresses that deliver to one
+     * mailbox each have a wait of their own, and which ones do is not
+     * something this platform can see. At least a minute, whatever this says,
+     * so a zero cannot switch the wait off.
+     */
+    'invitation_cooldown_minutes' => (int) env('TEAM_INVITATION_COOLDOWN_MINUTES', 10),
+
+    /*
      * Where the portal puts its invitation screen. Used to build the link in
      * the mail, which a queue worker has to construct without a request.
      */

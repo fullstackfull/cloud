@@ -15,6 +15,9 @@ use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Payments\Application\Actions\RecordPaymentFailure;
+use Lynomia\Modules\Payments\Domain\DTOs\ProviderEvent;
+use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
 use Lynomia\Modules\Payments\Domain\Events\PaymentFailed;
 use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
 use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
@@ -30,23 +33,26 @@ use Tests\TestCase;
 /**
  * The four kinds of money work F-08 names — settlement, refund, dunning and
  * renewal — each survive being run twice, and each decides "have I already
- * done this?" from a row it holds locked.
+ * done this?" while holding a row lock every other execution of the same work
+ * must also take.
  *
  * F-08 made the queue re-deliver work while the first delivery was still
  * running. Fixing the clocks stops the queue doing that, but it is not the
  * only source of a second delivery — a provider redelivers a webhook, a
  * retried job runs after a crash, an operator replays `failed_jobs` — so the
  * work itself has to converge. The property that makes it converge under
- * *overlap*, not only under sequential redelivery, is that the guard is read
- * inside the same transaction, from a row locked `FOR UPDATE`, before anything
- * is written: two overlapping executions then serialise on that row and the
- * second reads what the first wrote.
+ * *overlap*, not only under sequential redelivery, is that the guard is
+ * consulted inside the same transaction, under a row locked `FOR UPDATE`,
+ * before anything is written: two overlapping executions then serialise on
+ * that row and the second reads what the first wrote.
  *
  * A single process cannot hold two transactions open against itself, so the
  * lock is asserted from the statements each action issues, in order — the
- * first read of the guarded table must be the locking one. A read of the same
- * row before the lock would pass every sequential test and still let two
- * overlapping executions both see "not yet".
+ * first read of the guarded table must be the locking one, and dunning, whose
+ * guard is a table of its own (one row per failure counted), must lock the
+ * subscription before it touches that table. A read of the guard before the
+ * lock would pass every sequential test and still let two overlapping
+ * executions both see "not yet".
  *
  * The other three payments listeners are covered by their own mechanisms and
  * need no pin here, with proof rather than by omission:
@@ -193,6 +199,101 @@ final class AnIdempotencyGuardIsReadUnderItsOwnLockTest extends TestCase
         $this->assertSame(0, $subscription->failed_payment_count);
     }
 
+    /**
+     * A key that remembers only the failure counted last forgets every one
+     * before it: A, B, A counts three, because by the time A comes back the
+     * key says B.
+     */
+    #[Test]
+    public function an_older_failure_delivered_again_after_a_newer_one_is_not_counted_again(): void
+    {
+        $subscription = Subscription::factory()->create();
+        $older = $this->failureFor($subscription);
+        $listener = app(StartDunningOnFailedPayment::class);
+
+        $listener->handle($older);
+        $listener->handle($this->failureFor($subscription));
+        $listener->handle($older);
+
+        $this->assertSame(2, $subscription->refresh()->failed_payment_count, 'Two declined payments, the first delivered twice, are two failures.');
+    }
+
+    #[Test]
+    public function an_older_failure_delivered_again_after_the_customer_paid_does_not_reopen_dunning(): void
+    {
+        $subscription = Subscription::factory()->create();
+        $older = $this->failureFor($subscription);
+        $listener = app(StartDunningOnFailedPayment::class);
+
+        $listener->handle($older);
+        $listener->handle($this->failureFor($subscription));
+        app(AdvanceDunning::class)->recordSuccessfulPayment($subscription);
+        $listener->handle($older);
+
+        $subscription->refresh();
+
+        $this->assertSame(SubscriptionStatus::Active, $subscription->status, 'A failure counted before the customer paid reopened dunning on a paid subscription.');
+        $this->assertSame(0, $subscription->failed_payment_count);
+        $this->assertNull($subscription->grace_period_ends_at);
+    }
+
+    /**
+     * The same case through the production chain rather than the listener
+     * alone: RecordPaymentFailure raises PaymentFailed, and its queued
+     * listener runs on the sync connection here.
+     *
+     * `payments:reconcile` records a failed intent through
+     * ConfirmPaymentFromReturn (event id `retrieve:<reference>`); the
+     * provider's own webhook for that intent arrives later under an event id
+     * never seen before, so the webhook replay table does not stop it, and
+     * RecordPaymentFailure announces the same transaction a second time. The
+     * dunning key is the only place those two deliveries meet.
+     */
+    #[Test]
+    public function a_late_webhook_for_a_failure_reconciliation_already_counted_does_not_reopen_dunning_once_paid(): void
+    {
+        $subscription = Subscription::factory()->create();
+
+        /** @var Invoice $invoice */
+        $invoice = Invoice::factory()->create([
+            'customer_id' => $subscription->customer_id,
+            'subscription_id' => $subscription->id,
+            'currency' => 'KWD',
+            'status' => InvoiceStatus::Open,
+        ]);
+
+        $record = app(RecordPaymentFailure::class);
+        $customerId = (string) $subscription->customer_id;
+        $declined = static fn (string $eventId, string $reference): ProviderEvent => new ProviderEvent(
+            providerEventId: $eventId,
+            type: 'payment_intent.payment_failed',
+            kind: ProviderEventKind::PaymentFailed,
+            amount: Money::ofMinor(9_000, 'KWD'),
+            currency: 'KWD',
+            providerReference: $reference,
+            payload: ['data' => []],
+            failureCode: 'card_declined',
+            failureMessage: 'Declined',
+        );
+
+        $reconciled = $record->execute('fake', $declined('retrieve:pi_first', 'pi_first'), $customerId, (string) $invoice->id);
+        $record->execute('fake', $declined('evt_second', 'pi_second'), $customerId, (string) $invoice->id);
+
+        $this->assertSame(2, $subscription->refresh()->failed_payment_count);
+
+        app(AdvanceDunning::class)->recordSuccessfulPayment($subscription);
+
+        $late = $record->execute('fake', $declined('evt_first_late', 'pi_first'), $customerId, (string) $invoice->id);
+
+        $this->assertSame($reconciled->id, $late->id, 'The late webhook is the same failed transaction, announced again.');
+
+        $subscription->refresh();
+
+        $this->assertSame(SubscriptionStatus::Active, $subscription->status, 'A paid subscription was put back into dunning by a failure it had already counted.');
+        $this->assertSame(0, $subscription->failed_payment_count);
+        $this->assertNull($subscription->grace_period_ends_at);
+    }
+
     #[Test]
     public function an_unkeyed_caller_is_counted_every_time(): void
     {
@@ -268,14 +369,36 @@ final class AnIdempotencyGuardIsReadUnderItsOwnLockTest extends TestCase
         }, 'recorded_on_invoice_at is the guard; it must be read from a locked row.');
     }
 
+    /**
+     * The guard is the set of failures already counted, one row per
+     * (subscription, failure). It must be consulted only once the subscription
+     * row is held: consulted first, two overlapping deliveries of one failure
+     * both find it absent before either has written it.
+     */
     #[Test]
-    public function dunning_reads_the_failure_it_last_counted_under_the_lock(): void
+    public function dunning_consults_the_failures_it_counted_under_the_subscriptions_lock(): void
     {
         $subscription = Subscription::factory()->create();
+        $statements = [];
 
-        $this->assertFirstReadIsLocked('subscriptions', function () use ($subscription): void {
-            app(AdvanceDunning::class)->recordFailedPayment($subscription, null, (string) Str::ulid());
-        }, 'last_counted_payment_failure_id is the guard; it must be read from a locked row.');
+        DB::listen(static function ($query) use (&$statements): void {
+            $sql = strtolower(ltrim($query->sql));
+
+            foreach (['subscriptions', 'subscription_counted_payment_failures'] as $table) {
+                if (preg_match('/^(select\b.*?\bfrom|insert\s+into|update|delete\s+from)\s+"'.$table.'"/s', $sql) === 1) {
+                    $statements[] = ['table' => $table, 'locked' => str_contains($sql, 'for update')];
+                }
+            }
+        });
+
+        app(AdvanceDunning::class)->recordFailedPayment($subscription, null, (string) Str::ulid());
+
+        $this->assertNotSame([], $statements, 'Nothing touched either table.');
+        $this->assertSame(['table' => 'subscriptions', 'locked' => true], $statements[0], 'The subscription row must be locked before anything else is read or written.');
+
+        $key = array_values(array_filter($statements, static fn (array $s): bool => $s['table'] === 'subscription_counted_payment_failures'));
+
+        $this->assertNotSame([], $key, 'The failure was counted without being recorded as counted.');
     }
 
     #[Test]

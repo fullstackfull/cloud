@@ -24,6 +24,18 @@ use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
  * clock has been running with nobody reading. The row records that it
  * happened; six resends to an address that never answers is worth being able
  * to see.
+ *
+ * **Not twice inside the cooldown.** The account's hourly invitation budget
+ * bounds how much it sends, not where: without a wait of its own, one offer
+ * resent in a loop put the whole budget into one inbox — thirty mails, back
+ * to back, as fast as the requests arrived. So a resend earlier than
+ * {@see CustomerInvitation::mailableAgainAt()} is refused, and refused before
+ * anything is written: the token, the expiry, `sent_count` and `last_sent_at`
+ * stay as they were and no mail goes. The comparison is made under the same
+ * row lock as the write, so two resends racing each other cannot both read
+ * the old `last_sent_at`. The other road to the same inbox — withdraw the
+ * offer, invite the address again — is held to the same clock by
+ * InviteMember.
  */
 final readonly class ResendInvitation
 {
@@ -37,6 +49,12 @@ final readonly class ResendInvitation
 
             if (! $locked->isOpen()) {
                 throw MembershipRefusedException::becauseTheOfferIsNotOpen();
+            }
+
+            $again = $locked->mailableAgainAt();
+
+            if (CarbonImmutable::now()->lt($again)) {
+                throw MembershipRefusedException::becauseTheAddressWasMailedTooRecently($again);
             }
 
             $locked->forceFill([

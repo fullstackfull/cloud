@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { Field } from '@/components/Field'
+import { describedBy } from '@/components/fieldIds'
+import { FieldShell } from '@/components/FieldShell'
 import { LoadFailure } from '@/components/LoadFailure'
 import { Loading } from '@/components/Loading'
 import { PageHeader } from '@/components/PageHeader'
@@ -144,7 +146,7 @@ export function NetworkingPage() {
                     {t('admin.networking.addSubnet')}
                   </Button>
                 </div>
-                {openPool === pool.id ? <SubnetForm poolId={pool.id} onDone={() => { setOpenPool(null) }} /> : null}
+                {openPool === pool.id ? <SubnetForm poolId={pool.id} forCustomers={pool.scope !== 'management'} onDone={() => { setOpenPool(null) }} /> : null}
                 <SubnetList poolId={pool.id} />
               </li>
             ))}
@@ -382,14 +384,30 @@ function PoolForm({ onDone }: { onDone: () => void }) {
   )
 }
 
-function SubnetForm({ poolId, onDone }: { poolId: string; onDone: () => void }) {
+/**
+ * A block, and the segment it is on.
+ *
+ * A block a customer is given addresses from has to name a customer-facing
+ * segment: the server refuses one that does not
+ * (`infrastructure.subnet_has_no_customer_network`), because a VPS build
+ * refuses an address on no such segment and nothing attaches a network to a
+ * block afterwards. So for a customer pool the chooser offers only active,
+ * customer-facing segments and must be answered; for a management pool it is
+ * optional. The server stays the judge — the list is a convenience, not the
+ * rule.
+ */
+function SubnetForm({ poolId, forCustomers, onDone }: { poolId: string; forCustomers: boolean; onDone: () => void }) {
   const { t } = useTranslation()
   const describe = useApiErrorMessage()
   const register = useRegisterSubnet(poolId)
+  const networks = useNetworks()
   const [cidr, setCidr] = useState('')
   const [gateway, setGateway] = useState('')
+  const [networkId, setNetworkId] = useState('')
   const failure = describe(register.error)
   const fieldError = (field: string): string | undefined => failure?.fields?.[field]?.[0]
+  const networkField = useId()
+  const candidates = (networks.data?.data ?? []).filter((network) => !forCustomers || (network.is_customer_facing && network.is_active))
 
   return (
     <form
@@ -400,6 +418,7 @@ function SubnetForm({ poolId, onDone }: { poolId: string; onDone: () => void }) 
         register.mutate({
           cidr: cidr.trim(),
           ...(gateway.trim() === '' ? {} : { gateway: gateway.trim() }),
+          ...(networkId === '' ? {} : { network_id: networkId }),
         }, { onSuccess: onDone })
       }}
     >
@@ -407,6 +426,37 @@ function SubnetForm({ poolId, onDone }: { poolId: string; onDone: () => void }) 
         <Field label={t('admin.networking.cidr')} hint={t('admin.networking.cidrHint')} value={cidr} onChange={(e) => { setCidr(e.target.value) }} error={fieldError('cidr')} dir="ltr" required />
         <Field label={t('admin.networking.gateway')} value={gateway} onChange={(e) => { setGateway(e.target.value) }} error={fieldError('gateway')} dir="ltr" />
       </div>
+      <FieldShell
+        label={t('admin.networking.subnetNetwork')}
+        htmlFor={networkField}
+        hint={t('admin.networking.subnetNetworkHint')}
+        hintId={`${networkField}-hint`}
+        error={fieldError('network_id')}
+        errorId={`${networkField}-error`}
+      >
+        <select
+          id={networkField}
+          value={networkId}
+          onChange={(e) => { setNetworkId(e.target.value) }}
+          aria-invalid={fieldError('network_id') !== undefined}
+          aria-describedby={describedBy([
+            fieldError('network_id') !== undefined ? `${networkField}-error` : null,
+            `${networkField}-hint`,
+          ])}
+          className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 text-sm"
+          required={forCustomers}
+        >
+          <option value="">—</option>
+          {candidates.map((network) => (
+            <option key={network.id} value={network.id}>
+              {network.name ?? network.slug} · {network.slug}{network.datacenter === null ? '' : ` · ${network.datacenter}`}
+            </option>
+          ))}
+        </select>
+      </FieldShell>
+      {forCustomers && networks.data !== undefined && candidates.length === 0 ? (
+        <Alert tone="warning">{t('admin.networking.subnetNeedsNetwork')}</Alert>
+      ) : null}
       {failure !== null && failure.fields === null ? <Alert tone="error">{failure.message}</Alert> : null}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onDone}>{t('common.cancel')}</Button>

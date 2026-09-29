@@ -11,6 +11,7 @@ use Lynomia\Modules\Infrastructure\Application\Naming\AuditInfrastructureNaming;
 use Lynomia\Modules\Infrastructure\Application\Preflight\Checks\DependencyChain;
 use Lynomia\Modules\Infrastructure\Application\Preflight\Checks\MappingChain;
 use Lynomia\Modules\Infrastructure\Application\Preflight\Checks\ProviderChain;
+use Lynomia\Modules\Infrastructure\Application\Preflight\Checks\ReservedZonesCheck;
 use Lynomia\Modules\Infrastructure\Domain\Enums\InfrastructureAction;
 use Lynomia\Modules\Infrastructure\Domain\Naming\NamingFinding;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\CheckCategory;
@@ -117,6 +118,7 @@ final readonly class InfrastructurePreflightService
         private ProductRequirements $requirements,
         private SafetyGate $gate,
         private AuditInfrastructureNaming $naming,
+        private ReservedZonesCheck $reservedZones,
         private ReferenceValues $reference = new ReferenceValues,
     ) {}
 
@@ -223,6 +225,16 @@ final readonly class InfrastructurePreflightService
         $findings = [...$findings, ...$this->guarded('dependencies', CheckCategory::Backup, fn (): array => $this->dependencies->inspect())];
 
         $findings = [...$findings, ...$this->guarded('naming', CheckCategory::Configuration, fn (): array => $this->namingFindings($request))];
+
+        /*
+         * Deployment-wide like the two above, and estate-only unlike the
+         * first: which names no account may claim is a fact about this
+         * deployment's configuration and about no one product, so a product
+         * run would repeat it without adding anything. Production is decided
+         * as it is for the naming findings: a read-only-real run on a
+         * production installation, where holding too little is a blocker.
+         */
+        $findings = [...$findings, ...$this->guarded('dns', CheckCategory::Configuration, fn (): array => $this->reservedZones->inspect($this->production($request)))];
 
         foreach ($this->familiesInService() as $product) {
             $findings = [...$findings, ...$this->guarded(
@@ -605,8 +617,7 @@ final readonly class InfrastructurePreflightService
      */
     private function namingFindings(PreflightRequest $request): array
     {
-        $production = $request->mode === PreflightMode::ReadOnlyReal
-            && app()->environment('production');
+        $production = $this->production($request);
 
         return array_map(
             static fn (NamingFinding $finding): PreflightFinding => match ($finding->status) {
@@ -635,6 +646,17 @@ final readonly class InfrastructurePreflightService
             },
             $this->naming->execute($production),
         );
+    }
+
+    /**
+     * Is this run the one a production estate is judged by: read-only-real,
+     * on a production installation? A simulation run on production, or a
+     * real read anywhere else, is a rehearsal and is told rather than stopped.
+     */
+    private function production(PreflightRequest $request): bool
+    {
+        return $request->mode === PreflightMode::ReadOnlyReal
+            && app()->environment('production');
     }
 
     /**

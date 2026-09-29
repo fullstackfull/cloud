@@ -31,8 +31,13 @@ final class DnsRefusedException extends DomainException
 
     public static function zoneIsReserved(string $name): self
     {
+        // `zone` is published: it is the name the customer submitted in the
+        // request being refused, so telling it back discloses nothing they did
+        // not send (F-27's rule — whether the caller already knows it). Pinned
+        // by F-26's ClaimingAZoneTest, which reads it from error.details.
         return (new self('This domain is used by the platform itself and cannot be held by an account.'))
             ->withContext(['zone' => $name])
+            ->publishing('zone')
             ->as('dns.zone.reserved')
             ->withStatus(403);
     }
@@ -157,6 +162,47 @@ final class DnsRefusedException extends DomainException
     {
         return (new self('Type the zone name to confirm that it and every record in it are to be removed.'))
             ->as('dns.zone.not_confirmed');
+    }
+
+    /**
+     * The platform cannot tell which names it holds, so it holds them all.
+     *
+     * An entry in `DNS_RESERVED_ZONES` that is not a name refuses every claim
+     * by every account until it is corrected (see ReservedZones). That is the
+     * platform's condition and not the claimant's mistake, so it is answered
+     * as one: a 503 under its own code, with a sentence that blames nobody.
+     * It used to surface as `dns.invalid_name`, 422, "That is not a valid DNS
+     * name." — about a name the customer did not type (I-3).
+     *
+     * Nothing is published: not the entry, not the variable, not a count.
+     * Which names the platform holds, and how its configuration is broken,
+     * are not the caller's to know. The operator is told by the log line the
+     * action writes and by the estate preflight's `dns.reserved_zones`.
+     */
+    public static function reservationUnreadable(): self
+    {
+        return (new self('New zones cannot be added right now. Try again later.'))
+            ->as('dns.zone.unavailable')
+            ->withStatus(503);
+    }
+
+    /**
+     * A production estate that holds too little of its own names takes no
+     * claims until it does.
+     *
+     * The same refusal as an unreadable reservation, for the same reason: it
+     * is the platform's condition and not the claimant's, and which names the
+     * platform answers on, or how its configuration falls short, is not the
+     * caller's to know. The code, status and sentence are that refusal's, so
+     * a customer sees one condition whichever of the two it is; the operator
+     * is told which by ClaimZone's log line and by the estate preflight's
+     * `dns.reserved_zones`, blocked (F-26).
+     */
+    public static function reservationIncomplete(): self
+    {
+        return (new self('New zones cannot be added right now. Try again later.'))
+            ->as('dns.zone.unavailable')
+            ->withStatus(503);
     }
 
     public static function providerCannotCreateZones(): self

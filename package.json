@@ -12,8 +12,8 @@
   "scripts": {
     "dev": "npm run dev --workspace=apps/web",
     "build": "npm run build --workspace=apps/web",
-    "lint": "npm run lint --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
     "test": "npm run test --workspaces --if-present",
     "format": "prettier --write \"**/*.{ts,tsx,css,json,md}\"",
     "openapi:lint": "redocly lint docs/openapi.yaml",

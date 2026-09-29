@@ -36,7 +36,7 @@ final class AccountPermissionRequiredException extends DomainException
          * endpoint they called. It says nothing about the resource, or about
          * whether it exists.
          */
-        return $exception->withContext(['required_permission' => $permission]);
+        return $exception->withContext(['required_permission' => $permission])->publishing('required_permission');
     }
 
     public function errorCode(): string

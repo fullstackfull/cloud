@@ -85,6 +85,8 @@
     "aupDocument": "Acceptable use policy",
     "documentVersion": "version {{version}}",
     "registrationUnavailable": "Registration is not open yet. The documents you would be agreeing to have not been published.",
+    "registrationOptionsFailed": "We could not load what this form needs — the countries, the currencies and the documents you would be agreeing to — so it cannot be submitted yet.",
+    "registrationUnconfirmed": "We could not confirm that registration is open, so this form cannot be submitted yet. Try again in a moment.",
     "haveAccount": "Already have an account?",
     "checkYourEmailTitle": "Check your email",
     "checkYourEmailBody": "We sent a verification link to {{email}}. Your account is created; verify the address to start ordering.",
@@ -755,7 +757,9 @@
     "primaryAddress": "Main address",
     "noAddresses": "No addresses assigned to this machine yet.",
     "rebuildBody": "The last rebuild of this machine.",
-    "rebuildRequested": "Requested"
+    "rebuildRequested": "Requested",
+    "rebuildDataDestroyed": "This rebuild has already erased the disk. Whatever was on it is gone, whether or not the installation finished.",
+    "rebuildStoppedAfterErasing": "The rebuild stopped after erasing the disk"
   },
   "dedicated": {
     "subtitle": "Your physical machines.",
@@ -812,6 +816,7 @@
     "rebuildBody": "The last rebuild of this machine.",
     "rebuildRequested": "Requested",
     "rebuildDataDestroyed": "This rebuild has already erased the disks. Whatever was on them is gone, whether or not the installation finished.",
+    "rebuildStoppedAfterErasing": "The rebuild stopped after erasing the disks",
     "rebuildNeedsAttention": "The platform did not hear how this rebuild ended. Do not request another — support can tell you where it stands."
   },
   "hosting": {
@@ -1490,8 +1495,8 @@
       "retryEvidence": "What changed?",
       "retryEvidenceHint": "Recorded in the audit trail. “pve-kw-04 was added this morning and has 96 free cores”, not “trying again”.",
       "reservedIdentity": "Reserved identity {{id}} · nodes: {{nodes}} · names: {{names}}",
-      "adopt": "Adopt what it built",
-      "adoptTitle": "Adopt the machine this job built",
+      "adopt": "Adopt the machine",
+      "adoptTitle": "Adopt a machine as this job's build",
       "adoptBody": "Records machine {{reference}} as this job's build and delivers the service. Only after looking at the hypervisor: the machine must be there, named as ordered. Adoption does not create the machine's record or commit its address — both are done by hand, in the same shift, as the runbook says.",
       "adoptEvidence": "What did you see at the hypervisor?",
       "adoptEvidenceHint": "Recorded in the audit trail. The node, the id and the name you found.",
@@ -1763,7 +1768,10 @@
       "managementWarning": "A management pool reaches the hypervisor and BMC control planes. It is never handed to a customer service, and this cannot be changed afterwards.",
       "cidr": "Block",
       "cidrHint": "In CIDR notation, as in 203.0.113.0/24.",
-      "gateway": "Gateway"
+      "gateway": "Gateway",
+      "subnetNetwork": "Network segment",
+      "subnetNetworkHint": "The segment a machine given an address from this block is plugged into. It cannot be changed once the block is registered.",
+      "subnetNeedsNetwork": "A block customers are given addresses from has to name a customer-facing segment. Register one first; a VPS also needs its bridge recorded."
     },
     "operators": {
       "title": "Operators",
@@ -1823,6 +1831,7 @@
     "deletionRequestedOn": "Deletion asked for {{date}}",
     "files": "Files",
     "filesUnsupported": "This backup's provider cannot open archives file by file. The whole server can still be restored.",
+    "filesUnreadable": "The datastore read this backup back and it did not come back. Its files cannot be opened or restored.",
     "browser": {
       "title": "Files in the backup taken {{date}}",
       "explainer": "Browse the backup, download a single file, or choose files and folders to put back on the server. A link (symlink) is shown and never followed.",
@@ -1875,14 +1884,12 @@
     "category": {
       "security": "Security",
       "billing": "Billing",
-      "service": "Your services",
-      "operational": "Maintenance and incidents"
+      "service": "Your services"
     },
     "categoryHint": {
       "security": "Sign-ins, password changes and two-factor. Always sent.",
       "billing": "Invoices, payments and anything that could interrupt your service. Always sent.",
-      "service": "Servers being built, suspended, restored or reinstalled.",
-      "operational": "Planned maintenance and incidents affecting what you run."
+      "service": "Servers being built, suspended, restored or reinstalled."
     },
     "preferences": {
       "title": "What we email you",
@@ -1968,7 +1975,13 @@
       "subscription_not_running": "This subscription is not currently running.",
       "service_busy": "Something else is happening to this server. Try again when it has finished.",
       "service_not_active": "Your service is suspended or still changing state, so it cannot be moved onto another plan yet.",
-      "price_not_for_plan": "That price does not belong to that plan."
+      "price_not_for_plan": "That price does not belong to that plan.",
+      "invoice_outstanding": "An invoice for this subscription is still unpaid. Pay it before changing plan again.",
+      "out_of_stock": "This plan is sold out.",
+      "per_customer_limit": "Your account already holds as many of this plan as it may.",
+      "not_deliverable": "This plan is temporarily unavailable to move onto. Nothing has been charged; please try again later.",
+      "previous_change_pending": "Your last plan change is paid for and still being applied. Try again when it has finished.",
+      "unit_count_unknown": "This subscription is on a price we no longer sell, so it cannot be moved onto another plan here. Contact support to change it."
     },
     "warning": {
       "resize_required": "Your server will be resized as part of this change.",

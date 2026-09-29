@@ -573,10 +573,15 @@ other are both failures of the same test.
 ## 24. Preflight as the path's preconditions
 
 `infra:preflight --mode=simulation --product=vps --json` is asserted to report
-exactly the five checks a VPS build actually needs as `pass` — cluster, nodes,
-storage, capacity, template — with `mode_label` of `SIMULATION`. (`mapping.network`
-appears only when no pool exists, which is why it is not in the list: the
-estate has one.)
+exactly the six checks a VPS build actually needs as `pass` — cluster, nodes,
+storage, capacity, template, network — with `mode_label` of `SIMULATION`. This
+section used to list five and explain the missing `mapping.network` as
+appearing only when no pool exists. That was the defect rather than a design:
+the address check sat below the template check's early return, so an estate
+with an installable template and no address pool at all reported the same five
+passes. It is asked on every path now, and
+`APreflightNeverDropsACheckSilentlyTest` holds that no check is absent from a
+mapping band that does not block.
 
 This is the gate that keeps the golden paths honest about their own setup. If a
 golden test could pass with an estate preflight calls incomplete, the test

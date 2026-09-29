@@ -42,11 +42,12 @@ final readonly class AdvanceDunning
      * @param  string|null  $paymentFailureId  the failed transaction this records. Supplied, it makes
      *                                         the count idempotent: a failure already counted — by a
      *                                         redelivered webhook, a retried job, or a second delivery
-     *                                         running at the same moment — is not counted again, and
-     *                                         the check is read under the same row lock as the write.
-     *                                         **Omitted, every call counts**, which is right for an
-     *                                         operator recording a failure by hand and wrong for
-     *                                         anything that can be delivered twice.
+     *                                         running at the same moment — is not counted again, however
+     *                                         many other failures were counted in between, and the check
+     *                                         is made under the same row lock as the write. **Omitted,
+     *                                         every call counts**, which is right for an operator
+     *                                         recording a failure by hand and wrong for anything that can
+     *                                         be delivered twice.
      *
      * @throws IllegalStateTransitionException
      */
@@ -71,18 +72,14 @@ final readonly class AdvanceDunning
                 );
             }
 
-            if ($paymentFailureId !== null && $locked->last_counted_payment_failure_id === $paymentFailureId) {
-                // Already counted. Kept even after a successful payment, so a
-                // failure redelivered after the money arrived cannot reopen
-                // dunning on a subscription that has paid.
+            if ($paymentFailureId !== null && ! $this->countForTheFirstTime($locked, $paymentFailureId, $now)) {
+                // Already counted. The record is kept even after a successful
+                // payment, so a failure redelivered after the money arrived
+                // cannot reopen dunning on a subscription that has paid.
                 return $locked;
             }
 
             $locked->failed_payment_count = $locked->failed_payment_count + 1;
-
-            if ($paymentFailureId !== null) {
-                $locked->last_counted_payment_failure_id = $paymentFailureId;
-            }
 
             /*
              * The grace clock starts at the first failure and is never
@@ -119,7 +116,7 @@ final readonly class AdvanceDunning
             // before the failure was processed — must not leave a half-run
             // dunning clock behind for the next failure to inherit.
             $locked->failed_payment_count = 0;
-            // last_counted_payment_failure_id is kept: see recordFailedPayment().
+            // The failures already counted are kept: see recordFailedPayment().
             $locked->grace_period_ends_at = null;
             $locked->suspended_at = null;
             $locked->save();
@@ -171,6 +168,26 @@ final readonly class AdvanceDunning
 
             return $locked;
         });
+    }
+
+    /**
+     * Records that this failure has been counted against this subscription,
+     * and says whether it had been before.
+     *
+     * One row per failure, not a "last counted" column: a column remembers
+     * only the newest failure, so an older one delivered again after it would
+     * be counted twice. The insert is its own check — it does nothing on
+     * conflict with the primary key — and it runs while the caller holds the
+     * subscription row, so two overlapping deliveries of one failure queue on
+     * that lock and the second finds the first's row.
+     */
+    private function countForTheFirstTime(Subscription $locked, string $paymentFailureId, CarbonImmutable $now): bool
+    {
+        return DB::table('subscription_counted_payment_failures')->insertOrIgnore([
+            'subscription_id' => $locked->getKey(),
+            'payment_failure_id' => $paymentFailureId,
+            'counted_at' => $now,
+        ]) === 1;
     }
 
     private function graceHasExpired(Subscription $subscription, CarbonImmutable $now): bool

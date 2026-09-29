@@ -30,16 +30,36 @@ use Lynomia\Modules\Billing\Http\Controllers\SubscriptionController;
  * that hands customers a broken file, and nobody would find out until an
  * accountant asked for one.
  *
- * **Nothing writes to an invoice.** No POST, no PATCH, no void, no refund. An
+ * **No customer route edits an invoice.** No PATCH, no void, no refund. An
  * invoice is frozen once issued, and every figure on it is moved by the
- * settlement, void and refund actions on the platform's own side. Paying one
- * is the Payments module's surface.
+ * settlement, void and refund actions on the platform's own side. The one POST
+ * on an invoice here is POST {invoice}/wallet-credit, which pays the invoice
+ * from the customer's wallet (PayInvoiceFromWallet) - a settlement, through
+ * the same action as any other, never a write to what the invoice says it
+ * bought. (The other two POSTs in this file are on a subscription: cancel and
+ * plan, below.) Paying by card is the Payments module's surface.
  *
- * **No renewal or plan-change route.** RenewSubscription is the worker's
- * entry point and refuses anything the due-for-renewal scope excludes;
- * ChangeSubscriptionPlan prices a proration that has to be reviewed as a
- * purchase, not slipped in under a subscriptions route. Neither is published
- * here.
+ * **No renewal route.** RenewSubscription is the worker's entry point and
+ * refuses anything the due-for-renewal scope excludes.
+ *
+ * ---------------------------------------------------------------------------
+ * Changing plan
+ * ---------------------------------------------------------------------------
+ *
+ * GET /subscriptions/{subscription}/plan-options prices every plan the
+ * subscription could move to, refused ones with their reasons, and POST
+ * /subscriptions/{subscription}/plan makes the move. The POST goes through
+ * ApplyPlanChange, which re-quotes under the subscription's lock and settles
+ * the proration as a purchase: an upgrade leaves an invoice and the machine
+ * is resized only when it is paid; a downgrade credits the wallet, never with
+ * more than the period collected. A change is refused while an invoice for
+ * the subscription is open, onto a plan that is sold out or at the account's
+ * limit, and onto a plan the change could not be delivered onto (a hosting
+ * plan with no single package on sale, say: `not_deliverable`, asked again
+ * when its invoice is paid). It takes the plan and the price and nothing else:
+ * the unit count is the one the subscription holds, as the quote priced it.
+ * The Idempotency-Key it requires names no provisioning job; the change's own
+ * record does.
  *
  * ---------------------------------------------------------------------------
  * Cancellation
@@ -81,8 +101,10 @@ Route::prefix('invoices')->as('invoices.')->group(function (): void {
      * The GET is a quote and takes nothing. The POST requires an
      * Idempotency-Key, because a repeated submission that debited twice would
      * spend a balance the customer only has once, and carries a tighter
-     * limiter than the shared ceiling: it is the one route on this surface
-     * that moves money without a provider in the way.
+     * limiter than the shared ceiling: it spends the wallet directly, with no
+     * payment provider in the way. (It is not the only route here that moves
+     * money without one - a plan change credits the wallet on a downgrade and
+     * issues an invoice on an upgrade, under its own limiter below.)
      */
     Route::get('{invoice}/wallet-credit', [InvoiceController::class, 'walletCreditQuote'])
         ->whereUlid('invoice')
@@ -90,7 +112,7 @@ Route::prefix('invoices')->as('invoices.')->group(function (): void {
 
     Route::post('{invoice}/wallet-credit', [InvoiceController::class, 'payFromWalletCredit'])
         ->whereUlid('invoice')
-        ->middleware('throttle:30,1,subscription-cancel:')
+        ->middleware('throttle:30,1,wallet-credit:')
         ->name('wallet_credit.pay');
 });
 
@@ -106,13 +128,14 @@ Route::prefix('subscriptions')->as('subscriptions.')->group(function (): void {
      * should be expensive.
      */
     Route::post('{subscription}/cancel', [SubscriptionController::class, 'cancel'])
-        ->middleware('throttle:30,1,plan-quote:')
+        ->middleware('throttle:30,1,subscription-cancel:')
         ->name('cancel');
 
     /*
      * Changing plan mid-cycle. Limited harder than cancelling: each change
-     * settles money both ways, and a client flapping between two plans would
-     * write a proration pair per request.
+     * settles money both ways. The limit is not what stops a client flapping
+     * between two plans for credit - ten a minute would still mint - the
+     * open-invoice refusal and the period's credit ceiling are (F-01).
      */
     Route::post('{subscription}/plan', [SubscriptionController::class, 'changePlan'])
         ->middleware('throttle:10,1,plan-change:')

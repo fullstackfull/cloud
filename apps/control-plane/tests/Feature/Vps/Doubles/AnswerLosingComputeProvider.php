@@ -22,12 +22,16 @@ use Throwable;
  * The controlled hypervisor, with one thing added: it can build a machine and
  * then lose the answer.
  *
- * That is the case F-15 is about and the one the plain fake cannot produce on
- * its own terms — its timeout marker records nothing, so "the call timed out"
- * and "nothing exists" always coincide there. On a real cluster they do not:
- * `qmcreate` keeps running after the HTTP request that started it has been
- * abandoned. Everything else is delegated, so the fleet this wraps is the one
- * every assertion reads.
+ * That is the case F-15 is about. The plain fake's timeout marker records
+ * nothing, so there "the call timed out" and "nothing exists" coincide; on a
+ * real cluster they do not: `qmcreate` keeps running after the HTTP request
+ * that started it has been abandoned. The plain fake can now produce the
+ * landed case on its own too, with its built-unanswered marker (F-24) — but a
+ * marker is in the hostname, so every create of that name loses its answer.
+ * These tests need the answer lost on one attempt and delivered on the next
+ * for the same order, which is a switch rather than a name, and that is what
+ * this double still is. Everything else is delegated, so the fleet this wraps
+ * is the one every assertion reads.
  *
  * It also records what it was asked, and can run a probe at the instant a
  * create is sent — which is how a test asks "had the platform written the
@@ -37,11 +41,29 @@ final class AnswerLosingComputeProvider implements ComputeProvider
 {
     public bool $loseTheAnswerToCreates = true;
 
+    /**
+     * When set, a create is lost before the cluster acts on it: it is
+     * recorded as sent, nothing is built, and it is answered as a lost
+     * answer is. The state in which a create under an identity HAS been sent
+     * and nothing of it is there — which is what a later look has to judge
+     * a machine found at the identity against.
+     */
+    public bool $loseTheRequestToCreates = false;
+
     /** @var list<CreateVmRequest> */
     public array $creates = [];
 
     /** @var ?Closure(CreateVmRequest): void */
     public ?Closure $atTheMomentOfCreate = null;
+
+    /**
+     * When set, run once at the first read of a machine, before the fleet is
+     * asked: how a test puts something at the identity between an attempt
+     * reserving it and that attempt looking under it.
+     *
+     * @var ?Closure(string, string): void
+     */
+    public ?Closure $atTheMomentOfLook = null;
 
     /**
      * When set, thrown once the machine is built: the worker process dying
@@ -52,6 +74,12 @@ final class AnswerLosingComputeProvider implements ComputeProvider
 
     /** When set, every read of a machine fails with this, as an unreachable node does. */
     public ?ComputeProviderException $failReadsWith = null;
+
+    /**
+     * When set, a machine is read back without its vCPU and memory figures,
+     * as the Proxmox adapter reports a figure the cluster gave unreadably.
+     */
+    public bool $reportNoFigures = false;
 
     public function __construct(public readonly FakeComputeProvider $fleet = new FakeComputeProvider) {}
 
@@ -66,6 +94,14 @@ final class AnswerLosingComputeProvider implements ComputeProvider
 
         if ($this->atTheMomentOfCreate !== null) {
             ($this->atTheMomentOfCreate)($request);
+        }
+
+        if ($this->loseTheRequestToCreates) {
+            throw ComputeProviderException::requestFailed($this->name(), 'create_vm', [
+                'node' => $request->nodeName,
+                'vmid' => $request->vmId,
+                'provider_message' => 'this create was lost before the cluster acted on it',
+            ], indeterminate: true);
         }
 
         $operation = $this->fleet->createVirtualMachine($request);
@@ -146,7 +182,29 @@ final class AnswerLosingComputeProvider implements ComputeProvider
             throw $this->failReadsWith;
         }
 
-        return $this->fleet->getVm($nodeName, $providerId);
+        if ($this->atTheMomentOfLook !== null) {
+            $look = $this->atTheMomentOfLook;
+            $this->atTheMomentOfLook = null;
+            $look($nodeName, $providerId);
+        }
+
+        $machine = $this->fleet->getVm($nodeName, $providerId);
+
+        if ($machine === null || ! $this->reportNoFigures) {
+            return $machine;
+        }
+
+        return new RemoteVmState(
+            providerId: $machine->providerId,
+            nodeName: $machine->nodeName,
+            name: $machine->name,
+            powerState: $machine->powerState,
+            diskGib: $machine->diskGib,
+            uptimeSeconds: $machine->uptimeSeconds,
+            lock: $machine->lock,
+            startsOnBoot: $machine->startsOnBoot,
+            raw: $machine->raw,
+        );
     }
 
     public function listVms(string $nodeName): array

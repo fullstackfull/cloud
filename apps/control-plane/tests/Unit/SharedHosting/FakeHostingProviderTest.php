@@ -124,19 +124,32 @@ final class FakeHostingProviderTest extends TestCase
     }
 
     #[Test]
-    public function the_licence_answer_follows_the_node_row(): void
+    public function the_licence_answer_is_the_panels_and_not_the_node_row(): void
     {
+        /*
+         * This test used to be `the_licence_answer_follows_the_node_row` and
+         * asserted the defect: a panel that read the platform's own row back
+         * to it, so a node registered with `panel_licensed` false (nothing had
+         * asked yet) could never become licensed. The row is what the sync
+         * writes from this answer, not what the panel reads.
+         */
         $provider = new FakeHostingProvider;
 
-        $this->assertTrue($provider->licenceStatus($this->node())->valid);
+        $registered = $this->node();
+        $registered->panel_licensed = false;
+        $registered->licence_status = null;
 
-        $unlicensed = $this->node();
-        $unlicensed->panel_licensed = false;
-        $unlicensed->licence_status = 'expired';
+        $this->assertTrue($provider->licenceStatus($registered)->valid);
+
+        $lapsed = $this->node();
+        $lapsed->hostname = 'node-'.FakeHostingProvider::LICENCE_LAPSED_MARKER.'.lynomia.test';
 
         // A fake that always reported a valid licence would leave every
-        // licensing branch in the platform unexecuted.
-        $this->assertFalse($provider->licenceStatus($unlicensed)->valid);
+        // licensing branch in the platform unexecuted, so the lapse is still
+        // reachable — by a marker, whatever the row says.
+        $this->assertTrue($lapsed->panel_licensed);
+        $this->assertFalse($provider->licenceStatus($lapsed)->valid);
+        $this->assertSame('expired', $provider->licenceStatus($lapsed)->state);
     }
 
     private function node(): HostingNode

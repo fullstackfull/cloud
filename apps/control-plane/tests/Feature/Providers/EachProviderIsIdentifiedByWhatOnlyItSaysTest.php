@@ -95,8 +95,10 @@ final class EachProviderIsIdentifiedByWhatOnlyItSaysTest extends TestCase
     {
         /*
          * `create` is one POST that writes cores, memory, disks, a NIC, options
-         * and cloud-init keys; the cluster refuses it to a token holding
-         * VM.Allocate alone, so the tester must too.
+         * and cloud-init keys. On the tester's reading of the Proxmox API —
+         * which nothing in this repository verifies against a cluster — a
+         * token holding VM.Allocate alone cannot complete it, so the tester
+         * must not offer it.
          */
         Http::fake([
             '*/api2/json/version*' => Http::response(['data' => ['version' => '8.2.4', 'release' => '8.2', 'repoid' => 'faa83925c9f0e5a3']]),

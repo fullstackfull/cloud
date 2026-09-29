@@ -1,0 +1,70 @@
+# Dedicated server alerts, driven by the control plane's own /metrics endpoint.
+#
+# The power path — the one that physically cycles a customer's machine — had
+# no series and no rule until these. Both families come from the control
+# plane's DedicatedCollector, are zero-filled, and are labelled by nothing but
+# action and outcome.
+#
+# lynomia_dedicated_power_operation_total is a count of rows in each outcome,
+# exported as a gauge like every other `_total` family here. An outcome can
+# still move after it is written — a claim settles, and a claim settled as
+# abandoned is overwritten when its own process comes back with the
+# controller's real answer — so the rule below uses delta() and never rate()
+# or increase(), which assume a counter and would read every decrease as a
+# reset.
+
+groups:
+  - name: dedicated.power
+    rules:
+      - alert: DedicatedPowerOperationIndeterminate
+        # A power request the platform cannot vouch for: the management
+        # controller stopped answering mid-request, or the worker died before
+        # it answered and the claim's lease ran out. The customer was told "we
+        # do not know". Nothing retries it, by design — a second reset
+        # interrupts the first — so the machine may be mid-reset, down, or
+        # untouched, and nobody will find out without looking.
+        #
+        # delta() over the window, not the level: an indeterminate row is
+        # never resolved in place, so a level rule would fire for ever after
+        # the first one. delta() extrapolates to the window's edges, so the
+        # number in the summary is approximate and the sign is what counts. A
+        # late controller answer that turns an abandoned claim from
+        # indeterminate into accepted lowers the series, which reads as the
+        # negative it is and does not fire.
+        expr: >-
+          sum(delta(lynomia_dedicated_power_operation_total{outcome="indeterminate"}[1h])) > 0
+        labels:
+          severity: critical
+          component: dedicated
+        annotations:
+          summary: 'A dedicated power request ended without a confirmed outcome'
+          description: >-
+            In the last hour at least one power request to a dedicated server's management
+            controller ended indeterminate: the controller stopped answering, or the worker
+            died before it answered. The machine may be mid-reset, off, or untouched, and
+            the platform will not try again. Find the machine, look at its controller, and
+            tell the customer what it is actually doing.
+          runbook: docs/runbooks/dedicated-power.md
+          dashboard_url: https://grafana.prod.example/d/lynomia-dedicated/dedicated-servers
+
+      - alert: DedicatedPowerClaimsAbandoned
+        # Power claims past their lease that nothing has settled. The sweep
+        # runs every five minutes and settles each one as indeterminate, so a
+        # healthy platform shows this above zero for minutes at a time after a
+        # crash, not for half an hour.
+        expr: sum(lynomia_dedicated_power_claims_abandoned) > 0
+        for: 30m
+        labels:
+          severity: warning
+          component: dedicated
+        annotations:
+          summary: '{{ $value | printf "%.0f" }} dedicated power claim(s) past their lease and unsettled'
+          description: >-
+            Power claims whose process never came back have outlived their lease for half
+            an hour. Either the sweep that settles them is not running, or workers keep
+            dying mid-call and new claims keep lapsing while the sweep keeps up; which
+            thing is not decidable from here. The runbook tells the two apart: the same old
+            claims staying means the sweep; different, recent ones each time means the
+            workers.
+          runbook: docs/runbooks/dedicated-power.md
+          dashboard_url: https://grafana.prod.example/d/lynomia-dedicated/dedicated-servers

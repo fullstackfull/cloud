@@ -266,6 +266,18 @@ final class StripePaymentProvider implements PaymentProvider
             occurredAt: isset($payload['created']) && is_numeric($payload['created'])
                 ? CarbonImmutable::createFromTimestampUTC((int) $payload['created'])
                 : null,
+            /*
+             * `refund.updated` and `charge.refund.updated` carry the refund
+             * itself; its id is the reference refund() stored and its status
+             * is read the way refund() reads the answer to its own request.
+             * `charge.refunded` carries the charge, and names no one refund.
+             */
+            refundReference: $kind === ProviderEventKind::RefundSucceeded && ($object['object'] ?? null) === 'refund'
+                ? self::stringOrNull($object['id'] ?? null)
+                : null,
+            refundStatus: $kind === ProviderEventKind::RefundSucceeded && ($object['object'] ?? null) === 'refund'
+                ? self::mapRefundStatus(self::stringOrNull($object['status'] ?? null))
+                : null,
         );
     }
 

@@ -7,10 +7,15 @@ namespace Lynomia\Modules\SharedHosting\Domain\DTOs;
 /**
  * What to install, where, and for whom.
  *
- * `$adminPassword` passes through and is never persisted. The platform
- * generates it, hands it to the installer, and shows it to the customer once;
- * a stored copy would be every customer's site credentials in one table,
- * protecting nothing that a password reset does not already protect.
+ * `$adminPassword` passes through and is never persisted: a stored copy would
+ * be every customer's site credentials in one table. InstallWordPressHandler
+ * mints it at the moment of the install and drops it once the installer has
+ * it. It used to be minted earlier and carried in the job's payload, where the
+ * redactor turned it into `[redacted]` before the installer ever saw it
+ * (F-45).
+ *
+ * Getting it to the customer is not something a request object can do, and
+ * this one does not promise it.
  */
 final readonly class WordPressInstallRequest
 {

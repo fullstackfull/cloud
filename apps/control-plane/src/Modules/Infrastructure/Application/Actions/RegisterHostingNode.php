@@ -55,6 +55,17 @@ final readonly class RegisterHostingNode
                 onOurHardware: true,
                 production: $this->app->environment('production'),
             );
+        } elseif ($panel !== HostingPanel::Fake) {
+            /*
+             * No API endpoint means the hostname is what gets dialled: the
+             * panel connections build `https://{hostname}:{port}` for a row
+             * that names no endpoint, and send the panel's root token to it.
+             * So the hostname is asked about as the machine address it then
+             * is. The edit road asks the same question
+             * (InventoryController::updateHostingNode). A fake panel dials
+             * nothing.
+             */
+            $this->endpoints->assertMachineAddress($hostname, production: $this->app->environment('production'));
         }
 
         return $this->record->execute(

@@ -73,6 +73,20 @@ class Subnet extends Model
     }
 
     /**
+     * Whether the block names the router its hosts send everything else to.
+     *
+     * Registering one without is legitimate — a dedicated server's install
+     * profile can carry a default route of its own — but a virtual machine
+     * is given its default route from this column and nothing else, so a
+     * block without one is not one a VPS can be given an address in
+     * (IpAllocator::reserve() with `attachableOnly`).
+     */
+    public function hasGateway(): bool
+    {
+        return $this->gateway !== null && trim($this->gateway) !== '';
+    }
+
+    /**
      * The parsed block.
      *
      * Named block() rather than cidr() so it cannot collide with the string

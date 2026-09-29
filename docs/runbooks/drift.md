@@ -4,16 +4,19 @@
 
 One of two alerts, or rows from the drift report.
 
-- **`ResourceDriftOpen`** (critical, pages) — at least one **critical** drift has been
-  unresolved for 15 minutes: `lynomia_resource_drift_open{severity="critical"} > 0`. That
-  series counts `open` **and** `acknowledged` rows, so acknowledging the row in the
-  operator portal does **not** clear the page. Resolving it does. Critical means a
-  customer is paying for something the provider does not have, or a suspended service is
-  still running.
-- **`DriftQueueUnworked`** (warning, platform channel) — drift of any severity has sat
-  `open` and unreviewed for a day: `sum(lynomia_open_drift_total) > 0`. That series counts
-  `open` rows only, so acknowledging clears it — by design, because a review is what it
-  asks for.
+- **`ResourceDriftOpen`** (critical, pages) — the count of unresolved **critical** drift
+  of some kind has stayed above zero for 15 minutes:
+  `lynomia_resource_drift_open{severity="critical"} > 0`. That series counts `open`
+  **and** `acknowledged` rows, so acknowledging the row in the operator portal does
+  **not** clear the page. Resolving it does. Critical means the disagreement costs a
+  customer or the business now — for example a customer paying for a machine the
+  hypervisor does not have, or a suspended service still running; DNS records, backup
+  snapshots and hosting accounts raise critical drift too.
+- **`DriftQueueUnworked`** (warning, platform channel) — the queue of `open`, unreviewed
+  drift, of any severity, has not been seen empty for a day: `sum(lynomia_open_drift_total) > 0`
+  at every evaluation for 24 hours. That is the queue, not one row's age: younger rows that keep it from
+  emptying fire it too. The series counts `open` rows only, so acknowledging clears it —
+  by design, because a review is what it asks for.
 
 The identifiers the alert cannot carry — drift id, service id, provider reference — are in
 the control plane's structured log, on the error line *"Critical drift was seen between

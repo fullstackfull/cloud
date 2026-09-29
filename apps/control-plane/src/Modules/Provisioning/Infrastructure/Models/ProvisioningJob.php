@@ -191,8 +191,9 @@ class ProvisioningJob extends Model
      * and recorded only once the provider had answered, so a create whose
      * answer was lost left nothing behind: an operator's retry drew a new id
      * and built a second machine beside the first. The identity is now held
-     * by the job, and every attempt asks for the same one — and looks for what
-     * an earlier attempt may have built under it before building anything.
+     * by the job, and every attempt asks for the one it holds — the same one
+     * until an operator repoints the job — and looks for what an earlier
+     * attempt may have built under it before building anything.
      *
      * One statement, for three reasons:
      *
@@ -201,16 +202,25 @@ class ProvisioningJob extends Model
      *    concurrent claim) is handed the one already held and must use it.
      *    That is why this returns the row's identity rather than echoing its
      *    arguments.
-     *  - **The node and the name are recorded with the id**, append-only, in
-     *    the same write. There is no instant at which the platform has sent a
-     *    create under a name or to a node it has not written down; and what
-     *    establishes that a machine found at this id later is this job's own
-     *    build is exactly that list of names.
+     *  - **The node is recorded with the id**, append-only, in the same
+     *    write: every node an attempt under the identity was placed on, which
+     *    is every node a create under it can have been sent to, and so every
+     *    node a later attempt looks on.
      *  - **The cluster is a condition, not only a value.** An identity is
      *    meaningful in the cluster it was reserved against and nowhere else.
      *    The row is updated only when no cluster is held or the same one is,
      *    and null is returned otherwise — so a create cannot run under an id
      *    reserved on a different cluster however its caller was misled.
+     *
+     * The name is NOT recorded here. This runs before the look under the
+     * identity and before capacity and the address are reserved, so an
+     * attempt that holds an identity can still end without sending anything;
+     * a name written here would be one no create was sent with, and a machine
+     * carrying it would later be claimed as a build that never happened — on
+     * a first attempt, a stranger's machine named as this job names its own.
+     * The name is written by recordCreateSentWith(), immediately before the
+     * call. The identity handed back carries the names the row holds, which
+     * are those that earlier creates under it were sent with.
      *
      * Raw SQL rather than save(), for the same reason as recordRemoteJobId():
      * it is called mid-flight, and its whole value is that it is committed
@@ -220,7 +230,6 @@ class ProvisioningJob extends Model
         string $providerId,
         string $clusterId,
         string $nodeName,
-        string $hostname,
     ): ?ReservedProviderIdentity {
         $rows = DB::select(
             'update provisioning_jobs set '
@@ -232,10 +241,6 @@ class ProvisioningJob extends Model
             ."when coalesce(reserved_provider_nodes, '[]'::jsonb) @> jsonb_build_array(?::text) "
             .'then reserved_provider_nodes '
             ."else coalesce(reserved_provider_nodes, '[]'::jsonb) || jsonb_build_array(?::text) end, "
-            .'reserved_provider_hostnames = case '
-            ."when coalesce(reserved_provider_hostnames, '[]'::jsonb) @> jsonb_build_array(?::text) "
-            .'then reserved_provider_hostnames '
-            ."else coalesce(reserved_provider_hostnames, '[]'::jsonb) || jsonb_build_array(?::text) end, "
             .'updated_at = ? '
             .'where id = ? and (reserved_cluster_id is null or reserved_cluster_id = ?) '
             .'returning reserved_provider_id, reserved_cluster_id, reserved_provider_nodes, reserved_provider_hostnames',
@@ -244,8 +249,6 @@ class ProvisioningJob extends Model
                 $clusterId,
                 $nodeName,
                 $nodeName,
-                $hostname,
-                $hostname,
                 now(),
                 $this->getKey(),
                 $clusterId,
@@ -267,10 +270,12 @@ class ProvisioningJob extends Model
 
         // The attributes are now clean, for the reason recordRemoteJobId()
         // gives: a later save() must not write back a stale copy of these.
+        // The names are taken as the row holds them, null included, since
+        // this statement does not write them.
         $this->reserved_provider_id = $identity->providerId;
         $this->reserved_cluster_id = $identity->clusterId;
         $this->reserved_provider_nodes = $identity->nodes;
-        $this->reserved_provider_hostnames = $identity->hostnames;
+        $this->reserved_provider_hostnames = ($row['reserved_provider_hostnames'] ?? null) === null ? null : $identity->hostnames;
         $this->syncOriginalAttributes([
             'reserved_provider_id',
             'reserved_cluster_id',
@@ -279,6 +284,64 @@ class ProvisioningJob extends Model
         ]);
 
         return $identity;
+    }
+
+    /**
+     * Write down the name a create under the reserved identity is sent with,
+     * immediately before it is sent.
+     *
+     * F-15. What establishes that a machine found at the identity later is
+     * this job's own build is that it carries a name a create under the
+     * identity was SENT with, so this list holds every such name and is
+     * written by the one caller that sends, at the last moment before it
+     * does. A name reserved but never sent is not in it, and there is no
+     * instant at which a create has been sent under a name the list does not
+     * hold. What it can hold that was not sent is a name written for a
+     * create that never left: its worker died between this statement and the
+     * call, or the call failed before its request went. No record written
+     * before a send can exclude that, and it errs the safe way: a machine
+     * carrying the name is taken to be possibly this build's, not built
+     * around.
+     *
+     * Appended only when absent, and cleared only by a repoint, which keeps
+     * the list in the job's history with the identity it was about.
+     * Committed on its own, like the reservation, for the same reason.
+     */
+    public function recordCreateSentWith(string $hostname): void
+    {
+        $rows = DB::select(
+            'update provisioning_jobs set '
+            .'reserved_provider_hostnames = case '
+            ."when coalesce(reserved_provider_hostnames, '[]'::jsonb) @> jsonb_build_array(?::text) "
+            .'then reserved_provider_hostnames '
+            ."else coalesce(reserved_provider_hostnames, '[]'::jsonb) || jsonb_build_array(?::text) end, "
+            .'updated_at = ? '
+            .'where id = ? '
+            .'returning reserved_provider_hostnames',
+            [$hostname, $hostname, now(), $this->getKey()],
+        );
+
+        $row = $rows === [] ? [] : (array) $rows[0];
+
+        $this->reserved_provider_hostnames = self::listFrom($row['reserved_provider_hostnames'] ?? null);
+        $this->syncOriginalAttribute('reserved_provider_hostnames');
+    }
+
+    /**
+     * Every name a create under the reserved identity was sent with, as the
+     * row holds it now — not as this model loaded it.
+     *
+     * Read fresh because two workers can hold one job: the stale sweep moves
+     * a slow worker's job to review, and an operator's retry hands it to a
+     * second. A create the other one sent after this model was loaded, or
+     * after this attempt reserved the identity, still counts when this
+     * attempt judges a machine it has just found.
+     *
+     * @return list<string>
+     */
+    public function namesACreateWasSentWith(): array
+    {
+        return self::listFrom(DB::table($this->getTable())->where('id', $this->getKey())->value('reserved_provider_hostnames'));
     }
 
     /**

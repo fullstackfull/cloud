@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Domains\Infrastructure;
 use Lynomia\Modules\Domains\Domain\Contracts\DomainRegistrarProvider;
 use Lynomia\Modules\Domains\Domain\Exceptions\RegistrarNotAvailableException;
 use Lynomia\Modules\Domains\Domain\Exceptions\UnknownRegistrarDriverException;
+use Lynomia\Modules\Domains\Domain\Services\FakeRegistrarGuard;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
 use Lynomia\Modules\Domains\Infrastructure\Providers\FakeDomainRegistrarProvider;
 use Lynomia\Modules\Domains\Infrastructure\Providers\SyRegistryProvider;
@@ -46,6 +47,49 @@ final class DomainRegistrarFactory
     public static function drivers(): array
     {
         return [FakeDomainRegistrarProvider::NAME, SyRegistryProvider::NAME];
+    }
+
+    /**
+     * The drivers this build contains that may be constructed here.
+     *
+     * For whatever enumerates drivers and constructs each one — today only the
+     * orphan scan in `domains:reconcile`. {@see self::drivers()} is the right
+     * list for naming drivers and the wrong one for building them: it always
+     * holds the fake, and the fake refuses to exist in production, so a loop
+     * over it threw on every production run after the settle pass had already
+     * done its work.
+     *
+     * Derived from {@see self::drivers()} by filtering, never kept as a second
+     * list, for the reason that method gives. And the fake's answer comes from
+     * the guard's own predicate, so this and the refusal at construction
+     * cannot disagree about what "production" means.
+     *
+     * Not a catch around construction. A driver that throws while being built
+     * or asked is broken, not absent, and a sweep that skipped it would hide
+     * the failure most worth seeing.
+     *
+     * @return list<string>
+     */
+    public static function availableDrivers(): array
+    {
+        return array_values(array_filter(
+            self::drivers(),
+            static fn (string $driver): bool => self::isAvailableHere($driver),
+        ));
+    }
+
+    /**
+     * Only the fake has an environment it refuses. Every other driver is
+     * assumed constructible; one that refuses somewhere without being listed
+     * here is enumerated and throws, which fails the run loudly rather than
+     * narrowing it silently.
+     */
+    private static function isAvailableHere(string $driver): bool
+    {
+        return match ($driver) {
+            FakeDomainRegistrarProvider::NAME => FakeRegistrarGuard::permitsTheFake(),
+            default => true,
+        };
     }
 
     /**

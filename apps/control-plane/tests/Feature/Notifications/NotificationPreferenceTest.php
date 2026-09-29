@@ -6,6 +6,7 @@ namespace Tests\Feature\Notifications;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Notifications\Domain\Enums\NotificationCategory;
 use Lynomia\Modules\Notifications\Infrastructure\Models\NotificationPreference;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
@@ -45,7 +46,9 @@ final class NotificationPreferenceTest extends TestCase
 
         $rows = collect($response->json('data'));
 
-        $this->assertSame(8, $rows->count(), 'Four categories across two implemented channels.');
+        // Three since F-46: "operational" held only two types nothing raised,
+        // and went with them rather than stay as a switch for nothing.
+        $this->assertSame(6, $rows->count(), 'Three categories across two implemented channels.');
 
         $security = $rows->firstWhere(fn ($r) => $r['category'] === 'security' && $r['channel'] === 'email');
         $this->assertFalse($security['changeable']);
@@ -98,10 +101,10 @@ final class NotificationPreferenceTest extends TestCase
     #[Test]
     public function the_inbox_cannot_be_silenced_on_any_category(): void
     {
-        foreach (['security', 'billing', 'service', 'operational'] as $category) {
+        foreach (NotificationCategory::cases() as $category) {
             $this->actingAs($this->user)
                 ->putJson('/api/v1/me/notification-preferences', [
-                    'category' => $category,
+                    'category' => $category->value,
                     'channel' => 'in_app',
                     'enabled' => false,
                 ])

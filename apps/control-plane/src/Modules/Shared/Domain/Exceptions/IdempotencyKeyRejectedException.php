@@ -28,7 +28,7 @@ final class IdempotencyKeyRejectedException extends DomainException
         return (new self($reason))->withContext([
             'header' => self::HEADER,
             'field' => 'idempotency_key',
-        ]);
+        ])->publishing('header', 'field');
     }
 
     public function errorCode(): string

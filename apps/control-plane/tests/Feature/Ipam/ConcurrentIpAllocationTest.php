@@ -14,6 +14,7 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\IpReservation;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Ipam\Concerns\CreatesIpamFixtures;
+use Tests\Support\TestDatabaseGuard;
 use Tests\TestCase;
 
 /**
@@ -231,6 +232,8 @@ final class ConcurrentIpAllocationTest extends TestCase
      */
     private function wipe(): void
     {
+        TestDatabaseGuard::refuseToEmpty(DB::connection($this->defaultConnection));
+
         foreach ([
             'ip_assignments',
             'ip_reservations',

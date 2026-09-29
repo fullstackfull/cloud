@@ -20,7 +20,9 @@ use Lynomia\Modules\Provisioning\Domain\Contracts\HandlerRegistry;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ResourceReservationReleaser;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Registries\ProvisioningHandlerRegistry;
+use Lynomia\Modules\Shared\Domain\Contracts\HostResolver;
 use Lynomia\Modules\Shared\Infrastructure\Mail\OutboxTransport;
+use Lynomia\Modules\Shared\Infrastructure\Network\SystemHostResolver;
 use Lynomia\Modules\SharedHosting\Application\Handlers\ChangeHostingPackageHandler;
 use Lynomia\Modules\SharedHosting\Application\Handlers\CopyWordPressSiteHandler;
 use Lynomia\Modules\SharedHosting\Application\Handlers\CreateHostingAccountHandler;
@@ -78,6 +80,13 @@ final class InfrastructureServiceProvider extends ServiceProvider
          * reachable through a bastion binds something that knows how.
          */
         $this->app->bind(HostReachability::class, TcpHostReachability::class);
+
+        /*
+         * Who the endpoint policy asks where a name points. The deployment's
+         * own resolver, both address families; the test suite binds a table
+         * in its place (Tests\TestCase), so no fixture name is sent to DNS.
+         */
+        $this->app->bind(HostResolver::class, SystemHostResolver::class);
 
         /*
          * Who looks at a customer's site to decide whether it is really there.

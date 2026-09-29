@@ -132,7 +132,28 @@ never forces a move the table does not have.
 A plan unit and an unredeemed coupon use are held by every order except a cancelled or
 terminated one — and a refunded one whose services have all ended. A refund records the
 money and nothing else; what the order holds comes back when its service ends, which is a
-separate act.
+separate act. A full refund is recorded on the order from any status it holds once paid,
+including while it is queued, building or suspended.
+
+A customer may cancel only an order whose invoice has taken no money. The invoice is read
+under its own lock inside the cancel, because it hears about a payment before the order
+does: the order leaves `PENDING_PAYMENT` only when the queued fulfilment job runs. A
+settlement that nevertheless finds a cancelled order delivers nothing and credits to the
+wallet what the invoice took less what has already gone back (an overpayment surplus
+already in the wallet, or a refund), once. The reverse holds too: money already credited to
+the wallet against an invoice (an overpayment surplus, a compensated capture, a cancelled
+order's credit) is not refundable to the card afterwards (`payment.refund_exceeds_what_is_held`).
+A wallet credit the customer has spent is not clawed back.
+
+## Renewal and the end of a service
+
+A renewal is not issued for a service that was never delivered (a `PENDING` service the
+platform could not place, or a `FAILED` build) or that has ended (`TERMINATED`). Ending a
+service — through either operator route, the retention sweep, or a VPS destroy job —
+ends the subscription that paid for it: a suspended subscription is terminated, an active
+or past-due one is cancelled, and its invoices that are still open and have taken no money
+are voided. Through the hosting-account route that step needs `service.terminate`, as it
+does on the service route.
 
 ## Payment confirmation
 

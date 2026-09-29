@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Rbac\Application\Actions;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
@@ -27,7 +28,16 @@ use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
  *
  * An existing user is promoted rather than refused: the people who operate a
  * platform often already have a customer login, and making them register a
- * second address to hold a role would be a rule with no purpose.
+ * second address to hold a role would be a rule with no purpose. (Unlike the
+ * console bootstrap, this path sets no password on an existing account, and
+ * it needs an authenticated operator allowed to grant the role.)
+ *
+ * The whole invitation is one transaction: the user row, its OperatorInvited
+ * entry and the role grant commit together or not at all. The grant used to
+ * run after the first two had committed, so a refused grant (422
+ * `rbac.role_not_yours_to_grant`) left a user row and an audit entry recording
+ * an invitation that never happened. The reset link is sent only after the
+ * commit.
  */
 final readonly class InviteOperator
 {
@@ -45,6 +55,20 @@ final readonly class InviteOperator
     {
         $address = Str::lower(trim($email));
 
+        $operator = DB::transaction(fn (): User => $this->inviteAndGrant($actor, $address, $name, $roles));
+
+        Password::sendResetLink(['email' => $operator->email]);
+
+        return $operator->fresh() ?? $operator;
+    }
+
+    /**
+     * @param  list<string>  $roles
+     *
+     * @throws RoleChangeRefusedException
+     */
+    private function inviteAndGrant(User $actor, string $address, string $name, array $roles): User
+    {
         $operator = $this->record->execute(
             act: function () use ($address, $name): User {
                 /** @var User $user */
@@ -75,11 +99,7 @@ final readonly class InviteOperator
          * Written this way round on purpose: the alternative — validating here
          * and assigning here — is a second copy of the escalation rules.
          */
-        $this->roles->execute($actor, $operator, $roles);
-
-        Password::sendResetLink(['email' => $operator->email]);
-
-        return $operator->fresh() ?? $operator;
+        return $this->roles->execute($actor, $operator, $roles);
     }
 
     /**

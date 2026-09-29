@@ -16,6 +16,8 @@ use Lynomia\Modules\Compute\Infrastructure\Models\Region;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
@@ -135,6 +137,45 @@ final class TheEstateIsCorrectableAndNotSilentlyDestroyedTest extends TestCase
             ->assertJsonPath('error.code', 'infrastructure.still_in_use');
 
         $this->assertTrue($pool->fresh()?->is_active, 'Addresses in use kept answering from a pool marked inactive.');
+    }
+
+    #[Test]
+    public function a_network_an_active_subnet_is_on_cannot_lose_its_bridge(): void
+    {
+        /*
+         * F-07 (A×D), round four's re-audit: a VPS is built only onto a
+         * subnet whose network has a bridge (Network::canCarryACustomerMachine()),
+         * and clearing the bridge on a network an active subnet sits on made
+         * the estate silently unbuildable - every build after it failed
+         * ipam.pool_exhausted. It is refused while an active subnet is on the
+         * network, as switching the network off is; a bridge can be renamed.
+         */
+        $network = Network::factory()->create(['bridge' => 'vmbr1']);
+        $subnet = Subnet::factory()->create(['network_id' => $network->getKey()]);
+
+        foreach ([null, ''] as $cleared) {
+            $this->actingAs($this->operator)
+                ->putJson('/api/admin/infrastructure/networks/'.$network->id, ['bridge' => $cleared])
+                ->assertStatus(409)
+                ->assertJsonPath('error.code', 'infrastructure.still_in_use');
+
+            $this->assertSame('vmbr1', $network->fresh()?->bridge);
+        }
+
+        $this->actingAs($this->operator)
+            ->putJson('/api/admin/infrastructure/networks/'.$network->id, ['bridge' => 'vmbr2'])
+            ->assertOk();
+
+        $this->assertSame('vmbr2', $network->fresh()?->bridge);
+
+        // With no active subnet on it any more, the bridge is the operator's.
+        $subnet->forceFill(['is_active' => false])->save();
+
+        $this->actingAs($this->operator)
+            ->putJson('/api/admin/infrastructure/networks/'.$network->id, ['bridge' => null])
+            ->assertOk();
+
+        $this->assertNull($network->fresh()?->bridge);
     }
 
     #[Test]

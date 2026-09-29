@@ -55,10 +55,11 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
  * What it does do, and what nothing else in this module has to, is translate a
  * panel failure into something a customer may read. Every adapter records the
  * node's hostname, the function it called and the panel's own words in the
- * exception context so that an operator can find the machine; the shared
- * renderer publishes a DomainException's context as `error.details`. This is
- * the only place in the module where those two facts meet a customer-facing
- * response, so it is the place that has to keep them apart — see
+ * exception context so that an operator can find the machine. The shared
+ * renderer publishes only the context keys an exception declares, and the
+ * provider's exception declares none; this is still the only place in the
+ * module where a panel failure meets a customer-facing response, so it is the
+ * place that decides what that customer is told — see
  * {@see HostingPanelSessionFailedException}. The provider's exception is
  * chained, never discarded: the log keeps everything.
  */

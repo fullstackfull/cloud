@@ -21,6 +21,7 @@ import { safeLabel } from '@/lib/safeLabel'
 
 import { DedicatedPowerActions } from './dedicated/DedicatedPowerActions'
 import { DedicatedReinstallAction } from './dedicated/DedicatedReinstallAction'
+import { rebuildStateLabel, stoppedAfterErasing } from './rebuildStateLabel'
 
 /**
  * One dedicated machine, in one place.
@@ -127,8 +128,19 @@ export function DedicatedOverviewSection() {
             columns={2}
             facts={[
               {
+                /*
+                 * Named from the state and `data_destroyed` together: a
+                 * rebuild settled `failed` after the machine was told to boot
+                 * the installer is not "The rebuild did not run" (F-20).
+                 */
                 label: t('services.state'),
-                value: safeLabel('dedicated.reinstallState', server.reinstall.state),
+                value: stoppedAfterErasing(server.reinstall) ? (
+                  <span className="text-[var(--danger-text)]">
+                    {rebuildStateLabel('dedicated', server.reinstall)}
+                  </span>
+                ) : (
+                  rebuildStateLabel('dedicated', server.reinstall)
+                ),
               },
               {
                 label: t('dedicated.rebuildRequested'),

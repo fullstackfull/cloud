@@ -51,12 +51,29 @@ use Lynomia\Modules\Shared\Domain\Exceptions\EndpointRefused;
  *
  * The order is the order reality imposes:
  *
- *   configuration → credential → endpoint policy → identity → capabilities → licence
+ *   configuration → machine → credential → endpoint policy → identity → capabilities → licence
  *
- * A credential cannot be judged before there is an endpoint to judge it
- * against. An endpoint cannot be dialled before the policy has said it may be.
- * Capabilities cannot be read before something has authenticated. And a
- * licence question is only meaningful once the product has answered at all.
+ * The machine link exists only for a driver that needs an endpoint in a
+ * category that runs on a machine of ours; for any other row there is no
+ * machine to ask about. A credential cannot be judged before there is an
+ * endpoint to judge it against. An endpoint cannot be dialled before the
+ * policy has said it may be. Capabilities cannot be read before something has
+ * authenticated. And a licence question is only meaningful once the product
+ * has answered at all.
+ *
+ * ===========================================================================
+ * EVERY EXIT, WITHOUT EXCEPTION
+ * ===========================================================================
+ *
+ * Every return in {@see self::inspect()} before the last spreads
+ * {@see self::notTestedBelow()}: a driver this build has no adapter for, a
+ * disabled row, a machine that blocks, a credential that blocks, an endpoint
+ * that is missing or refused, and an identity that was not established. The
+ * first of those used to return its failure alone — red, so never a false
+ * green, but the one break that did not name the rungs below it, and a rule
+ * with one unstated exception is a rule a reader has to re-derive before
+ * trusting. `notTestedBelow()`'s own empty return is reached only for a link
+ * name it does not know, and every call names one it does.
  *
  * ===========================================================================
  * WHAT NEVER HAPPENS HERE
@@ -103,14 +120,17 @@ final readonly class ProviderChain
              * happen by editing a table, so reaching it means a seeder or an
              * import wrote a row nothing can serve.
              */
-            return [PreflightFinding::fail(
-                'provider.configuration',
-                CheckCategory::Configuration,
-                $name,
-                sprintf('The row names driver "%s", which this build has no adapter for.', $provider->driver),
-                sprintf('Change the provider to a catalogued driver, or remove the row. Catalogued drivers: %s.',
-                    implode(', ', array_map(static fn ($e): string => $e->driver, $this->catalogue->entries()))),
-            )];
+            return [
+                PreflightFinding::fail(
+                    'provider.configuration',
+                    CheckCategory::Configuration,
+                    $name,
+                    sprintf('The row names driver "%s", which this build has no adapter for.', $provider->driver),
+                    sprintf('Change the provider to a catalogued driver, or remove the row. Catalogued drivers: %s.',
+                        implode(', ', array_map(static fn ($e): string => $e->driver, $this->catalogue->entries()))),
+                ),
+                ...$this->notTestedBelow('provider.configuration', $name, 'credential'),
+            ];
         }
 
         if ($provider->state === ProviderState::Disabled) {

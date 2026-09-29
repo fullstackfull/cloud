@@ -22,13 +22,17 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
  * Why this is not retry
  * ---------------------------------------------------------------------------
  *
- * A build is refused over its name in two ways: the job names no domain at
+ * A build is refused over its name in four ways: the job names no domain at
  * all (`hosting.domain_missing` — every order placed before checkout asked for
- * one), or it names one another live account already serves
- * (`hosting.domain_in_use`). A retry runs the same job again and is refused
- * the same way, because a retry is not a repair. So the correction is its own
- * act, recorded as such, and the retry that follows it is the ordinary one
- * with its ordinary guards.
+ * one); it names something that is not a host name
+ * (`hosting.domain_unusable`); it names one another live account already
+ * serves (`hosting.domain_in_use`); or it names one other than the name its
+ * own earlier attempt's row still serves
+ * (`hosting.account_serves_another_domain`), where the way out is to name it
+ * back. A retry runs the same job again and is refused the same way, because
+ * a retry is not a repair. So the correction is its own act, recorded as
+ * such, and the retry that follows it is the ordinary one with its ordinary
+ * guards.
  *
  * It writes one column of the job and nothing else: not the status, not the
  * attempts, not the account row — and not the payload. The account row is the
@@ -109,7 +113,7 @@ final readonly class NameTheDomainAHostingJobWillServe
             }
 
             if (! in_array($locked->status, [ProvisioningJobStatus::Failed, ProvisioningJobStatus::NeedsReview], true)) {
-                throw HostingJobDomainRefusedException::becauseItHasNotStopped(
+                throw HostingJobDomainRefusedException::becauseItIsNotAwaitingRepair(
                     (string) $locked->getKey(),
                     $locked->status->value,
                 );

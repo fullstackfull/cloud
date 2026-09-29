@@ -6,9 +6,11 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Bootstrap\LoadConfiguration;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Middleware\TrustProxies as FrameworkTrustProxies;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Exceptions\InvalidSignatureException;
@@ -18,19 +20,22 @@ use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 use Lynomia\Http\Middleware\AssignRequestId;
 use Lynomia\Http\Middleware\EnsureEmailIsVerified;
+use Lynomia\Http\Middleware\EnsureTheCallerIsStaff;
 use Lynomia\Http\Middleware\ResolveActingCustomer;
 use Lynomia\Http\Middleware\SecurityHeaders;
 use Lynomia\Http\Middleware\SetRequestLocale;
+use Lynomia\Http\Middleware\TrustProxies;
 use Lynomia\Http\Responses\ApiError;
 use Lynomia\Http\Responses\ErrorCatalogue;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
+use Lynomia\Support\Environment\SettleTheApplicationEnvironment;
 use Spatie\Permission\Middleware\PermissionMiddleware;
 use Spatie\Permission\Middleware\RoleMiddleware;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
-return Application::configure(basePath: dirname(__DIR__))
+$app = Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
@@ -109,20 +114,32 @@ return Application::configure(basePath: dirname(__DIR__))
             'verified' => EnsureEmailIsVerified::class,
             'role' => RoleMiddleware::class,
 
+            /*
+             * The /api/admin staff gate: a login holding no staff role is
+             * refused before any permission is read. See the class.
+             */
+            'staff' => EnsureTheCallerIsStaff::class,
+
             // Resolves the one customer account a request acts for. Every
             // customer-scoped route carries it, and every customer-scoped
             // query reads the answer from it rather than from the request.
             'customer' => ResolveActingCustomer::class,
         ]);
 
-        // Never trust proxy headers blindly. The production Ansible role sets
-        // TRUSTED_PROXIES to the actual load balancer addresses; a wildcard
-        // would let any client spoof its source IP and defeat rate limiting.
-        $middleware->trustProxies(
-            at: array_values(array_filter(
-                array_map('trim', explode(',', (string) env('TRUSTED_PROXIES', '')))
-            )) ?: null,
-        );
+        /*
+         * Which callers' X-Forwarded-For is believed is decided per request,
+         * from configuration, by our TrustProxies — never here.
+         *
+         * This closure runs when the HTTP kernel is resolved, and
+         * Application::handleRequest() resolves the kernel before the kernel
+         * loads `.env`. The `env('TRUSTED_PROXIES')` that used to sit here
+         * therefore saw only the process environment, came back empty in
+         * production, and keyed every customer behind the balancer on the
+         * balancer's address: one bucket for every IP-keyed limiter (F-31).
+         * The list is `security.trusted_proxies` now, and the middleware also
+         * refuses any entry that would trust every caller.
+         */
+        $middleware->replace(FrameworkTrustProxies::class, TrustProxies::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
@@ -163,19 +180,38 @@ return Application::configure(basePath: dirname(__DIR__))
                 return null;
             }
 
+            /*
+             * On the customer API a code with no catalogue entry is answered
+             * with the catalogue's generic sentence, never the exception's
+             * own: that sentence is the engineer's and may name a node, a job
+             * or a provider. Everywhere else — the operator API, whose readers
+             * are staff — it stays the fallback. Whether a customer route can
+             * reach a class declaring an uncatalogued code is checked,
+             * for the literal spellings it reads, by
+             * NoCustomerRouteReachesAnUncataloguedCodeTest.
+             */
+            $customer = $request->is('api/v1', 'api/v1/*');
+
             $error = match (true) {
                 /*
                  * The code is the exception's; the sentence is the catalogue's,
                  * in the language the request asked for. The exception's own
                  * message is the engineer's and is only ever sent for a code
-                 * the customer catalogue has no entry for — which the parity
-                 * test keeps to the operator modules.
+                 * the customer catalogue has no entry for, and never on the
+                 * customer API (see `$customer` above).
+                 *
+                 * The sentence is filled from the whole context; `details` is
+                 * only the part the exception's class declared the caller
+                 * already knows. The rest of the context is for the log: it
+                 * may name a provider, a node or the configuration key a
+                 * credential is read from, and publishing it verbatim is how
+                 * two customer routes answered with exactly that.
                  */
                 $e instanceof DomainException => ApiError::make(
                     $e->errorCode(),
-                    ErrorCatalogue::message($e->errorCode(), $e->context(), $e->getMessage()),
+                    ErrorCatalogue::message($e->errorCode(), $e->context(), $customer ? '' : $e->getMessage()),
                     $e->httpStatus(),
-                    $e->context(),
+                    $e->publishedContext(),
                 ),
 
                 $e instanceof ValidationException => ApiError::make(
@@ -241,7 +277,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
                 $e instanceof HttpExceptionInterface => ApiError::make(
                     'http.'.$e->getStatusCode(),
-                    ErrorCatalogue::message('http.'.$e->getStatusCode(), [], $e->getMessage() ?: 'Request failed.'),
+                    ErrorCatalogue::message('http.'.$e->getStatusCode(), [], $customer ? '' : ($e->getMessage() ?: 'Request failed.')),
                     $e->getStatusCode(),
                 ),
 
@@ -263,3 +299,13 @@ return Application::configure(basePath: dirname(__DIR__))
             )->toResponse($request);
         });
     })->create();
+
+/*
+ * F-16: settle `$app['env']` the moment configuration is loaded, before any
+ * service provider registers or boots. Every production guard compares
+ * `$app['env']`, which a console `--env=` argument overrides verbatim; see
+ * SettleTheApplicationEnvironment for what "settle" means.
+ */
+$app->afterBootstrapping(LoadConfiguration::class, (new SettleTheApplicationEnvironment)(...));
+
+return $app;
