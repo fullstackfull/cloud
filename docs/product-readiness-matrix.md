@@ -29,7 +29,7 @@ requirements that selling anything needs.
 
 | Product | Depends on | Own requirements (category: capabilities) | Shared requirements |
 | --- | --- | --- | --- |
-| Cloud VPS (`vps`) | — | compute: create, start, stop, reboot, reinstall, suspend, unsuspend, destroy, task_polling · reverse_dns: set_ptr, clear_ptr | payment: charge, webhook · email: send |
+| Cloud VPS (`vps`) | — | compute: create, start, stop, reboot, resize, reinstall, suspend, unsuspend, console, destroy, templates, task_polling, inventory_sync · reverse_dns: set_ptr, clear_ptr | payment: charge, webhook · email: send |
 | Dedicated servers (`dedicated`) | — | bmc: power_state, power_control, boot_override · reverse_dns: set_ptr, clear_ptr | same |
 | Shared hosting (`shared_hosting`) | — | hosting: create_account, suspend, unsuspend, terminate, change_package | same |
 | WordPress (`wordpress`) | `shared_hosting` | wordpress_installer: install, uninstall, ssl | same |

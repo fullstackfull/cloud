@@ -117,7 +117,9 @@ interface HostingProvider
      * Set an account's panel password.
      *
      * The platform never keeps the value it sets: this is how a reset is
-     * performed, not how a password is stored.
+     * performed, not how a password is stored. The operator's reset —
+     * `ResetHostingAccountPassword` — mints the value, sets it here and hands
+     * it back once.
      *
      * @throws HostingProviderException
      */

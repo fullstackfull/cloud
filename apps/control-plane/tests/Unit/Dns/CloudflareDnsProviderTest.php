@@ -201,7 +201,7 @@ final class CloudflareDnsProviderTest extends TestCase
     }
 
     #[Test]
-    public function publishing_a_changed_record_replaces_it_rather_than_adding_a_second(): void
+    public function publishing_a_changed_record_under_its_identifier_replaces_it_rather_than_adding_a_second(): void
     {
         Http::fake([
             self::BASE.'/zones/zone-1/dns_records?*' => Http::response(self::ok([[
@@ -210,13 +210,36 @@ final class CloudflareDnsProviderTest extends TestCase
             self::BASE.'/zones/zone-1/dns_records/rec-old' => Http::response(self::ok(['id' => 'rec-old'])),
         ]);
 
+        // An edit: the record carries the identifier the provider gave it.
         $this->provider()->publish(
             self::zone(),
-            DnsRecord::of(DnsRecordType::A, 'www.lynomia.test', '192.0.2.10', 300),
+            DnsRecord::of(DnsRecordType::A, 'www.lynomia.test', '192.0.2.10', 300, id: 'rec-old'),
         );
 
         Http::assertSent(static fn (Request $r): bool => $r->method() === 'PUT' && str_ends_with($r->url(), '/rec-old'));
         Http::assertNotSent(static fn (Request $r): bool => $r->method() === 'POST');
+    }
+
+    #[Test]
+    public function publishing_a_second_value_at_a_name_adds_it_beside_the_first(): void
+    {
+        Http::fake([
+            self::BASE.'/zones/zone-1/dns_records?*' => Http::response(self::ok([[
+                'id' => 'rec-old', 'type' => 'A', 'name' => 'www.lynomia.test', 'content' => '192.0.2.9', 'ttl' => 300,
+            ]])),
+            self::BASE.'/zones/zone-1/dns_records' => Http::response(self::ok(['id' => 'rec-new'])),
+        ]);
+
+        // Round robin. Replacing the address already there — what this
+        // adapter once did with `$existing[0]` — would take it out of service.
+        $record = $this->provider()->publish(
+            self::zone(),
+            DnsRecord::of(DnsRecordType::A, 'www.lynomia.test', '192.0.2.10', 300),
+        );
+
+        $this->assertSame('rec-new', $record->id());
+        Http::assertSent(static fn (Request $r): bool => $r->method() === 'POST');
+        Http::assertNotSent(static fn (Request $r): bool => in_array($r->method(), ['PUT', 'DELETE'], true));
     }
 
     #[Test]

@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Dns\Domain\Contracts;
 use Lynomia\Modules\Dns\Domain\Enums\DnsRecordType;
 use Lynomia\Modules\Dns\Domain\Exceptions\DnsNotConfiguredException;
 use Lynomia\Modules\Dns\Domain\Exceptions\DnsProviderException;
+use Lynomia\Modules\Dns\Domain\Services\DnsRecordIdentity;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DnsRecord;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DnsZone;
 use Lynomia\Modules\Ipam\Domain\Contracts\ReverseDnsProvider;
@@ -27,6 +28,16 @@ use Lynomia\Modules\Ipam\Domain\Contracts\ReverseDnsProvider;
  * `publish()` is defined as "make the zone say this", and an implementation
  * that already holds the value is expected to do nothing rather than write it
  * again.
+ *
+ * **A name holds as many records as were written to it.** Several A records
+ * at one name are round robin; two MX records are a primary and a backup
+ * exchanger. So no method here identifies a record by `(type, name)`: which
+ * record a {@see DnsRecord} *is* is answered by
+ * {@see DnsRecordIdentity} — the
+ * provider's identifier while the zone still knows it, and otherwise the
+ * value — and every implementation asks it rather than deciding for itself.
+ * An implementation that collapsed a name's records onto one (F-11) would
+ * destroy the others on the next publish or delete.
  */
 interface DnsProvider
 {
@@ -102,7 +113,9 @@ interface DnsProvider
     public function deleteZone(DnsZone $zone): void;
 
     /**
-     * Records in a zone, optionally narrowed.
+     * Records in a zone, optionally narrowed. All of them: a provider that
+     * pages its listing is read to the last page, because a record missing
+     * from this answer is reported as missing from the zone.
      *
      * @return list<DnsRecord>
      *
@@ -114,9 +127,19 @@ interface DnsProvider
     /**
      * Make the zone say this, whether or not it said anything before.
      *
-     * Idempotent by name and type: publishing the same record twice leaves one,
-     * and publishing a changed value replaces rather than appends. Returns the
-     * record as the provider now holds it, carrying the provider's identifier.
+     * Idempotent by the record's identity, not by its name and type. A record
+     * carrying an identifier the zone still holds replaces the record under
+     * that identifier — an edit — and leaves every other record at the name
+     * alone. A record the zone already holds by value is left as it is, or
+     * rewritten only if what a resolver would see differs (its TTL included).
+     * Anything else is added beside what the name already holds: publishing a
+     * second address for a name is round robin, not a replacement.
+     *
+     * Returns the record as the provider now holds it, carrying the
+     * provider's identifier. That identifier may belong to a record the value
+     * tier found rather than one this call created; whether another row of
+     * the platform's already holds it is the caller's question, not the
+     * provider's, because nothing here can see the platform's table.
      *
      * @throws DnsProviderException
      * @throws DnsNotConfiguredException
@@ -124,8 +147,21 @@ interface DnsProvider
     public function publish(DnsZone $zone, DnsRecord $record): DnsRecord;
 
     /**
-     * Remove a record. Removing one that is not there is not an error: the
-     * caller asked for the name to be absent, and it is.
+     * Remove one record — the one {@see DnsRecordIdentity} finds, and never
+     * the other records at its name. Removing one that is not there is not an
+     * error: the caller asked for the value to be absent, and it is.
+     *
+     * The identifier is not fired blind. An implementation reads first, so an
+     * identifier the zone no longer knows (the record was removed in the
+     * provider's console) falls through to the value like any other, rather
+     * than being sent and answered with an error that parks the row for a
+     * person over a zone that already says what was asked.
+     *
+     * The read is narrowed to the record's type and name. So a record renamed
+     * at the provider under an identifier the platform holds is *not* removed
+     * by this call: it now sits at a name the platform never asked to remove,
+     * and the reconciliation sweep reports it as a record nobody here wrote.
+     * The controlled fake resolves the same way, over the same narrowing.
      *
      * @throws DnsProviderException
      * @throws DnsNotConfiguredException

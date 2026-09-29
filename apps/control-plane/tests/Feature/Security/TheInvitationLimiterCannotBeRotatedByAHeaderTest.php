@@ -26,9 +26,13 @@ use Tests\TestCase;
  * while presenting a bucket key nobody had ever used. That is not a rotated
  * limit, it is an unbounded one: every distinct value is a fresh budget.
  *
- * `throttle:team-invitations` runs AFTER `ResolveActingCustomer` on both
- * invitation routes, so the resolved account is available to the limiter and
- * there is no reason to consult the header at all.
+ * The limiter runs AFTER `ResolveActingCustomer` on both invitation routes —
+ * attached through `ThrottleAfterAccountResolution`, because the plain
+ * `throttle:` alias is sorted ahead of it — so the resolved account is
+ * available to the limiter and there is no reason to consult the header at
+ * all. This class sets the account itself and calls the closure directly, so
+ * it pins the key and cannot see attachment or order;
+ * TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest does.
  */
 final class TheInvitationLimiterCannotBeRotatedByAHeaderTest extends TestCase
 {

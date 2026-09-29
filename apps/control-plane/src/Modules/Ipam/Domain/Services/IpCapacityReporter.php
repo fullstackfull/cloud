@@ -114,7 +114,28 @@ final readonly class IpCapacityReporter
              */
             runwayDays: $rate > 0.0 ? round($available / $rate, 1) : null,
             observationDays: $observationDays,
+            quarantinedHeld: $this->heldQuarantines($subnetIds),
         );
+    }
+
+    /**
+     * Quarantined addresses with no clock — held for a machine nobody has yet
+     * declared empty. Counted apart because they are the one kind of
+     * quarantine that will not come back on its own.
+     *
+     * @param  list<string>  $subnetIds
+     */
+    private function heldQuarantines(array $subnetIds): int
+    {
+        if ($subnetIds === []) {
+            return 0;
+        }
+
+        return DB::table('ip_addresses')
+            ->whereIn('subnet_id', $subnetIds)
+            ->where('status', IpAddressStatus::Quarantined->value)
+            ->whereNull('quarantined_until')
+            ->count();
     }
 
     /**

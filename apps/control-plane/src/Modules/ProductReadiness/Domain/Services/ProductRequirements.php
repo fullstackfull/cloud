@@ -52,7 +52,15 @@ final readonly class ProductRequirements
     {
         return match ($product) {
             Product::Vps => [
-                new Requirement(ProviderCategory::Compute, ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling']),
+                /*
+                 * `inventory_sync` because placement reads the storage pools
+                 * the inventory sync recorded, and nothing else in production
+                 * records one: a cluster whose token cannot audit a datastore
+                 * answers every other question and places nothing. Named here
+                 * and not on GPU compute, which depends on VPS and inherits
+                 * its readiness.
+                 */
+                new Requirement(ProviderCategory::Compute, ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling', 'inventory_sync']),
                 new Requirement(ProviderCategory::ReverseDns, ['set_ptr', 'clear_ptr']),
             ],
             Product::Dedicated => [

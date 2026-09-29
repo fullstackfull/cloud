@@ -27,9 +27,29 @@ use Throwable;
  * the queue, and their reservations are quarantined rather than released — the
  * same rule the engine applies to a timeout it observed itself, for the same
  * reason.
+ *
+ * It also writes the job's finding, `result.error`, and that is not
+ * bookkeeping. The finding is what the screen and the actions downstream of
+ * it read as "what the last attempt found", and before this sweep wrote one
+ * the finding on a swept job was whatever an EARLIER attempt had written. F-15
+ * measured what that costs: an attempt that had found a stranger's machine at
+ * its reserved VPS identity left `vps.create_identity_taken` behind; the
+ * repoint that finding licenses was taken; the next attempt built under the
+ * new identity and its worker died; this sweep moved the job to review
+ * without touching `result` — and the old finding licensed a second repoint,
+ * and a second machine. The sweep's own code, stamped with the attempt it
+ * belongs to, replaces whatever was there. (`RepointReservedIdentity` also
+ * refuses a finding from any attempt but the last, independently; either
+ * half alone closes that door.)
  */
 final readonly class DetectStaleJobs
 {
+    /**
+     * What a swept job's finding says: no attempt answered, not what an
+     * earlier attempt found.
+     */
+    public const string ERROR_CODE = 'provisioning.worker_never_settled';
+
     public function __construct(
         private ProvisioningJobStateMachine $jobStates,
         private CompensateFailedJob $compensate,
@@ -131,6 +151,14 @@ final readonly class DetectStaleJobs
             $locked->last_error = $this->reasonFor($locked);
             $locked->finished_at = now();
             $locked->next_attempt_at = null;
+            $locked->result = [
+                ...($locked->result ?? []),
+                'error' => [
+                    'code' => self::ERROR_CODE,
+                    'class' => FailureClass::Timeout->value,
+                    'attempt' => $locked->attempts,
+                ],
+            ];
             $locked->save();
 
             return $locked;

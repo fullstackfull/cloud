@@ -59,27 +59,85 @@ use SensitiveParameter;
 class ProxmoxConnectionTester extends HttpIdentityTester
 {
     /**
-     * Proxmox privilege → what holding it proves, and what lacking it
-     * disproves.
+     * Capability → every Proxmox privilege the adapter's requests for it need.
      *
-     * Read as: this capability is offered if and only if the token holds this
-     * privilege somewhere. Capabilities absent from this map stay Unknown,
-     * because no privilege settles them on its own — `reinstall` needs both an
-     * allocation privilege and a working template, and the template half
-     * cannot be established without building something.
+     * Read as: this capability is offered if and only if the token holds ALL
+     * of these privileges somewhere, and is Unsupported if it provably lacks
+     * any one of them. Each list is what the Proxmox compute adapter
+     * actually sends for that capability, not what the capability's name
+     * suggests: `create` writes cores, memory, disks, a NIC, options, the SCSI
+     * controller type and cloud-init keys in one POST, so a token that holds
+     * `VM.Allocate` alone is refused by the cluster on the first order.
      *
-     * @var array<string, string>
+     * Every capability VPS requires of compute is settled here, apart from
+     * `task_polling`, which is read below. An earlier version left `reinstall`
+     * and `templates` out, on the ground that a privilege cannot establish
+     * that an image boots — which is true, and is equally true of `create`.
+     * Whether a build succeeds is verification's question; what a connection
+     * test can establish, without doing anything, is whether the token may
+     * issue every request the operation consists of. Leaving the two out did
+     * not make the answer more careful: it made it Unknown on every real
+     * cluster for ever, and VPS requires both with no optional list, so only
+     * the simulator could satisfy VPS (F-13).
+     *
+     *  - `reinstall` stops the guest and reads its status (`VM.PowerMgmt`,
+     *    `VM.Audit`), detaches and destroys the disk and imports a new one
+     *    (`VM.Config.Disk`, `Datastore.AllocateSpace`), and rewrites name,
+     *    OS type, boot order and `onboot` (`VM.Config.Options`) and the
+     *    cloud-init keys (`VM.Config.Cloudinit`).
+     *  - `templates` is reading the platform's images off storage, which is
+     *    what `import-from=` does to its source volume: `Datastore.Audit`.
+     *  - `inventory_sync` is the scheduled inventory read. `/nodes` needs
+     *    `Sys.Audit`, and a node's storage list shows only the pools the token
+     *    may audit, so without `Datastore.Audit` the sync records no pool and
+     *    the scheduler — which places only on recorded pools — places nothing.
+     *    Such a token used to be declared ready.
+     *
+     * `create` and `reinstall` ask for `VM.Config.Cloudinit` because every call
+     * that builds or rebuilds a machine hands the adapter a cloud-init config;
+     * the F-13 test reads both handlers' argument lists to hold that premise.
+     *
+     * Known to be short: `suspend` and `unsuspend` write `onboot` and `lock`,
+     * which is `VM.Config.Options`, and ask here only for `VM.PowerMgmt`. No
+     * product verdict moves on it, because both compute products require
+     * `create`, which requires `VM.Config.Options`.
+     *
+     * Every privilege named here is granted by the provisioning role in
+     * `infrastructure/ansible/group_vars/proxmox.yml`, and the F-13 test
+     * parses that file to keep it so.
+     *
+     * @var array<string, list<string>>
      */
     private const array PRIVILEGES = [
-        'create' => 'VM.Allocate',
-        'destroy' => 'VM.Allocate',
-        'start' => 'VM.PowerMgmt',
-        'stop' => 'VM.PowerMgmt',
-        'reboot' => 'VM.PowerMgmt',
-        'suspend' => 'VM.PowerMgmt',
-        'unsuspend' => 'VM.PowerMgmt',
-        'console' => 'VM.Console',
-        'resize' => 'VM.Config.Disk',
+        'create' => [
+            'VM.Allocate',
+            'Datastore.AllocateSpace',
+            'VM.Config.CPU',
+            'VM.Config.Memory',
+            'VM.Config.Disk',
+            'VM.Config.Network',
+            'VM.Config.Options',
+            'VM.Config.HWType',
+            'VM.Config.Cloudinit',
+        ],
+        'destroy' => ['VM.Allocate'],
+        'start' => ['VM.PowerMgmt'],
+        'stop' => ['VM.PowerMgmt'],
+        'reboot' => ['VM.PowerMgmt'],
+        'suspend' => ['VM.PowerMgmt'],
+        'unsuspend' => ['VM.PowerMgmt'],
+        'console' => ['VM.Console'],
+        'resize' => ['VM.Config.CPU', 'VM.Config.Memory', 'VM.Config.Disk', 'Datastore.AllocateSpace'],
+        'reinstall' => [
+            'VM.PowerMgmt',
+            'VM.Audit',
+            'VM.Config.Disk',
+            'VM.Config.Options',
+            'VM.Config.Cloudinit',
+            'Datastore.AllocateSpace',
+        ],
+        'templates' => ['Datastore.Audit'],
+        'inventory_sync' => ['Sys.Audit', 'Datastore.Audit'],
     ];
 
     public function __construct(string $driver = 'proxmox')
@@ -292,8 +350,8 @@ class ProxmoxConnectionTester extends HttpIdentityTester
 
         $states = [];
 
-        foreach (self::PRIVILEGES as $capability => $privilege) {
-            $states[$capability] = in_array($privilege, $held, strict: true)
+        foreach (self::PRIVILEGES as $capability => $privileges) {
+            $states[$capability] = array_diff($privileges, $held) === []
                 ? CapabilityState::Supported
                 : CapabilityState::Unsupported;
         }
@@ -313,7 +371,7 @@ class ProxmoxConnectionTester extends HttpIdentityTester
             static fn (CapabilityState $state): bool => $state === CapabilityState::Supported,
         );
 
-        $canWrite = array_intersect_key($writeable, array_flip(['create', 'start', 'stop', 'reboot', 'resize', 'destroy', 'suspend', 'unsuspend'])) !== [];
+        $canWrite = array_intersect_key($writeable, array_flip(['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'destroy', 'suspend', 'unsuspend'])) !== [];
 
         $probe->passed('capabilities', sprintf(
             'the cluster reported this token\'s privileges; %d of the capabilities asked about are offered.',

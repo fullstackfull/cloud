@@ -8,6 +8,7 @@ use Lynomia\Modules\Provisioning\Application\Actions\CreateProvisioningJob;
 use Lynomia\Modules\Provisioning\Application\DTOs\ProvisioningJobRequest;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
+use Lynomia\Modules\Shared\Domain\Naming\DnsName;
 use Lynomia\Modules\SharedHosting\Domain\Enums\SslStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressOperationKind;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressOperationState;
@@ -62,7 +63,7 @@ final readonly class CopyWordPressSite
 
         // The same rule an order applies: lower-cased, trimmed of dots and
         // whitespace, and it has to have a dot in it.
-        $targetDomain = strtolower(trim($targetDomain, " \t\n\r\0\x0B."));
+        $targetDomain = DnsName::canonicalAsSubmitted($targetDomain);
 
         if ($targetDomain === '' || ! str_contains($targetDomain, '.') || preg_match('/^[a-z0-9.-]{3,253}$/', $targetDomain) !== 1) {
             throw WordPressRefusedException::becauseTheDomainIsUnusable($targetDomain);

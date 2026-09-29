@@ -4,16 +4,20 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\SharedHosting\Application\Actions;
 
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Shared\Domain\Naming\DnsName;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\HostingCapacityReservation;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\PlacementRejectionReason;
+use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingDomainConflictException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingNodeUnlicensedException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingUsernameConflictException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\NodeAtCapacityException;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
+use Throwable;
 
 /**
  * Commits one slot on a node to one account.
@@ -38,6 +42,15 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
  * not commit a second slot. Without it the node loses a slot permanently and
  * silently on every retry — and retries are most frequent exactly when the
  * fleet is already under strain.
+ *
+ * It is also the seam where a name enters `hosting_accounts.primary_domain`,
+ * and so where one live account per name is decided. The name is folded here
+ * — the column's CHECK constraint refuses anything that is not — and asked of
+ * the table under the node's lock before a slot is taken; the partial unique
+ * index behind it is what a concurrent build on another node loses to, and
+ * that loss is translated into the same readable refusal. Whatever the
+ * reservation decides about a name, it writes that same name: the check and
+ * the write it justifies are one `forceFill`, never a status alone.
  */
 final readonly class ReserveHostingNodeCapacity
 {
@@ -49,6 +62,7 @@ final readonly class ReserveHostingNodeCapacity
      * @throws NodeAtCapacityException
      * @throws HostingNodeUnlicensedException
      * @throws HostingUsernameConflictException
+     * @throws HostingDomainConflictException
      */
     public function execute(
         HostingNode $node,
@@ -74,6 +88,7 @@ final readonly class ReserveHostingNodeCapacity
      * @throws NodeAtCapacityException
      * @throws HostingNodeUnlicensedException
      * @throws HostingUsernameConflictException
+     * @throws HostingDomainConflictException
      */
     public function reserve(
         HostingNode $node,
@@ -83,6 +98,8 @@ final readonly class ReserveHostingNodeCapacity
         ?HostingPackage $package = null,
         ?string $serviceId = null,
     ): HostingCapacityReservation {
+        $primaryDomain = DnsName::canonicalAsSubmitted($primaryDomain);
+
         return DB::transaction(function () use (
             $node, $username, $primaryDomain, $customerId, $package, $serviceId
         ): HostingCapacityReservation {
@@ -124,16 +141,41 @@ final readonly class ReserveHostingNodeCapacity
             }
 
             if ($existing !== null && $existing->status->occupiesNodeCapacity()) {
-                // This job already holds its slot. Returning the row rather
-                // than incrementing again is what makes a retry safe; the
-                // caller carries on and asks the panel to create the account,
-                // which is itself idempotent by name.
-                //
-                // Reported as NOT taken by this attempt: an earlier one has
-                // already been to the panel under this name, so this attempt
-                // is not entitled to give the slot back on a refusal.
+                /*
+                 * This job already holds its slot. Returning the row rather
+                 * than incrementing again is what makes a retry safe; the
+                 * caller carries on and asks the panel to create the account,
+                 * which is itself idempotent by name.
+                 *
+                 * Reported as NOT taken by this attempt: an earlier attempt
+                 * took it and may have been to the panel under this name — a
+                 * pending row is written here, before the panel is called, so
+                 * a worker that died before the create and one that died
+                 * awaiting its answer leave identical rows, and nothing on the
+                 * row says which. This attempt is not entitled to give the
+                 * slot back on a refusal.
+                 *
+                 * Only for the name the row already serves. A job whose name
+                 * was corrected since that attempt would otherwise carry on
+                 * under the row's OLD name — the panel handed the stale name on
+                 * a job reporting success — or, where the panel already holds
+                 * the account, retry for ever against a username it refuses.
+                 * The reservation cannot establish which from under the node's
+                 * lock, where it may not call a panel, so it refuses; the job
+                 * can be named back to the row's own name.
+                 */
+                if ($existing->primary_domain !== $primaryDomain) {
+                    throw HostingDomainConflictException::becauseTheAccountServesAnotherName(
+                        $primaryDomain,
+                        $existing->primary_domain,
+                        $existing->username,
+                    );
+                }
+
                 return new HostingCapacityReservation($existing, slotTakenNow: false);
             }
+
+            $this->assertNoLiveAccountServes($primaryDomain, $existing);
 
             /*
              * The licence is re-checked here and not only in the scheduler.
@@ -215,14 +257,28 @@ final readonly class ReserveHostingNodeCapacity
                  * keeps one identity across every attempt — and so the unique
                  * index on (hosting_node_id, username) stays the idempotency
                  * key it is here to be.
+                 *
+                 * The name is re-armed with the status, in the same write. The
+                 * check above asked whether THIS job's name is free; re-arming
+                 * the status alone would then arm a row serving the name the
+                 * earlier attempt used, and the panel would be handed that one
+                 * — an operator's correction silently discarded on a job that
+                 * reports success.
                  */
-                $existing->forceFill(['status' => HostingAccountStatus::Pending])->save();
+                try {
+                    $existing->forceFill([
+                        'status' => HostingAccountStatus::Pending,
+                        'primary_domain' => $primaryDomain,
+                    ])->save();
+                } catch (UniqueConstraintViolationException $e) {
+                    throw $this->translated($e, $primaryDomain);
+                }
 
                 return new HostingCapacityReservation($existing, slotTakenNow: true);
             }
 
-            return new HostingCapacityReservation(
-                HostingAccount::query()->create([
+            try {
+                $created = HostingAccount::query()->create([
                     'hosting_node_id' => $locked->getKey(),
                     'hosting_package_id' => $package?->getKey(),
                     'customer_id' => $customerId,
@@ -230,10 +286,72 @@ final readonly class ReserveHostingNodeCapacity
                     'username' => $username,
                     'primary_domain' => $primaryDomain,
                     'status' => HostingAccountStatus::Pending,
-                ]),
-                slotTakenNow: true,
-            );
+                ]);
+            } catch (UniqueConstraintViolationException $e) {
+                throw $this->translated($e, $primaryDomain);
+            }
+
+            return new HostingCapacityReservation($created, slotTakenNow: true);
         });
+    }
+
+    /**
+     * The statuses whose accounts hold their name: the ones the panel is
+     * expected to still have. The same set the partial unique index on
+     * `hosting_accounts.primary_domain` is built over.
+     *
+     * @return list<string>
+     */
+    public static function statusesThePanelHolds(): array
+    {
+        return array_values(array_map(
+            static fn (HostingAccountStatus $status): string => $status->value,
+            array_filter(
+                HostingAccountStatus::cases(),
+                static fn (HostingAccountStatus $status): bool => $status->existsAtPanel(),
+            ),
+        ));
+    }
+
+    /**
+     * Refuse a name another live account already serves.
+     *
+     * Asked under the node's lock, but the lock is per node and the name is
+     * fleet-wide, so this is the readable refusal and not the guarantee: a
+     * build racing this one on another node passes it too, and the partial
+     * unique index is what the loser meets — see translated().
+     *
+     * The job's own row is excluded. It is the row this reservation is about
+     * to re-arm, and counting it as somebody else serving the name would
+     * refuse a job its own earlier attempt.
+     *
+     * @throws HostingDomainConflictException
+     */
+    private function assertNoLiveAccountServes(string $primaryDomain, ?HostingAccount $own): void
+    {
+        $served = HostingAccount::query()
+            ->where('primary_domain', $primaryDomain)
+            ->whereIn('status', self::statusesThePanelHolds())
+            ->when($own !== null, static fn ($query) => $query->whereKeyNot($own?->getKey()))
+            ->exists();
+
+        if ($served) {
+            throw HostingDomainConflictException::forDomain($primaryDomain);
+        }
+    }
+
+    /**
+     * A unique violation, as the refusal it means.
+     *
+     * Only the live-domain index becomes a domain conflict. Any other unique
+     * violation — the (hosting_node_id, username) idempotency key losing a
+     * race — is not a statement about the name and is rethrown as it is.
+     */
+    private function translated(UniqueConstraintViolationException $e, string $primaryDomain): Throwable
+    {
+        return str_contains($e->getMessage(), 'hosting_accounts_live_primary_domain_unique')
+            ? HostingDomainConflictException::forDomain($primaryDomain)
+            : $e;
     }
 
     /**

@@ -227,6 +227,60 @@ groups:
           runbook: docs/runbooks/provisioning-stuck.md
           runbook_url: https://docs.prod.example/runbooks/provisioning-stuck
 
+  - name: platform.drift
+    rules:
+      - alert: ResourceDriftOpen
+        # Critical drift is a customer paying for a machine the hypervisor does
+        # not have, or a suspended service still running. The reconcilers
+        # record it and the listener logs it; this is what wakes somebody.
+        #
+        # It reads lynomia_resource_drift_open, which counts `open` AND
+        # `acknowledged` rows, and not lynomia_open_drift_total, which counts
+        # `open` only: a page on the latter would be silenced by clicking
+        # acknowledge, and acknowledging a critical drift is not fixing it.
+        # Only resolving the row clears this. validate-monitoring.py pins both
+        # the series and the receiver.
+        #
+        # Critical only. The severities exist so that an orphan on a node an
+        # operator also uses by hand does not page anybody at night.
+        expr: lynomia_resource_drift_open{severity="critical"} > 0
+        for: 15m
+        labels:
+          severity: critical
+          component: provisioning
+        annotations:
+          summary: '{{ $value | printf "%.0f" }} critical {{ $labels.kind }} drift(s) are unresolved'
+          description: >-
+            The platform and a provider disagree about a resource in a way that costs a
+            customer or the business now: a machine missing at its hypervisor, or a
+            service running that should be suspended. Acknowledging the row in the
+            operator portal does not clear this alert; resolving it does. The drift id,
+            service id and provider reference are in the control plane's structured
+            log, on the line "Critical drift was seen between the platform and a
+            provider."
+          runbook: docs/runbooks/drift.md
+          runbook_url: https://docs.prod.example/runbooks/drift
+
+      - alert: DriftQueueUnworked
+        # Drift of any severity that nobody has looked at for a day. Not a page:
+        # most of it is an operator's direct change at a provider, and the fix
+        # is a review, not a night call. Acknowledging clears it — by design,
+        # since a review is exactly what acknowledging records.
+        expr: sum(lynomia_open_drift_total) > 0
+        for: 24h
+        labels:
+          severity: warning
+          component: provisioning
+        annotations:
+          summary: '{{ $value | printf "%.0f" }} drift(s) have been open and unreviewed for a day'
+          description: >-
+            Reconciliation has recorded disagreements with a provider that nobody has
+            reviewed. Each one is either a change somebody made at the provider on
+            purpose or an operation that half-completed; the drift screen says which
+            is which, worst first.
+          runbook: docs/runbooks/drift.md
+          runbook_url: https://docs.prod.example/runbooks/drift
+
   - name: platform.queue
     rules:
       - alert: QueueBacklogGrowing

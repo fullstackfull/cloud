@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Queue;
 
+use Laravel\Horizon\ProvisioningPlan;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -93,15 +94,54 @@ final class HorizonSupervisesEveryQueueTest extends TestCase
     }
 
     #[Test]
-    public function provisioning_is_never_retried_by_the_queue(): void
+    public function the_provisioning_supervisor_retries_nothing_a_class_leaves_unsaid(): void
     {
         /*
          * The provisioning engine owns retrying. A queue-level retry
          * re-executes a job whose provider call may already have built a
          * machine, and the worker cannot know whether it did — which is how a
          * customer gets two servers and one invoice.
+         *
+         * This pins the supervisor's ceiling, and that is all it pins. A class
+         * that declares its own `tries` beats it: the payload's `maxTries` is
+         * read before the worker's option (`Worker.php:679` and `:707`), and a
+         * queued listener's `$tries` is carried into that payload by
+         * `Events\Dispatcher::propagateListenerOptions()`. Two classes on this
+         * queue do exactly that — `InstallWordPressOnceTheAccountExists` runs
+         * up to 5 times and `EnforceServiceStateForSubscription` up to 3. Both
+         * converge on retry (a unique idempotency key and in-lock guards), so
+         * they are not a double build; but "provisioning is never retried by
+         * the queue", which this test used to be called, was false.
          */
         $this->assertSame(1, (int) config('horizon.defaults.supervisor-provisioning.tries'));
+    }
+
+    #[Test]
+    public function every_process_pool_horizon_starts_has_a_wait_threshold(): void
+    {
+        /*
+         * Horizon looks thresholds up by the key of each process pool it runs,
+         * `connection:queue`, where `queue` is one name when the supervisor
+         * balances (a pool per queue) and the whole comma-joined list when it
+         * does not (`Supervisor::createProcessPools()`). The keys are derived
+         * here from Horizon's own resolved options rather than assumed to be
+         * one per queue, so a supervisor that lists two queues without
+         * balancing demands the key Horizon will actually read. A pool with no
+         * key falls back to Horizon's 60 seconds silently.
+         */
+        $waits = (array) config('horizon.waits');
+
+        foreach (ProvisioningPlan::get('probe')->toSupervisorOptions() as $environment => $supervisors) {
+            foreach ($supervisors as $options) {
+                $pools = $options->balancing() ? explode(',', $options->queue) : [$options->queue];
+
+                foreach ($pools as $queue) {
+                    $key = $options->connection.':'.$queue;
+
+                    $this->assertArrayHasKey($key, $waits, "Horizon ({$environment}) runs a pool keyed {$key} and config/horizon.php sets no wait threshold for it.");
+                }
+            }
+        }
     }
 
     #[Test]

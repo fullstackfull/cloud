@@ -50,4 +50,38 @@ enum DnsRecordType: string
     {
         return $this === self::CAA;
     }
+
+    /**
+     * Whether two contents of this type that differ only in letter case are
+     * the same value.
+     *
+     * A statement about record identity, not a display preference, so every
+     * site that decides whether two records are one reads it from here: the
+     * value object's comparison, the duplicate rule, and the zone-import
+     * planner's key. It was once a planner-local `strtolower()` applied to
+     * every type, which made a TXT value changed only in case read as
+     * "unchanged" and never publish.
+     *
+     *  - A, AAAA: an address. A's validity gate admits no letters at all, so
+     *    the answer is moot for it and given for completeness; AAAA's hex
+     *    digits are case-insensitive by definition.
+     *  - CNAME, MX: a host name, and DNS names are case-insensitive.
+     *  - TXT: arbitrary text — a DKIM key or a verification token is
+     *    compared byte for byte by whoever reads it.
+     *  - CAA: the value is an issuer domain or an `iodef` URL, and the tag is
+     *    compared case-insensitively by some readers and not others; treated
+     *    as case-sensitive, so that a difference is shown rather than folded
+     *    away.
+     *
+     * The unique index `dns_records_one_live_value` hashes content as stored
+     * and is case-sensitive, so this can only ever add a refusal the index
+     * would not make — never let through one it would.
+     */
+    public function contentIsCaseInsensitive(): bool
+    {
+        return match ($this) {
+            self::A, self::AAAA, self::CNAME, self::MX => true,
+            self::TXT, self::CAA => false,
+        };
+    }
 }

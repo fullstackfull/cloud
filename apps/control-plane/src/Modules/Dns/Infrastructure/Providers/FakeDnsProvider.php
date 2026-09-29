@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Dns\Infrastructure\Providers;
 use Lynomia\Modules\Dns\Domain\Contracts\DnsProvider;
 use Lynomia\Modules\Dns\Domain\Enums\DnsRecordType;
 use Lynomia\Modules\Dns\Domain\Exceptions\DnsProviderException;
+use Lynomia\Modules\Dns\Domain\Services\DnsRecordIdentity;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DnsRecord;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DnsZone;
 use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
@@ -48,7 +49,7 @@ final class FakeDnsProvider implements DnsProvider
     /** @var array<string, DnsZone> name => zone */
     private array $zones = [];
 
-    /** @var array<string, array<string, DnsRecord>> zone id => key => record */
+    /** @var array<string, array<string, DnsRecord>> zone id => record id => record */
     private array $records = [];
 
     private int $nextId = 1;
@@ -186,37 +187,79 @@ final class FakeDnsProvider implements DnsProvider
         }));
     }
 
+    /**
+     * Make the zone hold this record, touching no other record at its name.
+     *
+     * Resolved by {@see DnsRecordIdentity}, as the Cloudflare adapter
+     * resolves it, and over the same narrowed read — the record's own type
+     * and name — so the two implementations give the same answer to the same
+     * question. This fake once keyed its whole store by `type|name`: a second
+     * address for a name overwrote the first *and inherited its identifier*,
+     * and a delete took the whole set. That was the Cloudflare adapter's
+     * defect reproduced in the oracle meant to catch it (F-11, and F-24's DNS
+     * limb) — and worse than a blind spot, because a corrected adapter tested
+     * against it would have failed.
+     *
+     * A value the zone already holds keeps its identifier, so a repeat
+     * publish is one record with one id, as at a real provider — and so a
+     * publish whose answer was lost finds, on the next try, the record it
+     * already made.
+     */
     public function publish(DnsZone $zone, DnsRecord $record): DnsRecord
     {
         $this->restore();
 
         $this->refuseMarkedNames($record, 'publish '.$record->type()->value.' '.$record->name());
 
-        $key = $record->type()->value.'|'.$record->name();
+        $held = DnsRecordIdentity::findAmong($record, $this->at($zone, $record));
 
-        // Keeps the identifier a repeat publish already has, so that the fake
-        // is idempotent in the same observable way a real provider is: one
-        // record, one id, whether it was written once or three times.
-        $held = $this->records[$zone->id()][$key] ?? null;
+        if ($held !== null && $held->isPublishedExactlyAs($record)) {
+            return $held;
+        }
 
         $stored = $record->withId($held?->id() ?? 'record-'.$this->nextId++);
 
-        $this->records[$zone->id()][$key] = $stored;
+        $this->records[$zone->id()][(string) $stored->id()] = $stored;
 
         $this->remember();
 
         return $stored;
     }
 
+    /**
+     * Remove this one record, found as {@see self::publish()} finds it.
+     *
+     * An identifier the zone no longer holds falls through to the value, and
+     * a value the zone does not hold is nothing to remove — not an error.
+     */
     public function delete(DnsZone $zone, DnsRecord $record): void
     {
         $this->restore();
 
         $this->refuseMarkedNames($record, 'delete '.$record->type()->value.' '.$record->name());
 
-        unset($this->records[$zone->id()][$record->type()->value.'|'.$record->name()]);
+        $held = DnsRecordIdentity::findAmong($record, $this->at($zone, $record));
+
+        if ($held === null) {
+            return;
+        }
+
+        unset($this->records[$zone->id()][(string) $held->id()]);
 
         $this->remember();
+    }
+
+    /**
+     * What the zone holds at this record's type and name.
+     *
+     * @return list<DnsRecord>
+     */
+    private function at(DnsZone $zone, DnsRecord $record): array
+    {
+        return array_values(array_filter(
+            $this->records[$zone->id()] ?? [],
+            static fn (DnsRecord $held): bool => $held->type() === $record->type() && $held->name() === $record->name(),
+        ));
     }
 
     /**

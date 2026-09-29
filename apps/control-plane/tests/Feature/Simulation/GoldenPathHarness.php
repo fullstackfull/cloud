@@ -148,13 +148,23 @@ abstract class GoldenPathHarness extends WorkerHarness
     /**
      * An order and its invoice, through the platform's own actions.
      *
+     * A hosting plan is bought for a domain, as checkout requires; the name is
+     * derived from the idempotency key so each golden path's account has its
+     * own, and one live account per name holds across the paths a run makes.
+     *
      * @return array{0: Order, 1: Invoice}
      */
     protected function orderAndInvoice(Customer $customer, Plan $plan, ?string $idempotencyKey = null): array
     {
-        return $this->outsideTheTransaction(function () use ($customer, $plan, $idempotencyKey): array {
+        $plan->loadMissing('product');
+
+        $domain = $plan->product?->kind === ProductKind::SharedHosting
+            ? trim((string) preg_replace('/[^a-z0-9-]+/', '-', strtolower($idempotencyKey ?? 'golden-'.$customer->getKey())), '-').'.example.test'
+            : null;
+
+        return $this->outsideTheTransaction(function () use ($customer, $plan, $idempotencyKey, $domain): array {
             $order = app(PlaceOrder::class)->execute($customer, new CheckoutRequest(
-                lines: [new CheckoutLine((string) $plan->getKey(), 1)],
+                lines: [new CheckoutLine((string) $plan->getKey(), 1, $domain)],
                 billingPeriod: BillingPeriod::Monthly,
                 idempotencyKey: $idempotencyKey,
             ));

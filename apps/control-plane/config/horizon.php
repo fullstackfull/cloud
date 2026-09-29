@@ -42,9 +42,10 @@ return [
     'waits' => [
         // The number an operator is paged on. Provisioning is what a customer
         // is actively waiting for, so its tolerance is the tightest.
-        'redis:provisioning' => 60,
+        // Keyed `worker connection:queue`, as Horizon keys its process pools.
+        'redis-provisioning:provisioning' => 60,
         'redis:payments' => 60,
-        'redis:infrastructure' => 900,
+        'redis-infrastructure:infrastructure' => 900,
         // A minute. A customer told their server is ready two minutes late has
         // been told late, and this is the queue where lateness is visible.
         'redis:notifications' => 60,
@@ -75,7 +76,14 @@ return [
 
     'defaults' => [
         'supervisor-provisioning' => [
-            'connection' => 'redis',
+            /*
+             * Its own connection because its own clock: redis-provisioning
+             * re-reserves a message after 5,760 seconds, sixty past the
+             * timeout below. On the shared `redis` connection a build would be
+             * handed to a second worker while the first was still cloning
+             * (F-08; see config/queue.php).
+             */
+            'connection' => 'redis-provisioning',
             'queue' => ['provisioning'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
@@ -99,6 +107,11 @@ return [
              * dedicated build after twenty minutes. The invariant is enforced
              * by HorizonSupervisesEveryQueueTest instead, which fails if the
              * engine's longest timeout ever passes this one.
+             *
+             * Raising it means raising REDIS_PROVISIONING_RETRY_AFTER with it:
+             * a timeout at or past that clock lets one build run twice at once,
+             * and App\Queue\QueueRetryClocks refuses to start Horizon when it
+             * would.
              */
             'timeout' => (int) env('HORIZON_PROVISIONING_TIMEOUT', 5700),
             /*
@@ -120,15 +133,24 @@ return [
             'maxTime' => 0,
             'maxJobs' => 0,
             'memory' => 128,
+            // Below the `redis` connection's 180-second clock.
             'timeout' => 120,
-            // The listeners on this queue set their own tries and backoff;
-            // this is the ceiling for anything that does not.
+            /*
+             * The listeners on this queue set their own tries and backoff;
+             * this is the ceiling for anything that does not — and it is a
+             * real ceiling, not a default of one: a payments class that
+             * declares no `tries` runs five times here, with this
+             * supervisor's backoff of 0 between attempts unless it declares a
+             * ladder. EveryRetriedPaymentsListenerWaitsBetweenAttemptsTest
+             * reads it that way.
+             */
             'tries' => 5,
             'nice' => 0,
         ],
 
         'supervisor-infrastructure' => [
-            'connection' => 'redis',
+            // Its own clock, 1,860 seconds, for the same reason as provisioning.
+            'connection' => 'redis-infrastructure',
             'queue' => ['infrastructure'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',

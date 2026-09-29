@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Orders\Application\DTOs;
 
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
+use Lynomia\Modules\Shared\Domain\Naming\DnsName;
 
 /**
  * What a customer asked to buy, before anything has been priced or reserved.
@@ -44,11 +45,21 @@ final readonly class CheckoutRequest
      * change what is bought or what it costs, and a customer who retries after
      * fixing a typo in a delivery note should get their original order back
      * rather than a conflict.
+     *
+     * A hosting line's domain is part of what is bought — the same plan for a
+     * different name is a different account — so it is hashed, folded, after
+     * the quantity. Folded, so `Shop.Example.Test.` and `shop.example.test` are
+     * one purchase, exactly as they are one account. A line with no domain
+     * hashes exactly as every line did before domains existed, because an
+     * order written then carries that fingerprint, and a client mid-way
+     * through retrying it must be handed its order back rather than a 409.
      */
     public function fingerprint(): string
     {
         $lines = array_map(
-            static fn (CheckoutLine $line): string => $line->planId.':'.$line->quantity,
+            static fn (CheckoutLine $line): string => $line->domain === null
+                ? $line->planId.':'.$line->quantity
+                : $line->planId.':'.$line->quantity.':'.DnsName::canonicalAsSubmitted($line->domain),
             $this->lines,
         );
 

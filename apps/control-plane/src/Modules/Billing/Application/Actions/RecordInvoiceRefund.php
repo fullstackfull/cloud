@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Billing\Application\Actions;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
+use Lynomia\Modules\Billing\Domain\Events\InvoiceRefunded;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceRefundExceedsPaymentException;
 use Lynomia\Modules\Billing\Domain\Exceptions\UnsettleablePaymentException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
@@ -36,7 +38,12 @@ final readonly class RecordInvoiceRefund
     /**
      * @param  Refund|null  $refund  the payment-side row this reduction records, when there is
      *                               one; supplying it makes a redelivered refund webhook record
-     *                               the reduction once
+     *                               the reduction once. **Without it every call books the
+     *                               reduction again** — correct for the callers that must be
+     *                               counted each time (an operator's reconciliation), and wrong
+     *                               for anything a queue can deliver twice, which must pass the
+     *                               row or not call at all (RecordRefundAgainstTheInvoice throws
+     *                               rather than call without it)
      *
      * @throws InvoiceRefundExceedsPaymentException
      * @throws CurrencyMismatchException
@@ -98,6 +105,23 @@ final readonly class RecordInvoiceRefund
              */
             if ($locked->status === InvoiceStatus::Paid && $locked->refundableAmount()->isZero()) {
                 $locked = $this->transitionInvoice->execute($locked, InvoiceStatus::Refunded);
+
+                /*
+                 * Announced once, on the transition, after the outermost
+                 * commit — the rule SettleInvoice follows for InvoicePaid: a
+                 * queued listener must not find an invoice whose refund is
+                 * about to roll back.
+                 */
+                $refunded = new InvoiceRefunded(
+                    invoiceId: (string) $locked->getKey(),
+                    customerId: (string) $locked->customer_id,
+                    orderId: $locked->order_id === null ? null : (string) $locked->order_id,
+                    refundedAt: CarbonImmutable::now(),
+                );
+
+                DB::afterCommit(static function () use ($refunded): void {
+                    event($refunded);
+                });
             }
 
             return $locked->refresh();

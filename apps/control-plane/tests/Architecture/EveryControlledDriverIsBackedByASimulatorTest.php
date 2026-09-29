@@ -206,8 +206,17 @@ final class EveryControlledDriverIsBackedByASimulatorTest extends TestCase
                 .'string. Selecting an outcome from the request is how every simulator here injects a fault; this '
                 .'is the helper that keeps the marker in one place.',
         ],
-        'fake_hosting' => [],
-        'fake_wordpress' => [],
+        'fake_hosting' => [
+            'credentialHandedTo' => 'Observes the password the panel was last handed for an account. The platform '
+                .'mints a panel password per build and by design writes it nowhere it can read, and the contract '
+                .'rightly has no operation that returns one — so a test that searches the platform\'s tables for '
+                .'the credential it minted has nothing else to ask. Without it the only canary available is one '
+                .'planted in a job payload, which the build no longer reads and the redactor destroys on write.',
+        ],
+        'fake_wordpress' => [
+            'credentialHandedTo' => 'The hosting family\'s observation seam, listed again because one class '
+                .'simulates both families and each family is checked on its own. See fake_hosting.',
+        ],
         'fake_backup' => [],
         'fake_rdns' => [
             'publishedFor' => 'Observes the hostname this simulator believes is published for an address. The '

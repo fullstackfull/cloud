@@ -133,6 +133,30 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->name('provisioning.adopt');
 
     /*
+     * Correcting the domain a stopped hosting build will serve: the repair a
+     * retry cannot be, for a build refused because it names no domain or one
+     * another live account serves. It writes one column of the job,
+     * `operator_named_domain`, and nothing else — never the payload, which is
+     * written once (F-15); the retry that follows is the one above. Behind
+     * provisioning.retry for the same reason adoption is — it changes what
+     * the platform will do on the strength of a person's word.
+     */
+    Route::put('provisioning/jobs/{job}/hosting-domain', [ProvisioningController::class, 'nameHostingDomain'])
+        ->middleware('permission:'.Permission::ProvisioningRetry->value)
+        ->name('provisioning.hosting_domain');
+
+    /*
+     * Moving a VPS create off a provider identity somebody else's machine
+     * holds (F-15). Behind provisioning.retry for the reason adoption is: it
+     * changes what the platform will build on the strength of a finding a
+     * person confirms. The action refuses every case in which that could
+     * build a second machine.
+     */
+    Route::post('provisioning/jobs/{job}/repoint', [ProvisioningController::class, 'repoint'])
+        ->middleware('permission:'.Permission::ProvisioningRetry->value)
+        ->name('provisioning.repoint');
+
+    /*
      * The destructive operations queue. Reading it is provisioning.view like
      * the job list; deciding the outcome of one is provisioning.retry, which
      * is the permission that already means "change what the platform believes
@@ -797,21 +821,32 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->name('hosting_accounts.unsuspend');
 
     /*
+     * Setting a new panel password and handing it back once. Its own
+     * permission, not hosting_account.manage: a reset is quiet and hands the
+     * holder a live login to a customer's mail, files and databases, and it is
+     * the only operator path into a customer's panel. Three a minute per
+     * operator, as the credential reset it is — the limiter is keyed on the
+     * user, and its prefix is its own.
+     */
+    Route::post('hosting-accounts/{account}/password-reset', [HostingController::class, 'resetPassword'])
+        ->middleware([
+            'permission:'.Permission::HostingAccountResetPassword->value,
+            'throttle:3,1,hosting-password-reset:',
+        ])
+        ->name('hosting_accounts.password_reset');
+
+    /*
      * Deleting an account and everything on it. The retention window is
-     * enforced by the action; skipping it needs the same permission again
-     * inside the controller, because "terminate what has expired" and "delete
-     * a live customer's data today" are different decisions.
+     * enforced by the action. This permission covers clearing out an account
+     * whose window has run out; skipping the window, or destroying an account
+     * that is not suspended at all, needs service.terminate as well, checked
+     * inside the controller — because "terminate what has expired" and
+     * "delete a live customer's data today" are different decisions.
      */
     Route::delete('hosting-accounts/{account}', [HostingController::class, 'terminate'])
         ->middleware('permission:'.Permission::HostingAccountManage->value)
         ->name('hosting_accounts.terminate');
 
-    /*
-     * Ending a service and destroying the machine behind it. The action
-     * enforces the retention window; `force` skips it and is checked again
-     * inside the controller, because "terminate what has expired" and "delete
-     * a live customer's data today" are different decisions.
-     */
     /*
      * The service list, and the only place `placement_blocked_reason` can be
      * read without a SQL client. `?blocked=1` narrows it to the customers who
@@ -821,6 +856,17 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->middleware('permission:'.Permission::ServiceViewAny->value)
         ->name('services.index');
 
+    /*
+     * Ending a service, of any kind, through EndOfService — the same door the
+     * retention sweep uses. Each kind's action refuses a service that is not
+     * suspended, or is still inside its retention window, and `force` skips
+     * that guard without changing who may ask. This middleware is the
+     * permission every kind needs; the controller then asks
+     * EndOfService::authorityOver() for the rest, forced or not, which for
+     * shared hosting adds hosting_account.manage — so this route is never the
+     * weaker door to an account the hosting-account route above also reaches
+     * (F-19 × F-18).
+     */
     Route::delete('services/{service}', [ServiceController::class, 'terminate'])
         ->middleware('permission:'.Permission::ServiceTerminate->value)
         ->name('services.terminate');
@@ -833,6 +879,15 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::post('dedicated/{server}/return-to-stock', [ServiceController::class, 'returnToStock'])
         ->middleware('permission:'.Permission::DedicatedManage->value)
         ->name('dedicated.return_to_stock');
+
+    /*
+     * Or taking it out of the fleet for good. The same permission for the same
+     * reason — a statement about a physical machine — and the other act that
+     * starts the quarantine clock on the addresses the machine was holding.
+     */
+    Route::post('dedicated/{server}/retire', [ServiceController::class, 'retire'])
+        ->middleware('permission:'.Permission::DedicatedManage->value)
+        ->name('dedicated.retire');
 
     Route::get('audit', [AuditController::class, 'index'])
         ->middleware('permission:'.Permission::AuditView->value)

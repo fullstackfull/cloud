@@ -9,11 +9,17 @@ use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
 
 /**
- * Builds the structured JSON channel that Grafana Alloy ships to Loki.
+ * Builds the structured JSON channel, the log Grafana Alloy is configured to
+ * read and ship to Loki.
  *
  * One JSON object per line, secrets scrubbed, correlation IDs carried in the
  * record's context by Laravel's Context facade. Promtail is deliberately not
  * part of this pipeline: it is end-of-life.
+ *
+ * SHIPPER-STATUS: not deployed. `alloy/config.alloy` names this file's deployed
+ * path, and nothing in this repository installs Alloy on a control-plane host;
+ * see the log-shipper declaration in infrastructure/ansible/group_vars/all.yml.
+ * Until that changes, the file is read on the host or not at all.
  */
 final class StructuredLogger
 {

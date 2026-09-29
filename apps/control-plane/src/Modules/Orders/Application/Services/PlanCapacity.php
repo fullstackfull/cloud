@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Orders\Application\Services;
 
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException;
+use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 
 /**
  * How much of a finite plan is already spoken for, and the claim on it.
@@ -35,12 +37,27 @@ use Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException;
  * What holds capacity, and what gives it back
  * ---------------------------------------------------------------------------
  *
- * Unchanged, and deliberately: an order awaiting payment still holds its unit,
- * because otherwise ten customers can each reserve the last machine while
- * sitting on the card form. Cancelled, refunded and terminated orders release
- * theirs. That release is arithmetic rather than a compensating write — the
- * count simply stops including them — so there is no second ledger to drift
- * out of step with the orders themselves.
+ * An order awaiting payment still holds its unit, because otherwise ten
+ * customers can each reserve the last machine while sitting on the card form.
+ * A cancelled order releases it, and so does a terminated one: the service it
+ * bought has ended.
+ *
+ * A refunded order does NOT release it by being refunded. This sentence used
+ * to say it did, and while nothing could write `refunded` the claim was
+ * dormant; F-19 made the status reachable and the sentence became behaviour —
+ * measured: the order refunded, its service and subscription still active, the
+ * plan's last unit counted free and sold to a second customer while the first
+ * one's machine was still running. The product decision is that a refund
+ * records the money and nothing else. So a refunded order holds its unit for
+ * as long as any service it bought is still live, and gives it back when the
+ * last one ends — which is read from the services, because `refunded` is the
+ * order's last status and the ending happens on the service row.
+ *
+ * The release is arithmetic rather than a compensating write — the count
+ * simply stops including those orders — so there is no second ledger to drift
+ * out of step with the orders and services themselves. The same rule governs
+ * an unredeemed coupon hold, and PlaceOrder asks stillHolding() for it rather
+ * than keeping a second copy of the list.
  *
  * Nothing here is a counter. The number is derived from durable order rows
  * every time it is asked for, which is what makes a cancellation release
@@ -50,15 +67,36 @@ use Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException;
 final readonly class PlanCapacity
 {
     /**
-     * Orders that no longer hold what they asked for.
+     * Orders that no longer hold what they asked for, whatever else is true.
+     *
+     * Not `refunded`: see the class docblock, and stillHolding().
      *
      * @var list<string>
      */
     private const array RELEASED = [
         OrderStatus::Cancelled->value,
-        OrderStatus::Refunded->value,
         OrderStatus::Terminated->value,
     ];
+
+    /**
+     * Narrows a query over `orders` to the orders still holding what they
+     * asked for: not released, and — for a refunded order — with a service
+     * that has not ended.
+     *
+     * @return Builder the same query, narrowed
+     */
+    public static function stillHolding(Builder $query): Builder
+    {
+        return $query
+            ->whereNotIn('orders.status', self::RELEASED)
+            ->where(static fn (Builder $held): Builder => $held
+                ->where('orders.status', '!=', OrderStatus::Refunded->value)
+                ->orWhereExists(static fn (Builder $live): Builder => $live
+                    ->selectRaw('1')
+                    ->from('services')
+                    ->whereColumn('services.order_id', 'orders.id')
+                    ->where('services.status', '!=', ServiceStatus::Terminated->value)));
+    }
 
     /**
      * How many units of this plan are already claimed, optionally by one
@@ -71,12 +109,12 @@ final readonly class PlanCapacity
      */
     public function claimed(string $planId, ?Customer $customer = null): int
     {
-        return (int) DB::table('order_items')
+        $query = DB::table('order_items')
             ->join('orders', 'orders.id', '=', 'order_items.order_id')
             ->where('order_items.plan_id', $planId)
-            ->whereNotIn('orders.status', self::RELEASED)
-            ->when($customer !== null, fn ($query) => $query->where('orders.customer_id', $customer->getKey()))
-            ->sum('order_items.quantity');
+            ->when($customer !== null, fn ($query) => $query->where('orders.customer_id', $customer->getKey()));
+
+        return (int) self::stillHolding($query)->sum('order_items.quantity');
     }
 
     /**

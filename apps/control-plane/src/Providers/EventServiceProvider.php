@@ -10,6 +10,7 @@ use Lynomia\Modules\Billing\Application\Listeners\EvaluateOrderFinancialRequirem
 use Lynomia\Modules\Billing\Application\Listeners\RecordRefundAgainstTheInvoice;
 use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
+use Lynomia\Modules\Billing\Domain\Events\InvoiceRefunded;
 use Lynomia\Modules\Billing\Domain\Events\OrderFinanciallySettled;
 use Lynomia\Modules\Domains\Application\Listeners\RegisterDomainOnPayment;
 use Lynomia\Modules\Monitoring\Application\Listeners\RecordScheduledRun;
@@ -17,6 +18,9 @@ use Lynomia\Modules\Notifications\Application\Listeners\NotifyOnBillingEvent;
 use Lynomia\Modules\Notifications\Application\Listeners\NotifyOnProvisioningOutcome;
 use Lynomia\Modules\Notifications\Application\Listeners\NotifyOnSubscriptionChange;
 use Lynomia\Modules\Orders\Application\Listeners\FulfilOrderOnSettlement;
+use Lynomia\Modules\Orders\Application\Listeners\MoveTheOrderWithWhatItBought;
+use Lynomia\Modules\Orders\Application\Listeners\RecordFailedPaymentOnTheOrder;
+use Lynomia\Modules\Orders\Application\Listeners\RecordRefundOnTheOrder;
 use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
 use Lynomia\Modules\Payments\Domain\Events\PaymentFailed;
@@ -25,7 +29,11 @@ use Lynomia\Modules\ProductReadiness\Application\Listeners\ReassessProductsWhenA
 use Lynomia\Modules\Providers\Domain\Events\ProviderReadinessChanged;
 use Lynomia\Modules\Provisioning\Application\Listeners\AlertOnCriticalDrift;
 use Lynomia\Modules\Provisioning\Domain\Events\DriftRecorded;
+use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobFailed;
+use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobNeedsReview;
+use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobStarted;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobSucceeded;
+use Lynomia\Modules\Provisioning\Domain\Events\ServiceStatusChanged;
 use Lynomia\Modules\SharedHosting\Application\Listeners\InstallWordPressOnceTheAccountExists;
 use Lynomia\Modules\Subscriptions\Application\Listeners\EnforceServiceStateForSubscription;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
@@ -46,6 +54,13 @@ use Lynomia\Modules\Subscriptions\Domain\Events\SubscriptionStatusChanged;
  *                               the subscription, create the service and ask
  *                               for it to be built
  *     RefundIssued            → record the refund against the invoice it came off
+ *     InvoiceRefunded         → record on the order that its money went back,
+ *                               and nothing else (F-19)
+ *     PaymentFailed           → start dunning on a renewal; record the decline
+ *                               on a first purchase's order (F-19)
+ *     ServiceStatusChanged,   → keep the order in step with what it bought:
+ *     ProvisioningJobStarted,   queued, being built, active, suspended, under
+ *     …NeedsReview, …Failed     review, refused, ended (F-19)
  *
  * The settlement event in the middle is what lets a zero-total order reach
  * fulfilment: it owes nothing, so it produces no invoice, and a chain that
@@ -77,6 +92,9 @@ final class EventServiceProvider extends BaseEventServiceProvider
             // subscription for ever: nothing moved them to past_due, and the
             // lifecycle sweep only looks at subscriptions that already are.
             StartDunningOnFailedPayment::class,
+
+            // And a first purchase's order said nothing had been tried.
+            RecordFailedPaymentOnTheOrder::class,
         ],
         InvoicePaid::class => [
             AnnounceSettlementOnInvoicePaid::class,
@@ -109,6 +127,32 @@ final class EventServiceProvider extends BaseEventServiceProvider
         ],
         RefundIssued::class => [
             RecordRefundAgainstTheInvoice::class,
+        ],
+        InvoiceRefunded::class => [
+            // The money only. The service is kept, and what the order holds
+            // comes back when that service ends.
+            RecordRefundOnTheOrder::class,
+        ],
+
+        /*
+         * An order is what somebody bought, and until these it was paid for
+         * and never told anything again: nine of its thirteen states had no
+         * writer, and a delivered purchase read exactly like one nobody could
+         * build. Synchronous, so the order is current when the move that woke
+         * it returns — and it swallows its own failures, so a status summary
+         * can never stop a build or a suspension.
+         */
+        ServiceStatusChanged::class => [
+            MoveTheOrderWithWhatItBought::class,
+        ],
+        ProvisioningJobStarted::class => [
+            MoveTheOrderWithWhatItBought::class,
+        ],
+        ProvisioningJobNeedsReview::class => [
+            MoveTheOrderWithWhatItBought::class,
+        ],
+        ProvisioningJobFailed::class => [
+            MoveTheOrderWithWhatItBought::class,
         ],
 
         /*

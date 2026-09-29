@@ -13,6 +13,10 @@ use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
  * Each refusal is a case where destroying the machine would be irreversible
  * and wrong: a service somebody is still paying for, a suspension that may yet
  * end with a payment, or work that is already done.
+ *
+ * A service with no machine is no longer refused here (F-19): it ends when its
+ * build left nothing behind, and is refused by the provisioning module's
+ * `provisioning.build_may_exist` when it may have.
  */
 final class TerminationRefusedException extends DomainException
 {
@@ -23,13 +27,6 @@ final class TerminationRefusedException extends DomainException
         $exception = new self('This service has already been terminated.');
 
         return $exception->withContext(['service_id' => $serviceId])->as('vps.already_terminated');
-    }
-
-    public static function becauseThereIsNoMachine(string $serviceId): self
-    {
-        $exception = new self('This service has no virtual machine to destroy.');
-
-        return $exception->withContext(['service_id' => $serviceId])->as('vps.no_machine_to_destroy');
     }
 
     public static function becauseItIsStillInService(string $serviceId, ServiceStatus $status): self

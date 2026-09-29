@@ -109,6 +109,19 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
      */
     private array $accounts = [];
 
+    /**
+     * The password each account was last handed, keyed by node and username.
+     *
+     * A real panel holds the password it was given, and so does this one —
+     * which is what lets a test name the credential the platform minted and
+     * then search everywhere the platform writes for it. Kept apart from
+     * RemoteAccount on purpose: that is what `listAccounts()` returns to the
+     * reconciler, and a credential has no business travelling with it.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private array $credentials = [];
+
     /** Where this remembers between processes, or null to keep it in memory. */
     private readonly ?ControlledSimulationStore $store;
 
@@ -165,6 +178,7 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
             diskUsedMib: self::derivedDiskMib($request->username),
             ipAddress: $request->ipAddress ?? '203.0.113.10',
         );
+        $this->credentials[$key][$request->username] = $request->password;
 
         $this->remember();
 
@@ -220,6 +234,7 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
         $this->require($node, $username, 'terminate_account');
 
         unset($this->accounts[$this->nodeKey($node)][$username]);
+        unset($this->credentials[$this->nodeKey($node)][$username]);
 
         $this->remember();
     }
@@ -244,9 +259,28 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
     {
         $this->require($node, $username, 'change_password');
 
-        // Nothing is stored. The fake mirrors the real adapters here on
-        // purpose: a fake that kept passwords would make it possible to write
-        // a test that depends on the platform holding one.
+        // Held by the panel, as a real panel holds it — and only by the panel.
+        // Nothing the platform writes can read it back from here; a test that
+        // needs the value asks the panel for it, below.
+        $this->credentials[$this->nodeKey($node)][$username] = $password;
+
+        $this->remember();
+    }
+
+    /**
+     * The password this panel was last handed for an account, or null.
+     *
+     * Test scaffolding, not contract: the platform never asks a panel for a
+     * password and has no way to. It exists so a test can take the credential
+     * the platform MINTED — which by design is written nowhere the platform
+     * can read — and search every table for it, instead of planting a canary
+     * in a job payload that the build no longer reads.
+     */
+    public function credentialHandedTo(HostingNode $node, string $username): ?string
+    {
+        $this->restore();
+
+        return $this->credentials[$this->nodeKey($node)][$username] ?? null;
     }
 
     public function accountUsage(HostingNode $node, string $username): AccountUsage
@@ -616,9 +650,12 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
         $accounts = $state['accounts'] ?? [];
         /** @var array<string, array<string, WordPressInstallation>> $installations */
         $installations = $state['installations'] ?? [];
+        /** @var array<string, array<string, string>> $credentials */
+        $credentials = $state['credentials'] ?? [];
 
         $this->accounts = $accounts;
         $this->installations = $installations;
+        $this->credentials = $credentials;
     }
 
     private function remember(): void
@@ -626,6 +663,7 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
         $this->store?->write([
             'accounts' => $this->accounts,
             'installations' => $this->installations,
+            'credentials' => $this->credentials,
         ]);
     }
 }

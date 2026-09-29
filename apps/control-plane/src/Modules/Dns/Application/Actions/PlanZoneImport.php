@@ -88,11 +88,17 @@ final readonly class PlanZoneImport
 
             $key = $record->key();
             if (isset($seen[$key])) {
-                $entries[] = ZoneImportEntry::refusedRecord($record, sprintf('Line %d already states this record.', $seen[$key]));
+                // Two different reasons, and the customer is told which: the
+                // same record twice, or the same value at another priority or
+                // setting — two records the platform itself calls different,
+                // which it holds only one of per name.
+                $entries[] = ZoneImportEntry::refusedRecord($record, $record->statesTheSameAs($seen[$key])
+                    ? sprintf('Line %d already states this record.', $seen[$key]->line)
+                    : sprintf('Line %d already gives this name this value at a different priority or setting; a zone here holds each value once per name.', $seen[$key]->line));
 
                 continue;
             }
-            $seen[$key] = $record->line;
+            $seen[$key] = $record;
 
             $found = $byKey[$key] ?? null;
 
@@ -221,9 +227,13 @@ final readonly class PlanZoneImport
         return null;
     }
 
+    /**
+     * The same key the file's side uses, from {@see ParsedRecord::keyFor()},
+     * so that an existing row and an incoming line meet at one spelling.
+     */
     private function keyOf(DnsRecordType $type, string $name, string $content): string
     {
-        return $type->value.'|'.$name.'|'.strtolower($content);
+        return ParsedRecord::keyFor($type, $name, $content);
     }
 
     /**

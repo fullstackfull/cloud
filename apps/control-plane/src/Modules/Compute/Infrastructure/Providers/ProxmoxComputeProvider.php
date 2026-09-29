@@ -909,8 +909,16 @@ final class ProxmoxComputeProvider implements ComputeProvider
             name: isset($row['name']) && is_string($row['name']) ? $row['name'] : null,
             powerState: PowerState::fromProxmox(is_string($row['status'] ?? null) ? $row['status'] : null),
             vcpu: isset($row['cpus']) && is_numeric($row['cpus']) ? (int) $row['cpus'] : null,
-            memoryMib: isset($row['maxmem']) ? $this->toMib($row['maxmem']) : null,
-            diskGib: isset($row['maxdisk']) ? $this->toGib($row['maxdisk']) : null,
+            /*
+             * Null, not 0, when the figure is present but unparseable. A
+             * machine's shape is evidence in the VPS create's ownership check,
+             * where a null is the absence of an observation and 0 is an
+             * observation — of a machine with no memory, which a caller would
+             * then compare against the plan and call a stranger. `cpus` and
+             * `name` already behave this way; these two did not.
+             */
+            memoryMib: isset($row['maxmem']) && is_numeric($row['maxmem']) ? $this->toMib($row['maxmem']) : null,
+            diskGib: isset($row['maxdisk']) && is_numeric($row['maxdisk']) ? $this->toGib($row['maxdisk']) : null,
             uptimeSeconds: isset($row['uptime']) && is_numeric($row['uptime']) ? (int) $row['uptime'] : null,
             // Reported so suspension can be verified rather than assumed. A
             // lock cleared by hand at the node is exactly the drift the

@@ -259,6 +259,7 @@ return [
         'items.*' => 'العنصر',
         'items.*.plan_id' => 'الخطة',
         'items.*.quantity' => 'الكمية',
+        'items.*.domain' => 'النطاق',
         'kind' => 'النوع',
         'locale' => 'اللغة',
         'member_id' => 'العضو',

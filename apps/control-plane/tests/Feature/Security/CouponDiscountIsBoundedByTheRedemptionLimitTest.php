@@ -112,7 +112,14 @@ final class CouponDiscountIsBoundedByTheRedemptionLimitTest extends TestCase
         $firstInvoice = $this->payFor($first, $customer, 'pi_coupon_1');
 
         $this->assertSame(InvoiceStatus::Paid, $firstInvoice->fresh()->status);
-        $this->assertSame(OrderStatus::Paid, $first->fresh()->status);
+        /*
+         * Paid, and not delivered: this file's estate has no node with room,
+         * so the build stops for review. The assertion here used to be `paid`
+         * and passed whatever became of the build (F-19); it now says which.
+         * What this file is about — the coupon use — is unaffected.
+         */
+        $this->assertNotNull($first->fresh()->paid_at);
+        $this->assertSame(OrderStatus::ManualReview, $first->fresh()->status);
         $this->assertSame(1, Subscription::query()->count());
         $this->assertSame(1, (int) $coupon->fresh()->redemption_count);
         $this->assertSame(1, DB::table('coupon_redemptions')->count());

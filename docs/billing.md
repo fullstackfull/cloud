@@ -121,6 +121,19 @@ Two rules matter more than the rest:
 - **Terminal states have no exits.** A refunded order cannot become active again, which
   would hand a customer a running service they have been repaid for.
 
+Past `PAID` the order follows what it bought (F-19). Until then nine of its thirteen
+states had no writer: fulfilment happened on the service row, so a delivered purchase and
+one nobody could build both read `PAID` for ever. `KeepTheOrderInStepWithItsServices`
+now moves it as its services move — the build asked for, claimed by a worker, delivered
+(stamping `completed_at`), suspended, stopped for review, refused, ended — and a declined
+first payment and a full refund are recorded on it. It walks the transition table and
+never forces a move the table does not have.
+
+A plan unit and an unredeemed coupon use are held by every order except a cancelled or
+terminated one — and a refunded one whose services have all ended. A refund records the
+money and nothing else; what the order holds comes back when its service ends, which is a
+separate act.
+
 ## Payment confirmation
 
 A service is provisioned **only** after a server-side confirmation: a webhook whose

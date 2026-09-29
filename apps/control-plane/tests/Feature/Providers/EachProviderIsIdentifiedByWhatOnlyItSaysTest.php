@@ -62,8 +62,12 @@ final class EachProviderIsIdentifiedByWhatOnlyItSaysTest extends TestCase
             '*/api2/json/version*' => Http::response(['data' => ['version' => '8.2.4', 'release' => '8.2', 'repoid' => 'faa83925c9f0e5a3']]),
             '*/api2/json/nodes*' => Http::response(['data' => [['node' => 'pve-1', 'status' => 'online']]]),
             '*/api2/json/access/permissions*' => Http::response(['data' => [
-                '/' => ['Sys.Audit' => 1],
-                '/vms' => ['VM.Allocate' => 1, 'VM.PowerMgmt' => 1, 'VM.Console' => 1, 'VM.Config.Disk' => 1],
+                '/' => ['Sys.Audit' => 1, 'Datastore.Audit' => 1, 'Datastore.AllocateSpace' => 1],
+                '/vms' => [
+                    'VM.Allocate' => 1, 'VM.Audit' => 1, 'VM.PowerMgmt' => 1, 'VM.Console' => 1,
+                    'VM.Config.CPU' => 1, 'VM.Config.Memory' => 1, 'VM.Config.Disk' => 1, 'VM.Config.Network' => 1,
+                    'VM.Config.Options' => 1, 'VM.Config.HWType' => 1, 'VM.Config.Cloudinit' => 1,
+                ],
             ]]),
         ]);
 
@@ -75,12 +79,40 @@ final class EachProviderIsIdentifiedByWhatOnlyItSaysTest extends TestCase
         $this->assertSame(CapabilityState::Supported, $result->capabilities['task_polling']);
 
         /*
-         * Reinstall is not in the privilege map and stays Unknown even on a
-         * fully privileged token, because a privilege does not establish it: a
-         * reinstall needs a template that boots, and the only way to find out
-         * whether one does is to reinstall something.
+         * Reinstall and templates are settled by privileges like everything
+         * else. They used to be absent from the map and stayed Unknown on
+         * every real cluster, which left VPS satisfiable only by the
+         * simulator (F-13). Whether an image boots is verification's
+         * question, exactly as whether a create builds is.
          */
-        $this->assertSame(CapabilityState::Unknown, $result->capabilities['reinstall']);
+        $this->assertSame(CapabilityState::Supported, $result->capabilities['reinstall']);
+        $this->assertSame(CapabilityState::Supported, $result->capabilities['templates']);
+        $this->assertSame(CapabilityState::Supported, $result->capabilities['inventory_sync']);
+    }
+
+    #[Test]
+    public function a_proxmox_token_holding_only_the_allocation_privilege_cannot_create(): void
+    {
+        /*
+         * `create` is one POST that writes cores, memory, disks, a NIC, options
+         * and cloud-init keys; the cluster refuses it to a token holding
+         * VM.Allocate alone, so the tester must too.
+         */
+        Http::fake([
+            '*/api2/json/version*' => Http::response(['data' => ['version' => '8.2.4', 'release' => '8.2', 'repoid' => 'faa83925c9f0e5a3']]),
+            '*/api2/json/nodes*' => Http::response(['data' => [['node' => 'pve-1', 'status' => 'online']]]),
+            '*/api2/json/access/permissions*' => Http::response(['data' => [
+                '/' => ['Sys.Audit' => 1],
+                '/vms' => ['VM.Allocate' => 1, 'VM.PowerMgmt' => 1],
+            ]]),
+        ]);
+
+        $result = $this->test('proxmox', ProviderCategory::Compute, 'https://pve.example.test:8006', $this->proxmoxToken());
+
+        $this->assertSame(ConnectionState::Connected, $result->state);
+        $this->assertSame(CapabilityState::Unsupported, $result->capabilities['create']);
+        $this->assertSame(CapabilityState::Supported, $result->capabilities['destroy']);
+        $this->assertSame(CapabilityState::Unsupported, $result->capabilities['inventory_sync']);
     }
 
     #[Test]

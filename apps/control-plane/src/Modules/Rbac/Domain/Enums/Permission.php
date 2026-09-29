@@ -77,6 +77,17 @@ enum Permission: string
     case BmcAccess = 'bmc.access';
     case HostingNodeManage = 'hosting_node.manage';
     case HostingAccountManage = 'hosting_account.manage';
+    /*
+     * Its own permission rather than part of manage, and destructiveness is
+     * not the axis. Terminating is loud, irreversible and visible to the
+     * customer within the hour; a reset is quiet and hands the holder a live
+     * login to the customer's mail, files and databases. It is also the only
+     * operator path into a customer's panel — single sign-on is reached from
+     * the customer's side alone — so it is a new class of authority, not a
+     * variation on an existing one, and it is split the way vm.console is from
+     * vm.manage and bmc.access from dedicated.manage.
+     */
+    case HostingAccountResetPassword = 'hosting_account.reset_password';
 
     // --- Networking -----------------------------------------------------------
     case IpamView = 'ipam.view';

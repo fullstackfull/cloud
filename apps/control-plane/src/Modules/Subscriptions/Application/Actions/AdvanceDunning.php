@@ -39,13 +39,25 @@ final readonly class AdvanceDunning
     /**
      * A recurring payment failed.
      *
+     * @param  string|null  $paymentFailureId  the failed transaction this records. Supplied, it makes
+     *                                         the count idempotent: a failure already counted — by a
+     *                                         redelivered webhook, a retried job, or a second delivery
+     *                                         running at the same moment — is not counted again, and
+     *                                         the check is read under the same row lock as the write.
+     *                                         **Omitted, every call counts**, which is right for an
+     *                                         operator recording a failure by hand and wrong for
+     *                                         anything that can be delivered twice.
+     *
      * @throws IllegalStateTransitionException
      */
-    public function recordFailedPayment(Subscription $subscription, ?DateTimeImmutable $at = null): Subscription
-    {
+    public function recordFailedPayment(
+        Subscription $subscription,
+        ?DateTimeImmutable $at = null,
+        ?string $paymentFailureId = null,
+    ): Subscription {
         $now = $at !== null ? CarbonImmutable::instance($at) : CarbonImmutable::now();
 
-        return DB::transaction(function () use ($subscription, $now): Subscription {
+        return DB::transaction(function () use ($subscription, $now, $paymentFailureId): Subscription {
             /** @var Subscription $locked */
             $locked = Subscription::query()->lockForUpdate()->findOrFail($subscription->getKey());
 
@@ -59,7 +71,18 @@ final readonly class AdvanceDunning
                 );
             }
 
+            if ($paymentFailureId !== null && $locked->last_counted_payment_failure_id === $paymentFailureId) {
+                // Already counted. Kept even after a successful payment, so a
+                // failure redelivered after the money arrived cannot reopen
+                // dunning on a subscription that has paid.
+                return $locked;
+            }
+
             $locked->failed_payment_count = $locked->failed_payment_count + 1;
+
+            if ($paymentFailureId !== null) {
+                $locked->last_counted_payment_failure_id = $paymentFailureId;
+            }
 
             /*
              * The grace clock starts at the first failure and is never
@@ -96,6 +119,7 @@ final readonly class AdvanceDunning
             // before the failure was processed — must not leave a half-run
             // dunning clock behind for the next failure to inherit.
             $locked->failed_payment_count = 0;
+            // last_counted_payment_failure_id is kept: see recordFailedPayment().
             $locked->grace_period_ends_at = null;
             $locked->suspended_at = null;
             $locked->save();

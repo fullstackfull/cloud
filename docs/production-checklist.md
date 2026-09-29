@@ -79,7 +79,12 @@ several of them describe failures that are silent until a customer finds them.
 
 ## Observability
 
-- [ ] `LOG_STACK` includes the `structured` channel and Grafana Alloy is shipping it.
+- [ ] `LOG_STACK` includes the `structured` channel.
+- [ ] A log shipper is running on every control-plane host and reading
+      `/opt/lynomia/current/storage/logs/lynomia.json`. SHIPPER-STATUS: not deployed —
+      nothing in this repository installs one (`lynomia_log_shipper_deployed: false` in
+      `infrastructure/ansible/group_vars/all.yml`), so this item is done out-of-band or not
+      at all. When it is done, flip that variable and every SHIPPER-STATUS marker with it.
 - [ ] A test log line confirms secrets are redacted end to end — write one containing a
       fake token and confirm it reaches Loki masked.
 - [ ] Prometheus is scraping the control plane, the database, Redis and every node.

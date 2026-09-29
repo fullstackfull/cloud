@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Billing\Domain\Events\OrderFinanciallySettled;
 use Lynomia\Modules\Catalog\Application\Actions\RedeemCoupon;
 use Lynomia\Modules\Catalog\Application\DTOs\CouponContext;
+use Lynomia\Modules\Orders\Application\Actions\KeepTheOrderInStepWithItsServices;
 use Lynomia\Modules\Orders\Application\Actions\TransitionOrder;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
@@ -47,10 +48,20 @@ use Throwable;
  *     item — including at the database, which holds a unique index on
  *     services.order_item_id so that two workers cannot both decide to build.
  *
- * Idempotent throughout. The transition converges when the order is already
- * paid, StartSubscription refuses to create a second subscription for a line
- * that has one, and ProvisionOrderedService returns the existing service rather
- * than a second machine — so a redelivered webhook, a retried job, or a
+ * And then the order is told where it stands. From here on it follows what
+ * it bought (F-19): each service's build being asked for, started, finished
+ * or stopped moves the order through KeepTheOrderInStepWithItsServices, which
+ * is asked once more at the end of this run so that a line whose service is
+ * waiting for an operator to place it puts the order in `manual_review`
+ * rather than leaving it reading `paid` for ever.
+ *
+ * Idempotent throughout. The order is moved to `paid` only if it has never
+ * been paid — once it has, it may already be building, active or further
+ * along, and asking for `paid` again would be an illegal move backwards rather
+ * than the no-op it used to be. An order that has ended since is not fulfilled
+ * a second time. StartSubscription refuses to create a second subscription for
+ * a line that has one, and ProvisionOrderedService returns the existing service
+ * rather than a second machine — so a redelivered webhook, a retried job, or a
  * settlement that ran twice all produce one fulfilment.
  */
 final class FulfilOrderOnSettlement implements ShouldQueue
@@ -72,6 +83,7 @@ final class FulfilOrderOnSettlement implements ShouldQueue
         private readonly StartSubscription $startSubscription,
         private readonly RedeemCoupon $redeemCoupon,
         private readonly ProvisionOrderedService $provisionService,
+        private readonly KeepTheOrderInStepWithItsServices $follow,
     ) {}
 
     public function handle(OrderFinanciallySettled $event): void
@@ -88,14 +100,28 @@ final class FulfilOrderOnSettlement implements ShouldQueue
             return;
         }
 
-        $order = $this->transition->execute(
-            $order,
-            OrderStatus::Paid,
-            actorType: 'system',
-            reason: $event->invoiceId !== null
-                ? 'invoice '.$event->invoiceId.' settled'
-                : 'nothing was owed on this order',
-        );
+        if (in_array($order->status, [OrderStatus::Refunded, OrderStatus::Terminated], true)) {
+            // Delivered once and since ended. A settlement replayed now has
+            // nothing left to deliver, and must not build it again.
+            Log::info('A settlement arrived for an order that has already ended; nothing to fulfil.', [
+                'order_id' => (string) $order->getKey(),
+                'status' => $order->status->value,
+                'invoice_id' => $event->invoiceId,
+            ]);
+
+            return;
+        }
+
+        if ($order->paid_at === null) {
+            $order = $this->transition->execute(
+                $order,
+                OrderStatus::Paid,
+                actorType: 'system',
+                reason: $event->invoiceId !== null
+                    ? 'invoice '.$event->invoiceId.' settled'
+                    : 'nothing was owed on this order',
+            );
+        }
 
         $this->redeem($order);
 
@@ -119,6 +145,8 @@ final class FulfilOrderOnSettlement implements ShouldQueue
              */
             $this->provisionService->execute($order, $item, $subscription);
         }
+
+        $this->follow->execute((string) $order->getKey(), 'every line of the order was handed to provisioning');
     }
 
     /**

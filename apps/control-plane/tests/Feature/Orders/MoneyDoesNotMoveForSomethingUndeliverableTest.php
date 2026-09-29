@@ -332,8 +332,14 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
 
     private function place(Customer $customer, Plan $plan): Order
     {
+        // A hosting line is bought for a domain, which checkout requires; one
+        // per customer so no two accounts ever share a name.
+        $domain = $plan->product?->kind === ProductKind::SharedHosting
+            ? 'shop-'.strtolower(substr((string) $customer->getKey(), -8)).'.example.test'
+            : null;
+
         return app(PlaceOrder::class)->execute($customer, new CheckoutRequest(
-            lines: [new CheckoutLine($plan->id, 1)],
+            lines: [new CheckoutLine($plan->id, 1, $domain)],
             billingPeriod: BillingPeriod::Monthly,
             couponCode: null,
             idempotencyKey: null,

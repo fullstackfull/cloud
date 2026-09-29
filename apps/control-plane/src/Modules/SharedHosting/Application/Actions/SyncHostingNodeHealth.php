@@ -39,6 +39,15 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
  * platform cannot prove is licensed, and treating silence as "still fine" is
  * what turns a lapsed licence into a fleet-wide outage weeks later. The error
  * is kept on the row so an operator sees why.
+ *
+ * ---------------------------------------------------------------------------
+ * A node that answers, and whose licence is not confirmed
+ * ---------------------------------------------------------------------------
+ *
+ * Also kept on the row: the adapter's reason for not confirming the licence
+ * lands in `last_sync_error`. An answer the adapter could not read is recorded
+ * unlicensed (F-14), and without the reason beside it that row is
+ * indistinguishable from one the vendor lapsed.
  */
 final readonly class SyncHostingNodeHealth
 {
@@ -81,7 +90,16 @@ final readonly class SyncHostingNodeHealth
             'licence_status' => $licence->state ?? ($licence->valid ? 'valid' : 'invalid'),
             'licence_checked_at' => now(),
             'last_synced_at' => now(),
-            'last_sync_error' => $health->online ? null : 'the node reported itself offline',
+            'last_sync_error' => match (true) {
+                ! $health->online => 'the node reported itself offline',
+                // Why the licence was not confirmed, on the row an operator
+                // opens. A node refused for an unreadable licence answer
+                // otherwise looks exactly like one that synced cleanly, bar a
+                // boolean, and the remedy — renew, or ask why the panel's
+                // answer is unreadable — is in this sentence.
+                ! $licence->valid => $licence->detail ?? 'the panel licence could not be confirmed',
+                default => null,
+            },
         ])->save();
 
         return $health->online;

@@ -18,8 +18,9 @@ use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
  * accepts an amount, a currency, a tax rate or a discount from the client is a
  * checkout where the customer sets their own price; a checkout that accepts a
  * customer id is a checkout where they choose whose card is charged. So the
- * accepted fields are plan ids, quantities, a billing period, an optional
- * coupon code and a note — and the rules below are an allow-list, not a filter.
+ * accepted fields are plan ids, quantities, a hosting line's domain, a billing
+ * period, an optional coupon code and a note — and the rules below are an
+ * allow-list, not a filter.
  * The DTO handed to PlaceOrder is built here, field by field, from validated
  * input only; `$request->all()` never reaches it.
  *
@@ -62,6 +63,15 @@ final class PlaceOrderRequest extends FormRequest
              */
             'items.*.plan_id' => ['required', 'string', 'ulid', 'distinct'],
             'items.*.quantity' => ['required', 'integer', 'min:1', 'max:100'],
+            /*
+             * The name a shared-hosting line is bought for. Shape only here:
+             * whether a line needs one depends on the plan's product, which
+             * this request cannot see, and whether the string is a host name
+             * is DnsName's answer. Both are PlaceOrder's, so a caller that is
+             * not this endpoint is held to them too. 253 is RFC 1035's
+             * ceiling on a name.
+             */
+            'items.*.domain' => ['sometimes', 'nullable', 'string', 'max:253'],
 
             'billing_period' => ['required', new Enum(BillingPeriod::class)],
 
@@ -93,7 +103,7 @@ final class PlaceOrderRequest extends FormRequest
         /** @var array<string, mixed> $validated */
         $validated = $this->validated();
 
-        /** @var list<array{plan_id: string, quantity: int}> $items */
+        /** @var list<array{plan_id: string, quantity: int, domain?: string|null}> $items */
         $items = array_values($validated['items']);
 
         $couponCode = isset($validated['coupon_code']) && is_string($validated['coupon_code'])
@@ -105,6 +115,7 @@ final class PlaceOrderRequest extends FormRequest
                 static fn (array $item): CheckoutLine => new CheckoutLine(
                     planId: $item['plan_id'],
                     quantity: $item['quantity'],
+                    domain: isset($item['domain']) && is_string($item['domain']) ? $item['domain'] : null,
                 ),
                 $items,
             ),

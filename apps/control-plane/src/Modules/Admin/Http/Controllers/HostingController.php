@@ -9,18 +9,22 @@ use Illuminate\Http\Request;
 use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
+use Lynomia\Modules\SharedHosting\Application\Actions\ResetHostingAccountPassword;
 use Lynomia\Modules\SharedHosting\Application\Actions\TerminateHostingAccount;
 use Lynomia\Modules\SharedHosting\Application\Actions\UnsuspendHostingAccount;
+use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 
 /**
- * The two hosting-account operations only a person should make.
+ * The hosting-account operations only a person should make.
  *
- * Both actions existed and neither had a caller. An account could be suspended
+ * Each action existed and none had a caller. An account could be suspended
  * for non-payment (once the dunning listener was wired) and nothing could put
- * it back by hand; and an account could reach the end of its retention window
+ * it back by hand; an account could reach the end of its retention window
  * and stay on the node for ever, holding a slot the node's capacity counted
- * as spent.
+ * as spent; and an account whose create answer was lost held a panel password
+ * nobody had, with `changePassword` implemented by every adapter and called
+ * by nothing.
  */
 final class HostingController
 {
@@ -63,14 +67,74 @@ final class HostingController
     }
 
     /**
+     * Set a new panel password on an account and hand it back, once.
+     *
+     * The password is minted by the action — no password is accepted from
+     * this body — and it appears in this response and nowhere else: not on the
+     * row, not in the audit entry, not in a log. The route's middleware holds
+     * it to three a minute per operator, as the credential reset it is, and
+     * `api/*` responses are `Cache-Control: no-store`.
+     *
+     * Panel first, then the record. Recording first would write down an act
+     * that may not have happened, on a table whose rows can be neither updated
+     * nor deleted. The cost is the other order's failure: a reset the panel
+     * accepted whose audit write then failed is a reset with no record, and
+     * the operator is shown an error for a password that was in fact set.
+     */
+    public function resetPassword(Request $request, string $account): JsonResponse
+    {
+        $found = HostingAccount::query()->findOrFail($account);
+
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'min:3', 'max:500'],
+        ]);
+
+        $password = app(ResetHostingAccountPassword::class)->execute($found);
+
+        app(RecordAuditEntry::class)->execute(
+            action: AuditAction::HostingAccountPasswordReset,
+            subject: $found,
+            customerId: $found->customer_id,
+            context: [
+                'reason' => $validated['reason'],
+                'username' => $found->username,
+                'primary_domain' => $found->primary_domain,
+                'status' => $found->status->value,
+            ],
+        );
+
+        return response()->json([
+            'data' => [
+                'id' => (string) $found->getKey(),
+                'username' => $found->username,
+                'password' => $password,
+            ],
+        ]);
+    }
+
+    /**
      * Delete an account and everything on it.
      *
-     * `force` skips the retention window, and it is a real decision rather
-     * than a convenience: the window exists so that a customer who is
-     * suspended by mistake, or who changes their mind, still has their site.
-     * Forcing is for an abuse case or an erasure request, so it needs its own
-     * permission on top — an operator who may terminate expired accounts must
-     * not thereby be able to delete a live customer's data today.
+     * The route's permission, hosting_account.manage, is for clearing out
+     * accounts whose retention window has run out, and that is all it is for.
+     * Anything else — a live customer's site, or a suspended one still inside
+     * its window — needs service.terminate on top: an operator who may
+     * terminate expired accounts must not thereby be able to delete a live
+     * customer's data today.
+     *
+     * `force` skips the window, and it is a real decision rather than a
+     * convenience: the window exists so that a customer who is suspended by
+     * mistake, or who changes their mind, still has their site. Forcing is for
+     * an abuse case or an erasure request.
+     *
+     * The second permission is asked for on the account's status as well as
+     * on `force`, and that is F-18. It used to be asked only under `force`,
+     * while the action read a live account's missing `suspended_at` as an
+     * elapsed window — so the weaker grant, sent without `force`, destroyed a
+     * serving site, and the control was exactly inverted. The action now
+     * refuses a live account on its own (409) and this gate refuses the weaker
+     * principal first (403); each is pinned separately, so neither is load
+     * the other quietly carries.
      *
      * There is deliberately no "force success" here, and no way to mark an
      * account terminated in the platform without the panel having actually
@@ -92,12 +156,19 @@ final class HostingController
          * A genuinely different grant from the one on the route, not the same
          * one asked for twice. service.terminate is the platform's permission
          * for destroying a customer's service, and that is what skipping the
-         * window does: an operator who may clear out accounts whose retention
-         * has elapsed does not thereby get to delete a live customer's site
-         * this afternoon.
+         * window does — and what destroying an account that is not suspended
+         * at all does, whether or not `force` was sent. Only a suspended
+         * account (whose window the action still checks) and one already
+         * terminated (a no-op) are within the route's own grant.
          */
-        if ($force && $request->user()?->can(Permission::ServiceTerminate->value) !== true) {
-            abort(403, 'Skipping the retention window needs permission to terminate a service.');
+        $withinTheRoutesGrant = ! $force && in_array(
+            $found->status,
+            [HostingAccountStatus::Suspended, HostingAccountStatus::Terminated],
+            true,
+        );
+
+        if (! $withinTheRoutesGrant && $request->user()?->can(Permission::ServiceTerminate->value) !== true) {
+            abort(403, 'Destroying an account that is not waiting out its retention window needs permission to terminate a service.');
         }
 
         $terminated = app(TerminateHostingAccount::class)->execute($found, force: $force);

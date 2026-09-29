@@ -13,7 +13,15 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 ( cd "$ROOT/apps/control-plane" && php artisan serve --host=0.0.0.0 --port="${API_PORT:-8000}" ) & pids+=($!)
-( cd "$ROOT/apps/control-plane" && php artisan queue:work --queue=critical,payments,provisioning,infrastructure,notifications,monitoring,default ) & pids+=($!)
+# One worker per retry clock, each with its Horizon supervisor's timeout (F-08).
+# A single worker on one connection either kills a 5,700-second build after its
+# default 60 seconds or, given that timeout, outlives the 180-second clock the
+# payments queue runs on and runs a job twice at once. The connection named is
+# the clock; all three read the same Redis keys. Kept in step with
+# config/horizon.php by TheDevelopmentScriptDrainsEveryQueueTest.
+( cd "$ROOT/apps/control-plane" && php artisan queue:work redis --queue=payments,notifications,default --timeout=120 ) & pids+=($!)
+( cd "$ROOT/apps/control-plane" && php artisan queue:work redis-provisioning --queue=provisioning --timeout=5700 ) & pids+=($!)
+( cd "$ROOT/apps/control-plane" && php artisan queue:work redis-infrastructure --queue=infrastructure --timeout=1800 ) & pids+=($!)
 ( cd "$ROOT/apps/control-plane" && php artisan schedule:work ) & pids+=($!)
 ( cd "$ROOT/apps/web" && npm run dev ) & pids+=($!)
 

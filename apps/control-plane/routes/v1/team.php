@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
+use Lynomia\Http\Middleware\ThrottleAfterAccountResolution;
 use Lynomia\Modules\Identity\Http\Controllers\TeamController;
 
 /*
@@ -33,13 +34,23 @@ Route::delete('team/members/{member}', [TeamController::class, 'removeMember'])
 
 Route::get('team/invitations', [TeamController::class, 'invitations'])->name('team.invitations');
 
+/*
+ * Both roads that put an invitation in the post spend one budget per account.
+ *
+ * Not `throttle:team-invitations`. The limiter keys on the acting account,
+ * and the router's priority sort runs any ThrottleRequests before `customer`
+ * has resolved it — the budget silently became one per administrator.
+ * ThrottleAfterAccountResolution runs the same limiter where it is declared.
+ * TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest holds every route
+ * that uses InvitationMailer to both halves of that.
+ */
 Route::post('team/invitations', [TeamController::class, 'invite'])
-    ->middleware('throttle:team-invitations')
+    ->middleware(ThrottleAfterAccountResolution::class.':team-invitations')
     ->name('team.invitations.create');
 
 Route::post('team/invitations/{invitation}/resend', [TeamController::class, 'resendInvitation'])
     ->whereUlid('invitation')
-    ->middleware('throttle:team-invitations')
+    ->middleware(ThrottleAfterAccountResolution::class.':team-invitations')
     ->name('team.invitations.resend');
 
 Route::delete('team/invitations/{invitation}', [TeamController::class, 'revokeInvitation'])

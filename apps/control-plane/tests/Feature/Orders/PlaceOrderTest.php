@@ -84,16 +84,18 @@ final class PlaceOrderTest extends TestCase
     #[Test]
     public function the_price_is_never_taken_from_the_request(): void
     {
-        // The DTO carries only a plan id and a quantity, by construction.
-        // A checkout that accepted a submitted amount would be a checkout
-        // where the customer sets their own price, so this is asserted at the
-        // type level rather than by trying to smuggle a price through.
+        // The DTO carries a plan id, a quantity and — for a hosting line — the
+        // domain the account is for (F-04), by construction, and nothing that
+        // is a price. A checkout that accepted a submitted amount would be a
+        // checkout where the customer sets their own price, so this is
+        // asserted at the type level rather than by trying to smuggle a price
+        // through. A field added here has to be argued past this list.
         $properties = array_map(
             static fn (\ReflectionProperty $p): string => $p->getName(),
             (new \ReflectionClass(CheckoutLine::class))->getProperties(),
         );
 
-        $this->assertSame(['planId', 'quantity'], $properties);
+        $this->assertSame(['planId', 'quantity', 'domain'], $properties);
     }
 
     #[Test]

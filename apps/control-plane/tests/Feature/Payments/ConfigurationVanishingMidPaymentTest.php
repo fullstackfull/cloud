@@ -108,7 +108,7 @@ final class ConfigurationVanishingMidPaymentTest extends TestCase
             DB::setDefaultConnection(self::PAYER);
 
             $order = app(PlaceOrder::class)->execute($customer, new CheckoutRequest(
-                lines: [new CheckoutLine($plan->id, 1)],
+                lines: [new CheckoutLine($plan->id, 1, 'vanishing.example.test')],
                 billingPeriod: BillingPeriod::Monthly,
                 couponCode: null,
                 idempotencyKey: null,

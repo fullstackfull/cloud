@@ -177,7 +177,13 @@ final class HostingAccountLifecycleTest extends TestCase
     #[Test]
     public function termination_gives_the_nodes_slot_back_and_only_once(): void
     {
+        // Suspended and past its window. This once terminated a live account
+        // unforced, which is F-18 written down as a test.
         $account = $this->account('acmeone');
+        $account->forceFill([
+            'status' => HostingAccountStatus::Suspended,
+            'suspended_at' => now()->subDays(31),
+        ])->save();
         $before = $this->node->fresh()?->account_count ?? 0;
 
         app(TerminateHostingAccount::class)->execute($account);

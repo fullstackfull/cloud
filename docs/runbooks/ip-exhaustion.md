@@ -73,6 +73,15 @@ hand-editing existing rows.
 Addresses quarantined **because of abuse** are held longer and flagged. Those are not
 candidates for early release at all.
 
+**One kind of quarantine does not drain on its own.** A row with `quarantined_until`
+null is *held*: it came off a dedicated server that was decommissioned and is still
+racked with the address configured on its disks. Its clock starts only when an
+operator returns that machine to stock (`POST /api/admin/dedicated/{server}/return-to-stock`)
+or retires it (`POST /api/admin/dedicated/{server}/retire`). `php artisan ipam:capacity`
+lists them per pool with the machine each is waiting for; a list that only grows is a
+machine somebody forgot. Do not clear these by hand — erase or dispose of the machine,
+then use one of the two endpoints.
+
 ## 3. Genuinely low `available` — you are out of addresses
 
 The order in which to reach for options:

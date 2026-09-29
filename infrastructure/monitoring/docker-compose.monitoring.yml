@@ -192,9 +192,17 @@ services:
   # ---------------------------------------------------------------------------
   # Grafana Alloy — log shipping. Promtail is NOT used: it is end-of-life.
   #
-  # This instance ships the monitoring host's own logs. The control plane's log
-  # is shipped by an Alloy running on each application host, deployed by the
-  # Ansible monitoring role using the same config.alloy.
+  # This instance ships the monitoring host's own journal, and nothing else.
+  #
+  # SHIPPER-STATUS: not deployed. The control plane's structured log would be
+  # shipped by an Alloy on each application host running the same config.alloy,
+  # and nothing in this repository installs one there: the Ansible monitoring
+  # role builds only this stack, on the monitoring host. See
+  # lynomia_log_shipper_deployed in infrastructure/ansible/group_vars/all.yml.
+  #
+  # There is deliberately no mount of the application's log directory here.
+  # The monitoring host has no release tree, and a mount of a path the host does
+  # not have makes an absent pipeline look present.
   # ---------------------------------------------------------------------------
   alloy:
     image: grafana/alloy:v1.11.2
@@ -212,10 +220,9 @@ services:
       LYNOMIA_REGION: ${LYNOMIA_REGION:?set LYNOMIA_REGION}
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
-      # Read-only, and only the log directory. Alloy has no business with
-      # anything else on the host, and a log shipper with a writable host mount
-      # is a privilege escalation waiting for a CVE.
-      - /var/log/lynomia:/var/log/lynomia:ro
+      # Read-only, and only the journal. Alloy has no business with anything
+      # else on the host, and a log shipper with a writable host mount is a
+      # privilege escalation waiting for a CVE.
       - /var/log/journal:/var/log/journal:ro
       - /etc/machine-id:/etc/machine-id:ro
       - alloy-data:/var/lib/alloy/data

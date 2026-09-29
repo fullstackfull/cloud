@@ -16,10 +16,20 @@ import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import {
   useAdminProvisioningJobs,
+  useAdoptProvisioningJob,
   useJobsNeedingReview,
+  useRepointProvisioningJob,
   useRetryProvisioningJob,
   type AdminProvisioningJob,
 } from '@/lib/adminQueries'
+
+/**
+ * The reference an adoption would attach: what the job found, or else the
+ * identity it reserved before calling — the place its build would be.
+ */
+function adoptableReference(job: AdminProvisioningJob): string | null {
+  return job.provider_reference ?? job.reserved_provider_id ?? null
+}
 
 /**
  * The provisioning queue.
@@ -29,16 +39,26 @@ import {
  * of them needs a human to decide. That is why the jobs needing review sit at
  * the top of this page rather than behind a filter somebody has to think to
  * apply.
+ *
+ * Each carries what the runbook tells the operator to read (F-15): the finding
+ * and its reason, the whole error rather than a truncation of it, and for a
+ * VPS create the provider identity it reserved with every node and name a
+ * create under it was sent with. And all three ways out are here — retry,
+ * adopt, and repoint — each refused by the server where it would be wrong.
  */
 export function AdminProvisioningPage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
   const [page, setPage] = useState(1)
   const [retrying, setRetrying] = useState<AdminProvisioningJob | null>(null)
+  const [adopting, setAdopting] = useState<AdminProvisioningJob | null>(null)
+  const [repointing, setRepointing] = useState<AdminProvisioningJob | null>(null)
 
   const { data, isPending, error: jobsError } = useAdminProvisioningJobs(page)
   const { data: review, error: reviewError } = useJobsNeedingReview()
   const retry = useRetryProvisioningJob()
+  const adopt = useAdoptProvisioningJob()
+  const repoint = useRepointProvisioningJob()
 
   const columns: Array<Column<AdminProvisioningJob>> = [
     {
@@ -111,10 +131,28 @@ export function AdminProvisioningPage() {
             <ul className="flex flex-col gap-2 text-xs">
               {needsReview.slice(0, 5).map((job) => (
                 <li key={job.id} className="flex flex-wrap items-center justify-between gap-2">
-                  <span dir="ltr" className="technical">
-                    {job.id} · {job.kind} · {job.failure_class ?? '—'}
-                    {job.last_error !== null ? ` · ${job.last_error.slice(0, 120)}` : ''}
-                  </span>
+                  <div dir="ltr" className="technical flex min-w-0 flex-col gap-1">
+                    <span>
+                      {job.id} · {job.kind} · {job.failure_class ?? '—'}
+                      {job.error_code == null ? '' : ` · ${job.error_code}`}
+                      {job.error_reason == null ? '' : ` (${job.error_reason})`}
+                    </span>
+                    {/*
+                      Whole, not cut at 120 characters: the part of a
+                      taken-identity message that says whose machine it is
+                      comes after that.
+                    */}
+                    {job.last_error === null ? null : <span className="break-words">{job.last_error}</span>}
+                    {job.reserved_provider_id == null ? null : (
+                      <span>
+                        {t('admin.provisioning.reservedIdentity', {
+                          id: job.reserved_provider_id,
+                          nodes: (job.reserved_provider_nodes ?? []).join(', ') || '—',
+                          names: (job.reserved_provider_hostnames ?? []).join(', ') || '—',
+                        })}
+                      </span>
+                    )}
+                  </div>
                   {/*
                     Offered on every job here, and refused by the API for the
                     ones where a second run would build a second machine or
@@ -122,9 +160,21 @@ export function AdminProvisioningPage() {
                     pre-empted: the reason is the useful part, and only the
                     server knows it.
                   */}
-                  <Button size="sm" variant="secondary" onClick={() => { setRetrying(job); }}>
-                    {t('admin.provisioning.retry')}
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => { setRetrying(job); }}>
+                      {t('admin.provisioning.retry')}
+                    </Button>
+                    {adoptableReference(job) === null ? null : (
+                      <Button size="sm" variant="secondary" onClick={() => { setAdopting(job); }}>
+                        {t('admin.provisioning.adopt')}
+                      </Button>
+                    )}
+                    {job.reserved_provider_id == null ? null : (
+                      <Button size="sm" variant="secondary" onClick={() => { setRepointing(job); }}>
+                        {t('admin.provisioning.repoint')}
+                      </Button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
@@ -179,6 +229,55 @@ export function AdminProvisioningPage() {
           retry.mutate(
             { id: retrying.id, evidence },
             { onSuccess: () => { setRetrying(null); } },
+          )
+        }}
+      />
+
+      <ConfirmDialog
+        open={adopting !== null}
+        title={t('admin.provisioning.adoptTitle')}
+        body={
+          <div className="flex flex-col gap-2">
+            <p>{t('admin.provisioning.adoptBody', { reference: adopting === null ? '' : (adoptableReference(adopting) ?? '') })}</p>
+          </div>
+        }
+        evidenceLabel={t('admin.provisioning.adoptEvidence')}
+        evidenceHint={t('admin.provisioning.adoptEvidenceHint')}
+        confirmLabel={t('admin.provisioning.adopt')}
+        loading={adopt.isPending}
+        error={adopt.error === null ? undefined : adopt.error.message}
+        onCancel={() => { setAdopting(null); adopt.reset(); }}
+        onConfirm={(_phrase, evidence) => {
+          const reference = adopting === null ? null : adoptableReference(adopting)
+          if (adopting === null || reference === null) return
+
+          adopt.mutate(
+            { id: adopting.id, providerReference: reference, evidence },
+            { onSuccess: () => { setAdopting(null); } },
+          )
+        }}
+      />
+
+      <ConfirmDialog
+        open={repointing !== null}
+        title={t('admin.provisioning.repointTitle')}
+        body={
+          <div className="flex flex-col gap-2">
+            <p>{t('admin.provisioning.repointBody')}</p>
+          </div>
+        }
+        evidenceLabel={t('admin.provisioning.repointEvidence')}
+        evidenceHint={t('admin.provisioning.repointEvidenceHint')}
+        confirmLabel={t('admin.provisioning.repoint')}
+        loading={repoint.isPending}
+        error={repoint.error === null ? undefined : repoint.error.message}
+        onCancel={() => { setRepointing(null); repoint.reset(); }}
+        onConfirm={(_phrase, evidence) => {
+          if (repointing === null) return
+
+          repoint.mutate(
+            { id: repointing.id, evidence },
+            { onSuccess: () => { setRepointing(null); } },
           )
         }}
       />

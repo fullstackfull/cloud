@@ -194,8 +194,19 @@ final class PurchaseToActiveServiceTest extends TestCase
         $this->assertSame(InvoiceStatus::Paid, $invoice->status);
         $this->assertSame(0, $invoice->amount_due_minor);
 
+        /*
+         * Paid — and then not delivered. This file's estate can place a VPS (a
+         * cluster, a pool, an image) and has no node with room, so every build
+         * stops in `needs_review` and the service fails. The old assertion
+         * here was `paid`, and it passed because a delivered purchase and one
+         * nobody could build read identically (F-19). The order now says which
+         * it is. Giving the estate a node with room would change what this
+         * file covers, and is left to whoever owns it.
+         */
         $order->refresh();
-        $this->assertSame(OrderStatus::Paid, $order->status);
+        $this->assertNotNull($order->paid_at);
+        $this->assertSame(OrderStatus::ManualReview, $order->status);
+        $this->assertNull($order->completed_at);
 
         $subscription = Subscription::query()->sole();
         $this->assertSame(SubscriptionStatus::Active, $subscription->status);
@@ -206,7 +217,7 @@ final class PurchaseToActiveServiceTest extends TestCase
         // ---- 9. The audit trail explains how it got here ----------------------
         $trail = $order->transitions()->orderBy('created_at')->orderBy('id')->get();
         $this->assertSame(
-            ['draft', 'pending_payment', 'paid'],
+            ['draft', 'pending_payment', 'paid', 'queued_for_provisioning', 'provisioning', 'manual_review'],
             $trail->pluck('from_status')->push($trail->last()->to_status)
                 ->map(static fn ($s): string => $s->value)->all(),
         );
@@ -256,8 +267,11 @@ final class PurchaseToActiveServiceTest extends TestCase
         $this->deliverWebhook($signed);
 
         // The single most important rule in the platform: no money, no service.
+        // The order says the attempt failed (F-19) and is still unpaid and
+        // payable: the invoice stays open.
         $this->assertSame(InvoiceStatus::Open, $invoice->fresh()->status);
-        $this->assertSame(OrderStatus::PendingPayment, $order->fresh()->status);
+        $this->assertSame(OrderStatus::PaymentFailed, $order->fresh()->status);
+        $this->assertNull($order->fresh()->paid_at);
         $this->assertSame(0, Subscription::query()->count());
     }
 

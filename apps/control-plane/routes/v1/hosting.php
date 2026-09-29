@@ -46,11 +46,14 @@ use Lynomia\Modules\SharedHosting\Http\Controllers\WordPressCopyController;
  * the customer: suspension is what dunning does to an account, and an endpoint
  * that let a customer unsuspend their own hosting would undo it.
  *
- * **No password reset yet.** changePassword() exists at the provider and the
- * platform deliberately keeps no copy of what it sets, so publishing it means
- * deciding where the new password goes — shown once, mailed, or set by the
- * customer — and rate-limiting it as the credential-reset endpoint it is.
- * That is a surface of its own, not a line on this file.
+ * **No customer password reset.** A customer reaches the panel by single
+ * sign-on and never holds the password the platform sets, which it keeps no
+ * copy of. The reset that exists is an operator's, for an account whose
+ * create answer was lost: POST /api/admin/hosting-accounts/{account}/
+ * password-reset, under its own permission, rate-limited as the credential
+ * reset it is, returning the new password once. A customer surface would
+ * mean deciding where the password goes — shown once, mailed, or set by the
+ * customer — and is a surface of its own, not a line on this file.
  *
  * **Nothing that polls a node.** The list, show and usage endpoints read the
  * platform's record. An endpoint that asked the panel on every request would

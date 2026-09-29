@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Dns\Application\Actions;
 
+use Illuminate\Database\QueryException;
 use Lynomia\Modules\Dns\Domain\Enums\DnsState;
+use Lynomia\Modules\Dns\Domain\Enums\IndeterminateAfter;
 use Lynomia\Modules\Dns\Domain\Exceptions\DnsNotConfiguredException;
 use Lynomia\Modules\Dns\Domain\Exceptions\DnsProviderException;
 use Lynomia\Modules\Dns\Domain\Exceptions\InvalidDnsRecordException;
+use Lynomia\Modules\Dns\Domain\Services\DnsRecordIdentity;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DnsRecord as DnsRecordValue;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DnsZone as DnsZoneValue;
 use Lynomia\Modules\Dns\Infrastructure\DnsProviderFactory;
@@ -41,14 +44,33 @@ use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
  *  - **Missing at the provider.** The platform says a record is live and the
  *    zone does not have it. Critical — the name is not resolving, and the
  *    customer's screen says it is.
- *  - **A deletion that completed after all.** A row left `deleting` or
- *    `indeterminate` by a call that did not answer, whose value is no longer
- *    in the zone. Settled to `deleted`: this is the answer the platform was
- *    waiting for, and the Timeout Rule says wait for it rather than ask again.
- *  - **A publish that landed after all.** A row left `indeterminate` whose
- *    value *is* in the zone, saying exactly what the platform meant it to say.
- *    Settled to `active`, with the provider's own identifier picked up.
+ *  - **A deletion that completed after all.** A row left `deleting`, or left
+ *    `indeterminate` by a *delete* that did not answer, whose value is no
+ *    longer in the zone. Settled to `deleted`: this is the answer the
+ *    platform was waiting for, and the Timeout Rule says wait for it rather
+ *    than ask again.
+ *  - **A publish that landed after all.** A row left `indeterminate` by a
+ *    *publish*, whose value is in the zone saying exactly what the platform
+ *    meant it to say. Settled to `active`, claiming the provider's own
+ *    identifier through `ClaimProviderRecord` — the same claim a publish
+ *    makes, for the same reason.
  *  - **Records nobody here wrote.** Reported and left alone, for ever.
+ *
+ * Which call left a row indeterminate is recorded on the row
+ * (`indeterminate_after`), because the same observation means opposite things
+ * for the two calls: see `IndeterminateAfter`. A publish that never arrived is
+ * **not** a deletion, and a delete that never arrived is **not** a record
+ * going live — it goes to `needs_review`, because the customer asked for the
+ * record to be gone and it is still answering. A row that cannot say which
+ * call it was waiting on is left for a person rather than guessed at.
+ *
+ * Records are matched by identity (`DnsRecordIdentity`'s two tiers, plus
+ * the rule that a match must say what the row says), and each record in the
+ * zone is matched at most once, by position in the listing. A key of
+ * `type|name|content` used to stand in for that, and it collapsed an MX at
+ * two priorities, or two CAA records whose fields differed, onto one key — so
+ * a certificate authority added in a provider's console beside the one the
+ * platform wrote was silently counted as the platform's.
  */
 final readonly class ReconcileZones
 {
@@ -59,6 +81,7 @@ final readonly class ReconcileZones
     public function __construct(
         private DnsProviderFactory $providers,
         private RecordDrift $drift,
+        private ClaimProviderRecord $claim,
     ) {}
 
     /**
@@ -171,20 +194,41 @@ final readonly class ReconcileZones
         $rows = DnsRecord::query()
             ->where('dns_zone_id', $zone->getKey())
             ->where('state', '!=', DnsState::Deleted->value)
+            // Rows that already hold an identifier first, so that a row
+            // claiming a record by value never takes it from the row whose
+            // identifier names it.
+            ->orderByRaw('provider_record_id is null')
+            ->orderBy('id')
             ->get()
             ->all();
 
+        /** @var array<int, true> $matched positions in $present */
         $matched = [];
 
         foreach ($rows as $row) {
-            $found = $this->find($row, $present);
+            $position = $this->find($row, $present, $matched);
+            $found = $position === null ? null : $present[$position];
 
-            if ($found !== null) {
-                $matched[] = $this->keyOf($found);
+            if ($position !== null) {
+                $matched[$position] = true;
             }
 
-            if ($this->settle($row, $found)) {
-                $settled++;
+            try {
+                if ($this->settle($row, $found)) {
+                    $settled++;
+
+                    continue;
+                }
+            } catch (QueryException $e) {
+                /*
+                 * One row the table will not take — `ClaimProviderRecord` is
+                 * meant to make this unreachable, and the unique index is
+                 * what makes it loud if something bypasses the claim — must
+                 * not abort the whole pass. The pass is the very channel that
+                 * reports a disowned row, and every other zone in the batch
+                 * would go unlooked-at behind it.
+                 */
+                report($e);
 
                 continue;
             }
@@ -213,36 +257,79 @@ final readonly class ReconcileZones
     }
 
     /**
-     * The two questions a listing answers rather than raises.
+     * The questions a listing answers rather than raises.
      *
-     * Both are about rows the platform stopped being sure of, and in both the
-     * zone itself is the authority: it is the thing serving the name.
+     * All are about rows the platform stopped being sure of, and in all of
+     * them the zone itself is the authority: it is the thing serving the name.
+     * Each needs to know which call the row was waiting on — the same
+     * observation settles a publish and a delete in opposite directions.
      */
     private function settle(DnsRecord $row, ?DnsRecordValue $found): bool
     {
-        if ($found !== null && $row->state === DnsState::Indeterminate) {
-            $row->transitionTo(DnsState::Active, [
-                'provider_record_id' => $found->id(),
-                'failure_reason' => null,
-                'last_published_at' => now(),
-            ]);
+        $after = $row->indeterminate_after;
 
-            return true;
+        if ($found !== null && $row->state === DnsState::Indeterminate) {
+            if ($after === IndeterminateAfter::Publish) {
+                $this->claim->execute($row, DnsState::Active, $found->id(), [
+                    'failure_reason' => null,
+                    'last_published_at' => now(),
+                ]);
+
+                return true;
+            }
+
+            if ($after === IndeterminateAfter::Delete) {
+                // The delete did not land: the record the customer asked to
+                // remove is still answering. Not `active` — that would stamp
+                // it live and clear the evidence — and not retried from here,
+                // because this sweep never writes to a zone. A person, or the
+                // customer deleting again, finishes it.
+                $row->transitionTo(DnsState::NeedsReview, [
+                    'failure_reason' => 'The delete did not answer, and the record is still in the zone.',
+                ]);
+
+                return true;
+            }
+
+            return false;
         }
 
-        if ($found === null && ($row->state === DnsState::Deleting || $row->state === DnsState::Indeterminate)) {
+        if ($found === null && $row->state === DnsState::Deleting) {
             $row->transitionTo(DnsState::Deleted, ['failure_reason' => null]);
 
             return true;
         }
 
+        if ($found === null && $row->state === DnsState::Indeterminate && $after === IndeterminateAfter::Delete) {
+            $row->transitionTo(DnsState::Deleted, ['failure_reason' => null]);
+
+            return true;
+        }
+
+        /*
+         * Indeterminate after a publish, value absent: the record never
+         * arrived. Not a deletion — the customer never asked for it to go —
+         * so it stays where it is, visible to the customer and to operations
+         * through `needsAttention()`. It is not written up as drift: which
+         * kind of drift it is remains an open product decision.
+         */
         return false;
     }
 
     /**
+     * Which record in the listing this row is, by position, or null.
+     *
+     * The record under the row's identifier if the zone holds it and it says
+     * what the row says; otherwise a record holding the row's value that no
+     * other row has matched. A record under the row's identifier that says
+     * something else is *not* this row — an edit that did not land, or a
+     * value changed in the provider's console — and calling it a match would
+     * settle a row as live on a value the zone is not serving.
+     *
      * @param  list<DnsRecordValue>  $present
+     * @param  array<int, true>  $matched
      */
-    private function find(DnsRecord $row, array $present): ?DnsRecordValue
+    private function find(DnsRecord $row, array $present, array $matched): ?int
     {
         try {
             $wanted = $row->toValue();
@@ -252,9 +339,21 @@ final readonly class ReconcileZones
             return null;
         }
 
-        foreach ($present as $candidate) {
+        $unmatched = array_filter($present, static fn (int $position): bool => ! isset($matched[$position]), ARRAY_FILTER_USE_KEY);
+
+        $found = DnsRecordIdentity::findAmong($wanted, array_values($unmatched));
+
+        foreach ($unmatched as $position => $candidate) {
+            if ($candidate === $found && $found->saysTheSameAs($wanted)) {
+                return $position;
+            }
+        }
+
+        // The identifier tier found a record that no longer says this, or
+        // nothing: the value alone may still find one that does.
+        foreach ($unmatched as $position => $candidate) {
             if ($candidate->saysTheSameAs($wanted)) {
-                return $candidate;
+                return $position;
             }
         }
 
@@ -270,14 +369,14 @@ final readonly class ReconcileZones
      * can tell the difference.
      *
      * @param  list<DnsRecordValue>  $present
-     * @param  list<string>  $matched
+     * @param  array<int, true>  $matched
      */
     private function reportStrangers(DnsZone $zone, array $present, array $matched): int
     {
         $count = 0;
 
-        foreach ($present as $candidate) {
-            if (in_array($this->keyOf($candidate), $matched, strict: true)) {
+        foreach ($present as $position => $candidate) {
+            if (isset($matched[$position])) {
                 continue;
             }
 
@@ -298,9 +397,20 @@ final readonly class ReconcileZones
         return $count;
     }
 
+    /**
+     * A reference for a record the provider gave no identifier, naming every
+     * field that makes it the record it is — priority and structured data
+     * included, so two different records never share one.
+     */
     private function keyOf(DnsRecordValue $record): string
     {
-        return $record->type()->value.'|'.$record->name().'|'.$record->content();
+        return implode('|', [
+            $record->type()->value,
+            $record->name(),
+            $record->content(),
+            (string) $record->priority(),
+            (string) json_encode($record->data()),
+        ]);
     }
 
     /**

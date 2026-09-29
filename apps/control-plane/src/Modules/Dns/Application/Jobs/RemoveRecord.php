@@ -9,6 +9,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Lynomia\Modules\Dns\Domain\Enums\DnsState;
+use Lynomia\Modules\Dns\Domain\Enums\IndeterminateAfter;
 use Lynomia\Modules\Dns\Domain\Exceptions\DnsNotConfiguredException;
 use Lynomia\Modules\Dns\Domain\Exceptions\DnsProviderException;
 use Lynomia\Modules\Dns\Domain\Exceptions\InvalidDnsRecordException;
@@ -78,7 +79,12 @@ final class RemoveRecord implements ShouldQueue
         } catch (DnsProviderException $e) {
             $record->transitionTo(
                 $e->isIndeterminate() ? DnsState::Indeterminate : DnsState::NeedsReview,
-                ['failure_reason' => $redactor->redactString($e->getMessage())],
+                [
+                    'failure_reason' => $redactor->redactString($e->getMessage()),
+                    // A delete that never answered, not a publish: the sweep
+                    // reads the value's absence as this call's answer only.
+                    'indeterminate_after' => $e->isIndeterminate() ? IndeterminateAfter::Delete : null,
+                ],
             );
 
             return;

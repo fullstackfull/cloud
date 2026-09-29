@@ -65,6 +65,8 @@ export const STATUS_TONES: Readonly<Record<string, StatusTone>> = {
   scheduled: 'info',
   registration_pending: 'info',
   awaiting_registry: 'info',
+  // A WordPress site whose certificate is being issued is already serving.
+  awaiting_certificate: 'info',
   transfer_pending: 'info',
   pending_payment: 'info',
   open: 'info',
@@ -106,6 +108,8 @@ export const STATUS_TONES: Readonly<Record<string, StatusTone>> = {
   rotation_due: 'warning',
   disabled: 'warning',
   awaiting_approval: 'warning',
+  // A WordPress site waiting on the customer to point the name here.
+  awaiting_dns: 'warning',
   connected_read_only: 'warning',
   delete_requested: 'warning',
   deleting: 'warning',
@@ -126,6 +130,7 @@ export const STATUS_TONES: Readonly<Record<string, StatusTone>> = {
   cancelled: 'danger',
   terminated: 'danger',
   deleted: 'danger',
+  removed: 'danger',
   void: 'danger',
   refused: 'danger',
   rejected: 'danger',

@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Dns\Domain\ValueObjects;
 
 use Lynomia\Modules\Dns\Domain\Enums\DnsRecordType;
 use Lynomia\Modules\Dns\Domain\Exceptions\InvalidDnsRecordException;
+use Lynomia\Modules\Dns\Domain\Services\DnsRecordIdentity;
 
 /**
  * One record, in the shape the platform means it — not in any provider's shape.
@@ -127,18 +128,64 @@ final readonly class DnsRecord
     }
 
     /**
-     * Whether this record already says what another one says.
+     * Whether this is the same record as another: the value tier of
+     * {@see DnsRecordIdentity}.
      *
-     * Used to make a publish idempotent without a write: if the provider
-     * already holds this exact value, the call is a no-op rather than an
-     * update that bumps a serial and re-propagates a zone for nothing.
+     * Type, name, content, priority and structured data — every field that
+     * says what the record *is*. Not TTL, which says how long resolvers keep
+     * it: one value at two TTLs is one record whose TTL changed. Not the
+     * provider's identifier, which is a handle on the record rather than a
+     * fact about it.
+     *
+     * Content is compared case-insensitively exactly where
+     * {@see DnsRecordType::contentIsCaseInsensitive()} says so, and data is
+     * compared by its fields rather than by the order a provider happened to
+     * list them in.
+     *
+     * This is **not** the question a publish asks before it skips a write;
+     * that is {@see self::isPublishedExactlyAs()}. Asking this one there
+     * meant a TTL-only edit was never sent.
      */
     public function saysTheSameAs(self $other): bool
     {
         return $this->type === $other->type
             && $this->name === $other->name
-            && $this->content === $other->content
+            && $this->sameContentAs($other)
             && $this->priority === $other->priority
-            && $this->data === $other->data;
+            && self::canonicalData($this->data) === self::canonicalData($other->data);
+    }
+
+    /**
+     * Whether a zone holding `$other` already serves exactly this.
+     *
+     * The record's identity plus its TTL. Used to make a publish idempotent
+     * without a write: when the provider already holds this exact record, the
+     * call is a no-op rather than an update that bumps a serial and
+     * re-propagates a zone for nothing — and when anything a resolver would
+     * see differs, including only the TTL, the write goes out.
+     */
+    public function isPublishedExactlyAs(self $other): bool
+    {
+        return $this->saysTheSameAs($other) && $this->ttl === $other->ttl;
+    }
+
+    private function sameContentAs(self $other): bool
+    {
+        if ($this->type->contentIsCaseInsensitive()) {
+            return strtolower($this->content) === strtolower($other->content);
+        }
+
+        return $this->content === $other->content;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private static function canonicalData(array $data): array
+    {
+        ksort($data);
+
+        return $data;
     }
 }

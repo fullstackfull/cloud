@@ -2184,6 +2184,15 @@ return [
             'max_attempts' => ['type' => ['integer', 'null']],
             'failure_class' => ['type' => ['string', 'null']],
             'last_error' => ['type' => ['string', 'null']],
+            // The fields below are published by the needs-review list, which
+            // is where the runbook sends the operator (F-15).
+            'error_code' => ['type' => ['string', 'null'], 'description' => 'The last attempt\'s finding, e.g. `vps.create_identity_taken`.'],
+            'error_reason' => ['type' => ['string', 'null'], 'description' => 'Why, where the finding has a reason: for a taken identity `named_otherwise`, `unnamed` or `shape_differs`. The runbook\'s rows are keyed on it.'],
+            'provider_reference' => ['type' => ['string', 'null']],
+            'reserved_provider_id' => ['type' => ['string', 'null'], 'description' => 'The hypervisor id a VPS create reserved before calling; where to look for what it built.'],
+            'reserved_cluster_id' => ['type' => ['string', 'null']],
+            'reserved_provider_nodes' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Every node a create under the reserved id was sent to.'],
+            'reserved_provider_hostnames' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Every name a create under the reserved id was sent with.'],
             'correlation_id' => ['type' => ['string', 'null']],
             'started_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'finished_at' => ['$ref' => '#/components/schemas/Timestamp'],
@@ -2742,6 +2751,36 @@ return [
             'service_id' => ['type' => ['string', 'null']],
         ],
     ],
+    'AdminNamedHostingDomain' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'status' => ['type' => ['string', 'null']],
+            'primary_domain' => ['type' => 'string', 'description' => 'The name the build will now serve, folded.'],
+            'previous_domain' => ['type' => ['string', 'null'], 'description' => 'The name the build would have served before this correction - an earlier correction\'s, else the one the job was created with - or null when it named nothing.'],
+        ],
+    ],
+    'AdminHostingPasswordReset' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'username' => ['type' => 'string'],
+            'password' => ['type' => 'string', 'description' => 'The panel password now set. Shown here once and stored nowhere; there is no way to read it again.'],
+        ],
+    ],
+    'AdminRepointedJob' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'status' => ['type' => ['string', 'null']],
+            'reserved_provider_id' => ['type' => ['string', 'null']],
+            'previous_provider_id' => ['type' => ['string', 'null']],
+            'service_id' => ['type' => ['string', 'null']],
+        ],
+    ],
     'AdminRetriedJob' => [
         'type' => 'object',
         'additionalProperties' => false,
@@ -2805,9 +2844,18 @@ return [
             'provisioning_job_id' => ['type' => ['string', 'null']],
             'queued' => ['type' => 'boolean'],
             'dedicated_server_status' => ['type' => ['string', 'null']],
+            'hosting_account_id' => ['type' => ['string', 'null']],
         ],
     ],
     'AdminReturnedServer' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'dedicated_server_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'status' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'AdminRetiredServer' => [
         'type' => 'object',
         'additionalProperties' => false,
         'properties' => [

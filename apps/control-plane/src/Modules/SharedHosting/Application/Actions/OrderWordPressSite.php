@@ -14,6 +14,7 @@ use Lynomia\Modules\Orders\Application\DTOs\CheckoutLine;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
 use Lynomia\Modules\ProductReadiness\Application\Actions\AssertProductMaySell;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
+use Lynomia\Modules\Shared\Domain\Naming\DnsName;
 use Lynomia\Modules\SharedHosting\Domain\Enums\SslStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressDomainSource;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteState;
@@ -78,7 +79,9 @@ final readonly class OrderWordPressSite
         // is guarded again by PlaceOrder, for the shared_hosting line.
         $this->sellable->execute(Product::WordPress);
 
-        $domain = strtolower(trim($domain, " \t\n\r\0\x0B."));
+        // The platform's one fold for a submitted domain, byte-for-byte the
+        // expression that used to be written out here.
+        $domain = DnsName::canonicalAsSubmitted($domain);
 
         if ($domain === '' || ! str_contains($domain, '.')) {
             throw WordPressRefusedException::becauseTheDomainIsUnusable($domain);
@@ -120,7 +123,10 @@ final readonly class OrderWordPressSite
              * hosting this platform already sells.
              */
             $order = $this->orders->execute($customer, new CheckoutRequest(
-                lines: [new CheckoutLine(planId: $planId)],
+                // The hosting line is bought for the site's name: that is the
+                // domain the account is built for and the one WordPress is
+                // installed on.
+                lines: [new CheckoutLine(planId: $planId, domain: $domain)],
                 billingPeriod: BillingPeriod::Monthly,
                 idempotencyKey: $idempotencyKey ?? 'wordpress-'.$domain.'-'.$customer->getKey(),
             ));

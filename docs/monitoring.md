@@ -14,6 +14,19 @@ Grafana Alloy ships logs. **Promtail is not used** — it is end-of-life, and bu
 platform on a component that is already past its support window means migrating before the
 first year is out.
 
+**SHIPPER-STATUS: not deployed.** The Alloy in the monitoring stack ships that host's own
+journal. The control plane's structured log would be shipped by an Alloy on each
+control-plane host reading `alloy/config.alloy`, which names the file at its deployed path
+(`/opt/lynomia/current/storage/logs/lynomia.json`) — and nothing in this repository installs
+that agent. Until one is installed, out-of-band or by a role, the application log is on the
+host and not in Loki. The fact is declared as `lynomia_log_shipper_deployed` in
+`infrastructure/ansible/group_vars/all.yml`, and the test suite holds this sentence to it.
+
+Loki has no ruler wired to Alertmanager: alarms come from Prometheus. Critical drift, the one
+log-derived alarm anybody asked for, pages from the `lynomia_resource_drift_open` gauge
+(`ResourceDriftOpen`); the log line it points at carries the drift id, service id and
+provider reference the metric deliberately omits.
+
 ## Logs
 
 Application logs are structured JSON, one object per line. Every record carries the
@@ -136,6 +149,8 @@ advance — which is to say, before the outage.
 | Certificate expiring | Predictable, preventable, and takes the portal down |
 | Hosting node unavailable | Every account on it is offline |
 | IP pool below runway threshold | Orders will start failing after payment |
+| Critical drift unresolved (`ResourceDriftOpen`) | A customer is paying for a machine the hypervisor does not have, or a suspended service is still running. Pages; acknowledging does not clear it, resolving does |
+| Drift unreviewed for a day (`DriftQueueUnworked`) | Disagreements with a provider are piling up unreviewed. Warning; acknowledging clears it |
 
 Every alert carries enough context to act: which node, which cluster, which customer where
 one is implicated, and a link to the runbook.

@@ -147,6 +147,43 @@ final class TheWholeLifeOfAZoneImportTest extends DnsTestCase
     }
 
     #[Test]
+    public function a_text_value_changed_only_in_case_is_a_change_and_a_hostname_is_not(): void
+    {
+        $this->request()->postJson('/api/v1/dns/zones/'.$this->zoneId.'/records', ['type' => 'TXT', 'name' => 'example.test', 'content' => 'k=abcdefGHIJ'])->assertCreated();
+        $this->request()->postJson('/api/v1/dns/zones/'.$this->zoneId.'/records', ['type' => 'CNAME', 'name' => 'www.example.test', 'content' => 'target.example.test'])->assertCreated();
+
+        $text = <<<'ZONE'
+        $ORIGIN example.test.
+        @    IN TXT   "k=ABCDEFghij"
+        www  IN CNAME Target.Example.test.
+        ZONE;
+
+        $plan = $this->plan($text)->assertOk();
+
+        // A key that differs in case is a different key; the old one must not
+        // keep answering behind a preview that calls the new one unchanged.
+        $entries = collect($plan->json('data.entries'));
+        $this->assertSame('add', $entries->firstWhere('type', 'TXT')['kind']);
+        $this->assertSame('unchanged', $entries->firstWhere('type', 'CNAME')['kind']);
+    }
+
+    #[Test]
+    public function one_host_twice_at_two_priorities_is_not_called_the_same_line(): void
+    {
+        $text = <<<'ZONE'
+        $ORIGIN example.test.
+        @    IN MX 10 mail.example.test.
+        @    IN MX 20 mail.example.test.
+        ZONE;
+
+        $entries = collect($this->plan($text)->assertOk()->json('data.entries'));
+        $refused = $entries->firstWhere('kind', 'refused');
+
+        $this->assertNotNull($refused);
+        $this->assertStringNotContainsString('already states this record', (string) $refused['reason']);
+    }
+
+    #[Test]
     public function one_refused_line_refuses_the_whole_plan_and_the_apply(): void
     {
         $text = "www IN A 203.0.113.10\ninternal IN A 10.0.0.5\nmail IN MX 10 203.0.113.9\nbad IN SRV 1 1 1 x.example.test.\nwww2 IN A 203.0.113.10\n";

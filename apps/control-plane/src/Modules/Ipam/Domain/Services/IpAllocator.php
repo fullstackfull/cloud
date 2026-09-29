@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Ipam\Domain\Services;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
@@ -315,7 +316,131 @@ final readonly class IpAllocator
      */
     public function releaseAssignment(IpAssignment $assignment, ReleaseReason $reason): IpAssignment
     {
-        return DB::transaction(function () use ($assignment, $reason): IpAssignment {
+        return $this->endAssignment($assignment, $reason, startTheClock: true);
+    }
+
+    /**
+     * End a live assignment and hold the address until somebody says the
+     * machine carrying it is empty.
+     *
+     * The same release as releaseAssignment() — the assignment is stamped, the
+     * customer loses the address, and its PTR is marked for withdrawal — with
+     * one difference: no clock. `quarantined_until` stays null, and
+     * ReleaseQuarantinedAddresses never ends a quarantine without one.
+     *
+     * This is for a machine the platform takes back without destroying. A
+     * physical server leaves its customer with its operating system, and the
+     * address configured in it, still on its disks; until somebody erases
+     * them, the address is answering in the rack. A clock started now could
+     * run out while the machine still sits there, and the sweeper would hand
+     * the next customer an address a racked machine is still using. So the
+     * clock starts when a person declares the machine empty, through
+     * startHeldQuarantines(), and not before.
+     */
+    public function holdAssignment(IpAssignment $assignment, ReleaseReason $reason): IpAssignment
+    {
+        return $this->endAssignment($assignment, $reason, startTheClock: false);
+    }
+
+    /**
+     * Hold every address this machine is wearing: holdAssignment() for each
+     * of its live assignments.
+     *
+     * Found by the machine, not by the service. A service can own more than
+     * one machine, and ending one of them must not take addresses off another
+     * that is still racked and still answering on them. As in
+     * startHeldQuarantines(), the morph-type half of the match is inert —
+     * ULID keys are unique across tables — and kept because it is what the
+     * key means.
+     *
+     * Each assignment is released in its own nested transaction, and
+     * `released_at` is written per call; they share a stamp only because the
+     * column is `timestamp(0)`, not because a transaction freezes the clock.
+     *
+     * @return int how many assignments were ended
+     */
+    public function holdAssignmentsOf(Model $holder, ReleaseReason $reason): int
+    {
+        $assignments = IpAssignment::query()
+            ->where('assignable_type', $holder->getMorphClass())
+            ->where('assignable_id', $holder->getKey())
+            ->whereNull('released_at')
+            ->orderBy('id')
+            ->get();
+
+        foreach ($assignments as $assignment) {
+            $this->holdAssignment($assignment, $reason);
+        }
+
+        return $assignments->count();
+    }
+
+    /**
+     * Start the quarantine clock on every address held for this machine.
+     *
+     * "Held for this machine" means the address is quarantined with no expiry
+     * and its **latest** assignment names this holder. Not any assignment: an
+     * address can have been on this chassis a year ago, gone round the pool,
+     * and be held today for a different machine that is still racked with it
+     * configured. Starting that clock would put the second machine's address
+     * back into circulation because the first one was emptied.
+     *
+     * "Latest" is `assigned_at`, then the row's ULID. The timestamp alone does
+     * not decide it: `assigned_at` is `timestamp(0)`, so two assignments on one
+     * address in the same second tie, and the ULID — generated in order — is
+     * what says which came second.
+     *
+     * The holder's morph type is compared as well as its key. That half is
+     * inert, and kept knowingly: keys are ULIDs, unique across every table, so
+     * no two holders share one and no input can tell the clause's absence from
+     * its presence. It stays because it is what the key means.
+     *
+     * Only rows with no clock are touched, so a second call does not restart a
+     * window that is already running.
+     *
+     * @return int how many addresses now have a clock
+     */
+    public function startHeldQuarantines(Model $holder): int
+    {
+        return DB::transaction(function () use ($holder): int {
+            $addresses = IpAddress::query()
+                ->with('subnet.ipPool')
+                ->where('status', IpAddressStatus::Quarantined->value)
+                ->whereNull('quarantined_until')
+                ->whereExists(static function (QueryBuilder $query) use ($holder): void {
+                    $query->select(DB::raw(1))
+                        ->from('ip_assignments')
+                        ->whereColumn('ip_assignments.ip_address_id', 'ip_addresses.id')
+                        ->where('ip_assignments.assignable_type', $holder->getMorphClass())
+                        ->where('ip_assignments.assignable_id', $holder->getKey())
+                        ->whereRaw(
+                            'ip_assignments.id = (select latest.id from ip_assignments latest'
+                            .' where latest.ip_address_id = ip_addresses.id'
+                            .' order by latest.assigned_at desc, latest.id desc limit 1)',
+                        );
+                })
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
+
+            foreach ($addresses as $address) {
+                /** @var IpPool $pool */
+                $pool = $address->subnet->ipPool;
+
+                $address->forceFill([
+                    'quarantined_until' => $pool->quarantineExpiryFor(
+                        $address->quarantine_reason ?? ReleaseReason::ServiceTerminated,
+                    ),
+                ])->save();
+            }
+
+            return $addresses->count();
+        });
+    }
+
+    private function endAssignment(IpAssignment $assignment, ReleaseReason $reason, bool $startTheClock): IpAssignment
+    {
+        return DB::transaction(function () use ($assignment, $reason, $startTheClock): IpAssignment {
             /** @var IpAssignment $locked */
             $locked = IpAssignment::query()->lockForUpdate()->findOrFail($assignment->getKey());
 
@@ -351,7 +476,7 @@ final readonly class IpAllocator
             if ($address->status === IpAddressStatus::Assigned) {
                 $address->forceFill([
                     'status' => IpAddressStatus::Quarantined,
-                    'quarantined_until' => $pool->quarantineExpiryFor($reason),
+                    'quarantined_until' => $startTheClock ? $pool->quarantineExpiryFor($reason) : null,
                     'quarantine_reason' => $reason,
                 ])->save();
             }

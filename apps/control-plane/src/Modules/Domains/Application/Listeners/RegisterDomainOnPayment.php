@@ -43,6 +43,18 @@ final class RegisterDomainOnPayment implements ShouldQueue
 
     public int $tries = 5;
 
+    /**
+     * A wait before every retry. Five tries with no ladder is not five
+     * attempts; it is one attempt five times inside the same outage, on the
+     * queue that moves money (F-08).
+     *
+     * @return list<int>
+     */
+    public function backoff(): array
+    {
+        return [5, 15, 60, 300];
+    }
+
     public function handle(InvoicePaid $event): void
     {
         /** @var list<array{id: string, kind: DomainOperationKind}> $toDispatch */

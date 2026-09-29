@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Lynomia\Modules\Dns\Domain\Enums\DnsRecordType;
 use Lynomia\Modules\Dns\Domain\Enums\DnsState;
+use Lynomia\Modules\Dns\Domain\Enums\IndeterminateAfter;
 use Lynomia\Modules\Dns\Domain\Exceptions\IllegalDnsTransitionException;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DnsRecord as DnsRecordValue;
 
@@ -32,6 +33,7 @@ use Lynomia\Modules\Dns\Domain\ValueObjects\DnsRecord as DnsRecordValue;
  * @property ?int $priority
  * @property ?array<string, mixed> $data
  * @property DnsState $state
+ * @property ?IndeterminateAfter $indeterminate_after
  * @property ?string $provider_record_id
  * @property ?string $failure_reason
  * @property ?CarbonImmutable $last_published_at
@@ -55,6 +57,7 @@ class DnsRecord extends Model
         return [
             'type' => DnsRecordType::class,
             'state' => DnsState::class,
+            'indeterminate_after' => IndeterminateAfter::class,
             'data' => 'array',
             'ttl' => 'integer',
             'priority' => 'integer',
@@ -93,6 +96,13 @@ class DnsRecord extends Model
     }
 
     /**
+     * Move to another state.
+     *
+     * Leaving `indeterminate` clears which call left the row there: the
+     * record is no longer waiting on that call, and a stale answer to "which
+     * call?" on a later indeterminate row would settle it the wrong way. A
+     * caller moving a row *into* `indeterminate` says which call it was.
+     *
      * @param  array<string, mixed>  $attributes
      *
      * @throws IllegalDnsTransitionException
@@ -101,6 +111,10 @@ class DnsRecord extends Model
     {
         if (! $this->state->canBecome($next)) {
             throw IllegalDnsTransitionException::between((string) $this->getKey(), $this->state, $next);
+        }
+
+        if ($next !== DnsState::Indeterminate && ! array_key_exists('indeterminate_after', $attributes)) {
+            $attributes['indeterminate_after'] = null;
         }
 
         $this->forceFill([...$attributes, 'state' => $next])->save();

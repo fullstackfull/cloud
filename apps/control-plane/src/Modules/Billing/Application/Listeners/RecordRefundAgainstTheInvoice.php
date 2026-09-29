@@ -10,6 +10,7 @@ use Lynomia\Modules\Billing\Application\Actions\RecordInvoiceRefund;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
 use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
+use RuntimeException;
 
 /**
  * Puts a refund on the document it came off.
@@ -36,7 +37,13 @@ use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
  * without touching the provider.
  *
  * Idempotent through RecordInvoiceRefund, which attaches the refund row to the
- * invoice and reduces nothing a second time if it is already attached.
+ * invoice and reduces nothing a second time if it is already attached — and
+ * only through that. Without the row RecordInvoiceRefund books on every call,
+ * so a refund whose row cannot be read is thrown back to the queue rather than
+ * booked unkeyed: it retries on the ladder below, and if the row never appears
+ * it lands in failed_jobs, where a person replays it. Booking it anyway would
+ * reduce the invoice once per delivery, and a delivery is exactly what this
+ * queue repeats (F-08).
  */
 final class RecordRefundAgainstTheInvoice implements ShouldQueue
 {
@@ -77,6 +84,16 @@ final class RecordRefundAgainstTheInvoice implements ShouldQueue
             return;
         }
 
-        $this->record->execute($invoice, $event->amount, Refund::query()->find($event->refundId));
+        $refund = Refund::query()->find($event->refundId);
+
+        if ($refund === null) {
+            throw new RuntimeException(sprintf(
+                'Refund %s cannot be read, so recording it against invoice %s now could record it twice. Retrying.',
+                $event->refundId,
+                $event->invoiceId,
+            ));
+        }
+
+        $this->record->execute($invoice, $event->amount, $refund);
     }
 }

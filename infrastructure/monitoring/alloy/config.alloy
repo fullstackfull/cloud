@@ -40,10 +40,25 @@ logging {
 //
 // One JSON object per line, written by the Monolog channel built in
 // Lynomia\Modules\Shared\Infrastructure\Logging\StructuredLogger.
+//
+// The path is where that channel writes on a control-plane host: the
+// application's storage_path('logs/lynomia.json') under the release directory
+// the control_plane Ansible role deploys into (control_plane_release_dir,
+// {{ lynomia_base_dir }}/current). It used to be /var/log/lynomia/lynomia.json,
+// a directory nothing creates and the application user cannot, so every line
+// the application logged landed in a file nothing read.
+// CriticalDriftReachesAnOperatorTest derives both sides and holds them
+// together; change the channel and this line in the same commit.
+//
+// This file only says what an Alloy on an application host would read. Nothing
+// in this repository installs one there — see lynomia_log_shipper_deployed in
+// infrastructure/ansible/group_vars/all.yml. The Alloy in the monitoring
+// compose stack has no release tree mounted, so on that host this target
+// matches nothing and only the journal below is shipped.
 // ---------------------------------------------------------------------------
 local.file_match "control_plane" {
 	path_targets = [{
-		__path__ = "/var/log/lynomia/lynomia.json",
+		__path__ = "/opt/lynomia/current/storage/logs/lynomia.json",
 		job      = "control-plane",
 		service  = "control-plane",
 		env      = sys.env("LYNOMIA_ENV"),
